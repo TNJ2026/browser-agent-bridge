@@ -9,4 +9,4 @@ if [[ -f "$env_file" ]]; then
   set +a
 fi
 
-exec "/Users/cxd/.pyenv/shims/python3" "/Users/cxd/developer/browser_scraper/native/host.py"
+exec "/Users/cxd/.pyenv/versions/3.12.13/bin/python3" "/Users/cxd/Developer/browser_scraper/native/host.py"
