@@ -90,7 +90,7 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 ## Operating Rules
 
 - Do not use this skill for public web research; this bridge controls the user's local Chrome.
-- Page CSP (Content Security Policy) response headers are automatically stripped by the extension (`declarativeNetRequest`), meaning you can execute custom scripts (`page.executeJavaScript`) or run dynamic evaluations on any domain without being blocked by CSP.
+- Page CSP (Content Security Policy) response headers are automatically stripped by the extension (`declarativeNetRequest`) by default, allowing you to run custom scripts (`page.executeJavaScript`) on any domain. You can check the current toggle state using `extension.getCspBypass` and change it using `extension.setCspBypass`.
 - **Bookmarks & History Search**: When asked to locate internal pages or pages the user previously visited, call `history.search` or `bookmarks.search` JSON-RPC methods. This queries the local browser profile databases directly and resolves URLs without querying the public internet.
 - **Domain Experience Accumulation**: Before automating a website, check the `skills/browser-agent-bridge/references/site-patterns/` folder. If a `{domain}.md` exists, read it for selector tricks, known traps, or navigation flows. If you find new selector paths or bypasses during execution, document them in a `{domain}.md` file in that folder to help future sessions.
 - Do not execute high-risk actions such as purchases, sending messages, deleting data, changing account settings, or submitting sensitive forms unless the user explicitly asked for that exact action.
