@@ -441,3 +441,31 @@ URL and method patterns use `*` wildcards. Method patterns match JSON-RPC method
 ```json
 {"url":"https://example.com","method":"dom.click"}
 ```
+
+### `history.search`
+
+Exposed by the native host to search the local browser (Chrome and Edge) history database.
+
+Parameters:
+
+```json
+{"query":"github","limit":20,"since":"7d","browser":"chrome"}
+```
+
+* `query` (string, optional): Keywords to search, space-separated.
+* `limit` (int, optional): Max results, defaults to 20.
+* `since` (string or number, optional): Time window (e.g., "1d", "7h", "30m", or seconds).
+* `browser` (string, optional): "chrome" or "edge" to filter.
+
+### `bookmarks.search`
+
+Exposed by the native host to search the local browser (Chrome and Edge) bookmarks.
+
+Parameters:
+
+```json
+{"query":"github","browser":"chrome"}
+```
+
+* `query` (string, optional): Keywords to search, space-separated.
+* `browser` (string, optional): "chrome" or "edge" to filter.

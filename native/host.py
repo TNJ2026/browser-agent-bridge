@@ -10,6 +10,9 @@ import base64
 import hashlib
 import hmac
 import re
+import sqlite3
+import shutil
+import tempfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from socketserver import ThreadingTCPServer
@@ -138,6 +141,12 @@ def call_extension(request):
 
     if request.get("method") == "native.saveDataUrl":
         return handle_save_data_url(request)
+
+    if request.get("method") == "history.search":
+        return handle_history_search(request)
+
+    if request.get("method") == "bookmarks.search":
+        return handle_bookmarks_search(request)
 
     if not extension_ready:
         return {
@@ -478,6 +487,203 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
                 "id": None,
                 "error": {"code": -32000, "message": str(e)}
             })
+
+def get_browser_data_dirs():
+    home = Path.home()
+    if sys.platform == "darwin":
+        return [
+            {"id": "chrome", "label": "Chrome", "dir": home / "Library/Application Support/Google/Chrome"},
+            {"id": "edge", "label": "Edge", "dir": home / "Library/Application Support/Microsoft Edge"}
+        ]
+    elif sys.platform.startswith("linux"):
+        return [
+            {"id": "chrome", "label": "Chrome", "dir": home / ".config/google-chrome"},
+            {"id": "edge", "label": "Edge", "dir": home / ".config/microsoft-edge"}
+        ]
+    elif sys.platform == "win32":
+        local_app_data = Path(os.environ.get("LOCALAPPDATA", str(home / "AppData" / "Local")))
+        return [
+            {"id": "chrome", "label": "Chrome", "dir": local_app_data / "Google" / "Chrome" / "User Data"},
+            {"id": "edge", "label": "Edge", "dir": local_app_data / "Microsoft" / "Edge" / "User Data"}
+        ]
+    return []
+
+def list_profiles(data_dir):
+    local_state_path = data_dir / "Local State"
+    if local_state_path.exists():
+        try:
+            state = json.loads(local_state_path.read_text(encoding="utf-8", errors="ignore"))
+            info = state.get("profile", {}).get("info_cache", {})
+            profiles = [{"dir": d, "name": info[d].get("name", d)} for d in info]
+            if profiles:
+                return profiles
+        except Exception:
+            pass
+    return [{"dir": "Default", "name": "Default"}]
+
+def handle_history_search(request):
+    params = request.get("params", {}) or {}
+    query = params.get("query", "")
+    limit = params.get("limit", 20)
+    since = params.get("since")
+    browser_filter = params.get("browser")
+    
+    keywords = [k.strip() for k in query.split() if k.strip()]
+    since_dt = None
+    if since:
+        try:
+            if isinstance(since, (int, float)):
+                since_dt = time.time() - since
+            elif isinstance(since, str):
+                m = re.match(r"^(\d+)([dhm])$", since.strip().lower())
+                if m:
+                    val = int(m.group(1))
+                    unit = m.group(2)
+                    sec = {"d": 86400, "h": 3600, "m": 60}[unit]
+                    since_dt = time.time() - (val * sec)
+                else:
+                    since_dt = time.mktime(time.strptime(since.strip(), "%Y-%m-%d"))
+        except Exception as e:
+            log(f"Failed to parse since parameter {since}: {e}")
+            
+    WEBKIT_EPOCH_DIFF_US = 11644473600000000
+    results = []
+    
+    browser_dirs = get_browser_data_dirs()
+    for b in browser_dirs:
+        if not b["dir"].exists():
+            continue
+        if browser_filter and b["id"] != browser_filter:
+            continue
+            
+        profiles = list_profiles(b["dir"])
+        for p in profiles:
+            p_dir = b["dir"] / p["dir"]
+            history_file = p_dir / "History"
+            if not history_file.exists():
+                continue
+                
+            temp_db = None
+            try:
+                fd, temp_path = tempfile.mkstemp(suffix=".sqlite")
+                os.close(fd)
+                temp_db = Path(temp_path)
+                shutil.copy2(history_file, temp_db)
+                
+                conn = sqlite3.connect(str(temp_db))
+                cursor = conn.cursor()
+                
+                conds = ["last_visit_time > 0"]
+                sql_params = []
+                for kw in keywords:
+                    conds.append("LOWER(title || ' ' || url) LIKE ?")
+                    sql_params.append(f"%{kw.lower()}%")
+                    
+                if since_dt:
+                    webkit_us = int(since_dt * 1000000) + WEBKIT_EPOCH_DIFF_US
+                    conds.append("last_visit_time >= ?")
+                    sql_params.append(webkit_us)
+                    
+                where_clause = " AND ".join(conds)
+                sql_limit = limit * 2 if limit > 0 else 1000
+                sql = f"""
+                SELECT title, url, last_visit_time, visit_count
+                FROM urls WHERE {where_clause}
+                ORDER BY last_visit_time DESC LIMIT {sql_limit}
+                """
+                cursor.execute(sql, sql_params)
+                for row in cursor.fetchall():
+                    title, url, last_visit_time, visit_count = row
+                    unix_time = (last_visit_time - WEBKIT_EPOCH_DIFF_US) / 1000000
+                    results.append({
+                        "browser": b["label"],
+                        "profile": p["name"],
+                        "title": title or "",
+                        "url": url or "",
+                        "visitTime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(unix_time)),
+                        "timestamp": unix_time,
+                        "visitCount": visit_count
+                    })
+                conn.close()
+            except Exception as e:
+                log(f"Failed to query history for {b['label']} {p['name']}: {e}")
+            finally:
+                if temp_db and temp_db.exists():
+                    try:
+                        temp_db.unlink()
+                    except Exception:
+                        pass
+                        
+    results.sort(key=lambda x: x["timestamp"], reverse=True)
+    if limit > 0:
+        results = results[:limit]
+        
+    return {
+        "jsonrpc": "2.0",
+        "id": request.get("id"),
+        "result": {
+            "history": results
+        }
+    }
+
+def handle_bookmarks_search(request):
+    params = request.get("params", {}) or {}
+    query = params.get("query", "")
+    browser_filter = params.get("browser")
+    
+    keywords = [k.strip().lower() for k in query.split() if k.strip()]
+    results = []
+    
+    browser_dirs = get_browser_data_dirs()
+    for b in browser_dirs:
+        if not b["dir"].exists():
+            continue
+        if browser_filter and b["id"] != browser_filter:
+            continue
+            
+        profiles = list_profiles(b["dir"])
+        for p in profiles:
+            p_dir = b["dir"] / p["dir"]
+            bookmarks_file = p_dir / "Bookmarks"
+            if not bookmarks_file.exists():
+                continue
+                
+            try:
+                data = json.loads(bookmarks_file.read_text(encoding="utf-8", errors="ignore"))
+                
+                def walk(node, trail):
+                    if not node:
+                        return
+                    if node.get("type") == "url":
+                        url = node.get("url", "")
+                        name = node.get("name", "")
+                        hay = f"{name} {url}".lower()
+                        if not keywords or all(kw in hay for kw in keywords):
+                            results.append({
+                                "browser": b["label"],
+                                "profile": p["name"],
+                                "name": name,
+                                "url": url,
+                                "folder": " / ".join(trail)
+                            })
+                    if isinstance(node.get("children"), list):
+                        sub_trail = trail + [node["name"]] if node.get("name") else trail
+                        for child in node["children"]:
+                            walk(child, sub_trail)
+                            
+                for root in data.get("roots", {}).values():
+                    walk(root, [])
+            except Exception as e:
+                log(f"Failed to read bookmarks for {b['label']} {p['name']}: {e}")
+                
+    results = results[:1000]
+    return {
+        "jsonrpc": "2.0",
+        "id": request.get("id"),
+        "result": {
+            "bookmarks": results
+        }
+    }
 
 def main():
     # Run the Native Messaging listener in a daemon background thread
