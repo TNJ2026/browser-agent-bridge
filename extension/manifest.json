@@ -7,6 +7,7 @@
   "permissions": [
     "activeTab",
     "debugger",
+    "declarativeNetRequest",
     "downloads",
     "nativeMessaging",
     "notifications",
@@ -51,6 +52,15 @@
       },
       "description": "Open the browser agent side panel"
     }
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "ruleset_1",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
   },
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsVnlPxTnS5Iph50mixrZDE37kgr9v/SNbvrL4cSec556vfM99IR+UozP1k6w2opHVrMBui+YvQkYM/eEksLA8OM38C/9LbhrgLeQIsG8Eb3M0OUhLp3/mkA65wA72XDn0IiXXkJq6LkWmAV0NjGLqpFgB4Zn/tu4lO33kI1q9Ok9BTmuB1UqhsmnFcw5bk3frQVXHk3K1ligXop/LrRBzsqNoetRx0ND+oGfxFT264IU0vV1VLNPfqLNMehbG7N0XkT7Z1HwaY2jW9RgC4uE/zTV+FdXfDHwyuJ3L7cWl+jbxxx4koZG9GZ6z9mJuavPs6uoHRi+cGjGU0+c8vqf4wIDAQAB"
 }
