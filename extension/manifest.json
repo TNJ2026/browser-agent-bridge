@@ -56,19 +56,9 @@
   "declarative_net_request": {
     "rule_resources": [
       {
-        "id": "ruleset_csp",
+        "id": "ruleset_1",
         "enabled": true,
-        "path": "rules_csp.json"
-      },
-      {
-        "id": "ruleset_cors",
-        "enabled": false,
-        "path": "rules_cors.json"
-      },
-      {
-        "id": "ruleset_xfo",
-        "enabled": false,
-        "path": "rules_xfo.json"
+        "path": "rules.json"
       }
     ]
   },

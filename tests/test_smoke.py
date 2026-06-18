@@ -29,27 +29,6 @@ def run_smoke_test():
     if restored_csp.get("enabled") is not True:
         raise RuntimeError("Failed to restore CSP bypass")
 
-    # Test CORS bypass configuration APIs
-    print("\n0.2 Testing CORS bypass configuration...")
-    orig_cors = client.rpc("extension.getCorsBypass", {})
-    print(f"Original CORS status: {orig_cors}")
-    client.rpc("extension.setCorsBypass", {"enabled": True})
-    new_cors = client.rpc("extension.getCorsBypass", {})
-    print(f"New CORS status after enabling: {new_cors}")
-    if new_cors.get("enabled") is not True:
-        raise RuntimeError("Failed to enable CORS bypass")
-    client.rpc("extension.setCorsBypass", {"enabled": False})
-
-    # Test XFO bypass configuration APIs
-    print("\n0.3 Testing XFO bypass configuration...")
-    orig_xfo = client.rpc("extension.getXfoBypass", {})
-    print(f"Original XFO status: {orig_xfo}")
-    client.rpc("extension.setXfoBypass", {"enabled": True})
-    new_xfo = client.rpc("extension.getXfoBypass", {})
-    print(f"New XFO status after enabling: {new_xfo}")
-    if new_xfo.get("enabled") is not True:
-        raise RuntimeError("Failed to enable XFO bypass")
-    client.rpc("extension.setXfoBypass", {"enabled": False})
 
 
 
