@@ -84,6 +84,22 @@ Schedules `chrome.runtime.reload()` after returning the JSON-RPC response. It on
 {"jsonrpc":"2.0","id":"reload","method":"extension.reload","params":{}}
 ```
 
+### `extension.getCspBypass`
+
+Gets whether the extension is currently stripping Content Security Policy (CSP) headers.
+
+```json
+{"jsonrpc":"2.0","id":"get-csp","method":"extension.getCspBypass","params":{}}
+```
+
+### `extension.setCspBypass`
+
+Enables or disables Content Security Policy (CSP) header stripping.
+
+```json
+{"jsonrpc":"2.0","id":"set-csp","method":"extension.setCspBypass","params":{"enabled":false}}
+```
+
 ### `native.status`
 
 Returns Native Messaging status from the extension.

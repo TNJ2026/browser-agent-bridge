@@ -105,6 +105,24 @@ Schedules `chrome.runtime.reload()` after returning the JSON-RPC response. Usefu
 {}
 ```
 
+### `extension.getCspBypass`
+
+Gets whether the extension is currently stripping Content Security Policy (CSP) headers.
+
+```json
+{}
+```
+
+### `extension.setCspBypass`
+
+Enables or disables Content Security Policy (CSP) header stripping.
+
+```json
+{
+  "enabled": false
+}
+```
+
 ### `native.saveDataUrl`
 
 Native-host local method. Saves a data URL to disk and returns the file path. This is useful with `page.screenshot`.

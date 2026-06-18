@@ -2,8 +2,24 @@ const statusEl = document.querySelector('#status');
 const hostNameEl = document.querySelector('#host-name');
 const lastCheckedEl = document.querySelector('#last-checked');
 const errorEl = document.querySelector('#error');
+const bypassCspEl = document.querySelector('#bypass-csp');
 
 document.querySelector('#refresh').addEventListener('click', refresh);
+
+// Load CSP setting on open
+chrome.runtime.sendMessage({ type: 'GET_CSP_BYPASS' }).then(response => {
+  if (response && 'enabled' in response) {
+    bypassCspEl.checked = response.enabled;
+  }
+});
+
+// Update setting when toggled
+bypassCspEl.addEventListener('change', async () => {
+  await chrome.runtime.sendMessage({
+    type: 'SET_CSP_BYPASS',
+    enabled: bypassCspEl.checked
+  });
+});
 
 chrome.runtime.onMessage.addListener(message => {
   if (message?.type === 'NATIVE_STATUS_CHANGED') renderStatus(message.status);

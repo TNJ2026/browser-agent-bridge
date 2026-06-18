@@ -35,10 +35,12 @@ const DEFAULT_POLICY = {
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   connectNative();
+  await initCspBypass().catch(err => console.error(err));
 });
 
-chrome.runtime.onStartup.addListener(() => {
+chrome.runtime.onStartup.addListener(async () => {
   connectNative();
+  await initCspBypass().catch(err => console.error(err));
 });
 
 chrome.action.onClicked.addListener(async tab => {
@@ -93,6 +95,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 connectNative();
+initCspBypass().catch(err => console.error(err));
 
 function connectNative() {
   if (nativePort) return;
@@ -157,6 +160,14 @@ async function handleRuntimeMessage(message, sender) {
     case 'GET_NATIVE_STATUS':
       connectNative();
       return { ok: nativeStatus.state === 'connected', status: nativeStatus };
+    case 'GET_CSP_BYPASS':
+      return { ok: true, enabled: (await chrome.storage.local.get('bypassCSP')).bypassCSP !== false };
+    case 'SET_CSP_BYPASS': {
+      const bypass = message.enabled !== false;
+      await chrome.storage.local.set({ bypassCSP: bypass });
+      await updateCspRuleset(bypass);
+      return { ok: true };
+    }
     case 'RPC':
       return { ok: true, result: await handleRpc(message.request, sender) };
     case 'CONTENT_ACCESSIBILITY_TREE':
@@ -179,6 +190,10 @@ async function handleRpc(request) {
       return extensionInfo();
     case 'extension.reload':
       return extensionReload();
+    case 'extension.getCspBypass':
+      return extensionGetCspBypass();
+    case 'extension.setCspBypass':
+      return extensionSetCspBypass(params);
     case 'native.status':
       return nativeStatus;
     case 'tabs.list':
@@ -273,6 +288,8 @@ async function extensionInfo() {
     tools: [
       'extension.info',
       'extension.reload',
+      'extension.getCspBypass',
+      'extension.setCspBypass',
       'native.status',
       'tabs.list',
       'tabs.create',
@@ -315,6 +332,41 @@ async function extensionInfo() {
       'policy.checkUrl'
     ]
   };
+}
+
+async function initCspBypass() {
+  const result = await chrome.storage.local.get('bypassCSP');
+  let bypass = result.bypassCSP;
+  if (bypass === undefined) {
+    bypass = true;
+    await chrome.storage.local.set({ bypassCSP: true });
+  }
+  await updateCspRuleset(bypass);
+}
+
+async function updateCspRuleset(enabled) {
+  const rulesetId = 'ruleset_1';
+  if (enabled) {
+    await chrome.declarativeNetRequest.updateEnabledRulesets({
+      enableRulesetIds: [rulesetId]
+    }).catch(err => console.error('Error enabling CSP ruleset:', err));
+  } else {
+    await chrome.declarativeNetRequest.updateEnabledRulesets({
+      disableRulesetIds: [rulesetId]
+    }).catch(err => console.error('Error disabling CSP ruleset:', err));
+  }
+}
+
+async function extensionGetCspBypass() {
+  const result = await chrome.storage.local.get('bypassCSP');
+  return { enabled: result.bypassCSP !== false };
+}
+
+async function extensionSetCspBypass(params) {
+  const bypass = params.enabled !== false;
+  await chrome.storage.local.set({ bypassCSP: bypass });
+  await updateCspRuleset(bypass);
+  return { success: true };
 }
 
 async function extensionReload() {
