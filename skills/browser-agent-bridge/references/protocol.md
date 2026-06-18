@@ -100,6 +100,38 @@ Enables or disables Content Security Policy (CSP) header stripping.
 {"jsonrpc":"2.0","id":"set-csp","method":"extension.setCspBypass","params":{"enabled":false}}
 ```
 
+### `extension.getCorsBypass`
+
+Gets whether the extension is currently bypassing Cross-Origin Resource Sharing (CORS) headers and cross-origin isolation policies (COOP/COEP).
+
+```json
+{"jsonrpc":"2.0","id":"get-cors","method":"extension.getCorsBypass","params":{}}
+```
+
+### `extension.setCorsBypass`
+
+Enables or disables CORS header bypassing.
+
+```json
+{"jsonrpc":"2.0","id":"set-cors","method":"extension.setCorsBypass","params":{"enabled":true}}
+```
+
+### `extension.getXfoBypass`
+
+Gets whether the extension is currently stripping X-Frame-Options (XFO) and Frame-Options headers.
+
+```json
+{"jsonrpc":"2.0","id":"get-xfo","method":"extension.getXfoBypass","params":{}}
+```
+
+### `extension.setXfoBypass`
+
+Enables or disables X-Frame-Options bypassing.
+
+```json
+{"jsonrpc":"2.0","id":"set-xfo","method":"extension.setXfoBypass","params":{"enabled":true}}
+```
+
 ### `native.status`
 
 Returns Native Messaging status from the extension.

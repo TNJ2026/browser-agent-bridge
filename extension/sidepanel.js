@@ -3,21 +3,45 @@ const hostNameEl = document.querySelector('#host-name');
 const lastCheckedEl = document.querySelector('#last-checked');
 const errorEl = document.querySelector('#error');
 const bypassCspEl = document.querySelector('#bypass-csp');
+const bypassCorsEl = document.querySelector('#bypass-cors');
+const bypassXfoEl = document.querySelector('#bypass-xfo');
 
 document.querySelector('#refresh').addEventListener('click', refresh);
 
-// Load CSP setting on open
+// Load settings on open
 chrome.runtime.sendMessage({ type: 'GET_CSP_BYPASS' }).then(response => {
   if (response && 'enabled' in response) {
     bypassCspEl.checked = response.enabled;
   }
 });
+chrome.runtime.sendMessage({ type: 'GET_CORS_BYPASS' }).then(response => {
+  if (response && 'enabled' in response) {
+    bypassCorsEl.checked = response.enabled;
+  }
+});
+chrome.runtime.sendMessage({ type: 'GET_XFO_BYPASS' }).then(response => {
+  if (response && 'enabled' in response) {
+    bypassXfoEl.checked = response.enabled;
+  }
+});
 
-// Update setting when toggled
+// Update settings when toggled
 bypassCspEl.addEventListener('change', async () => {
   await chrome.runtime.sendMessage({
     type: 'SET_CSP_BYPASS',
     enabled: bypassCspEl.checked
+  });
+});
+bypassCorsEl.addEventListener('change', async () => {
+  await chrome.runtime.sendMessage({
+    type: 'SET_CORS_BYPASS',
+    enabled: bypassCorsEl.checked
+  });
+});
+bypassXfoEl.addEventListener('change', async () => {
+  await chrome.runtime.sendMessage({
+    type: 'SET_XFO_BYPASS',
+    enabled: bypassXfoEl.checked
   });
 });
 

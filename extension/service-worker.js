@@ -35,12 +35,12 @@ const DEFAULT_POLICY = {
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   connectNative();
-  await initCspBypass().catch(err => console.error(err));
+  await initSecurityBypasses().catch(err => console.error(err));
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   connectNative();
-  await initCspBypass().catch(err => console.error(err));
+  await initSecurityBypasses().catch(err => console.error(err));
 });
 
 chrome.action.onClicked.addListener(async tab => {
@@ -95,7 +95,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 connectNative();
-initCspBypass().catch(err => console.error(err));
+initSecurityBypasses().catch(err => console.error(err));
 
 function connectNative() {
   if (nativePort) return;
@@ -165,7 +165,23 @@ async function handleRuntimeMessage(message, sender) {
     case 'SET_CSP_BYPASS': {
       const bypass = message.enabled !== false;
       await chrome.storage.local.set({ bypassCSP: bypass });
-      await updateCspRuleset(bypass);
+      await updateRuleset('ruleset_csp', bypass);
+      return { ok: true };
+    }
+    case 'GET_CORS_BYPASS':
+      return { ok: true, enabled: !!(await chrome.storage.local.get('bypassCORS')).bypassCORS };
+    case 'SET_CORS_BYPASS': {
+      const bypass = !!message.enabled;
+      await chrome.storage.local.set({ bypassCORS: bypass });
+      await updateRuleset('ruleset_cors', bypass);
+      return { ok: true };
+    }
+    case 'GET_XFO_BYPASS':
+      return { ok: true, enabled: !!(await chrome.storage.local.get('bypassXFO')).bypassXFO };
+    case 'SET_XFO_BYPASS': {
+      const bypass = !!message.enabled;
+      await chrome.storage.local.set({ bypassXFO: bypass });
+      await updateRuleset('ruleset_xfo', bypass);
       return { ok: true };
     }
     case 'RPC':
@@ -194,6 +210,14 @@ async function handleRpc(request) {
       return extensionGetCspBypass();
     case 'extension.setCspBypass':
       return extensionSetCspBypass(params);
+    case 'extension.getCorsBypass':
+      return extensionGetCorsBypass();
+    case 'extension.setCorsBypass':
+      return extensionSetCorsBypass(params);
+    case 'extension.getXfoBypass':
+      return extensionGetXfoBypass();
+    case 'extension.setXfoBypass':
+      return extensionSetXfoBypass(params);
     case 'native.status':
       return nativeStatus;
     case 'tabs.list':
@@ -290,6 +314,10 @@ async function extensionInfo() {
       'extension.reload',
       'extension.getCspBypass',
       'extension.setCspBypass',
+      'extension.getCorsBypass',
+      'extension.setCorsBypass',
+      'extension.getXfoBypass',
+      'extension.setXfoBypass',
       'native.status',
       'tabs.list',
       'tabs.create',
@@ -334,26 +362,41 @@ async function extensionInfo() {
   };
 }
 
-async function initCspBypass() {
-  const result = await chrome.storage.local.get('bypassCSP');
-  let bypass = result.bypassCSP;
-  if (bypass === undefined) {
-    bypass = true;
+async function initSecurityBypasses() {
+  const result = await chrome.storage.local.get(['bypassCSP', 'bypassCORS', 'bypassXFO']);
+  
+  let bypassCSP = result.bypassCSP;
+  if (bypassCSP === undefined) {
+    bypassCSP = true;
     await chrome.storage.local.set({ bypassCSP: true });
   }
-  await updateCspRuleset(bypass);
+  
+  let bypassCORS = result.bypassCORS;
+  if (bypassCORS === undefined) {
+    bypassCORS = false;
+    await chrome.storage.local.set({ bypassCORS: false });
+  }
+  
+  let bypassXFO = result.bypassXFO;
+  if (bypassXFO === undefined) {
+    bypassXFO = false;
+    await chrome.storage.local.set({ bypassXFO: false });
+  }
+  
+  await updateRuleset('ruleset_csp', bypassCSP);
+  await updateRuleset('ruleset_cors', bypassCORS);
+  await updateRuleset('ruleset_xfo', bypassXFO);
 }
 
-async function updateCspRuleset(enabled) {
-  const rulesetId = 'ruleset_1';
+async function updateRuleset(rulesetId, enabled) {
   if (enabled) {
     await chrome.declarativeNetRequest.updateEnabledRulesets({
       enableRulesetIds: [rulesetId]
-    }).catch(err => console.error('Error enabling CSP ruleset:', err));
+    }).catch(err => console.error(`Error enabling ruleset ${rulesetId}:`, err));
   } else {
     await chrome.declarativeNetRequest.updateEnabledRulesets({
       disableRulesetIds: [rulesetId]
-    }).catch(err => console.error('Error disabling CSP ruleset:', err));
+    }).catch(err => console.error(`Error disabling ruleset ${rulesetId}:`, err));
   }
 }
 
@@ -365,7 +408,31 @@ async function extensionGetCspBypass() {
 async function extensionSetCspBypass(params) {
   const bypass = params.enabled !== false;
   await chrome.storage.local.set({ bypassCSP: bypass });
-  await updateCspRuleset(bypass);
+  await updateRuleset('ruleset_csp', bypass);
+  return { success: true };
+}
+
+async function extensionGetCorsBypass() {
+  const result = await chrome.storage.local.get('bypassCORS');
+  return { enabled: !!result.bypassCORS };
+}
+
+async function extensionSetCorsBypass(params) {
+  const bypass = !!params.enabled;
+  await chrome.storage.local.set({ bypassCORS: bypass });
+  await updateRuleset('ruleset_cors', bypass);
+  return { success: true };
+}
+
+async function extensionGetXfoBypass() {
+  const result = await chrome.storage.local.get('bypassXFO');
+  return { enabled: !!result.bypassXFO };
+}
+
+async function extensionSetXfoBypass(params) {
+  const bypass = !!params.enabled;
+  await chrome.storage.local.set({ bypassXFO: bypass });
+  await updateRuleset('ruleset_xfo', bypass);
   return { success: true };
 }
 

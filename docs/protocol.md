@@ -123,6 +123,42 @@ Enables or disables Content Security Policy (CSP) header stripping.
 }
 ```
 
+### `extension.getCorsBypass`
+
+Gets whether the extension is currently bypassing Cross-Origin Resource Sharing (CORS) headers and cross-origin isolation policies (COOP/COEP).
+
+```json
+{}
+```
+
+### `extension.setCorsBypass`
+
+Enables or disables CORS header bypassing.
+
+```json
+{
+  "enabled": true
+}
+```
+
+### `extension.getXfoBypass`
+
+Gets whether the extension is currently stripping X-Frame-Options (XFO) and Frame-Options headers.
+
+```json
+{}
+```
+
+### `extension.setXfoBypass`
+
+Enables or disables X-Frame-Options bypassing.
+
+```json
+{
+  "enabled": true
+}
+```
+
 ### `native.saveDataUrl`
 
 Native-host local method. Saves a data URL to disk and returns the file path. This is useful with `page.screenshot`.
