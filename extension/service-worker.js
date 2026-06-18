@@ -748,7 +748,7 @@ async function domClick(params) {
         }
       }
     },
-    args: [params.selector, index, params.scrollIntoView, params.frameSelector || null],
+    args: [params.selector, index, params.scrollIntoView !== false, params.frameSelector || null],
     world: 'MAIN'
   });
   await recordAction(tabId, 'dom.click', { selector: params.selector, index, frameSelector: params.frameSelector || null }, result);
@@ -799,7 +799,7 @@ async function domType(params) {
         }
       }
     },
-    args: [params.selector, index, params.text, replace, params.scrollIntoView, params.frameSelector || null],
+    args: [params.selector, index, params.text, replace, params.scrollIntoView !== false, params.frameSelector || null],
     world: 'MAIN'
   });
   await recordAction(tabId, 'dom.type', { selector: params.selector, index, text: params.text, replace, frameSelector: params.frameSelector || null }, result);
@@ -844,7 +844,7 @@ async function domSelect(params) {
         }
       }
     },
-    args: [params.selector, index, params.value, params.scrollIntoView, params.frameSelector || null],
+    args: [params.selector, index, params.value, params.scrollIntoView !== false, params.frameSelector || null],
     world: 'MAIN'
   });
   await recordAction(tabId, 'dom.select', { selector: params.selector, index, value: params.value, frameSelector: params.frameSelector || null }, result);
