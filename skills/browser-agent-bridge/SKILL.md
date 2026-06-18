@@ -113,7 +113,15 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 3. `page.accessibilityTree` for interactable elements
 4. `page.screenshot` when visual confirmation matters
 
+### Locate Local Pages (Bookmarks/History)
+
+When the user asks to look up or navigate to a page they have visited before, or mentions an internal system (e.g. "my dashboard", "the wiki page", "the code repo I visited yesterday"):
+1. Call `history.search` or `bookmarks.search` with a query of the system name or keywords.
+2. If URLs are returned, select the most relevant one.
+3. Call `page.navigate` (or `session.start` if isolating) to open and inspect that URL.
+
 ### Click Or Type
+
 
 1. Read the accessibility tree or screenshot first.
 2. Try `dom.query` to find stable selectors for the target control.
