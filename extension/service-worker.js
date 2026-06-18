@@ -572,13 +572,58 @@ async function pageReadText(params) {
 async function pageAccessibilityTree(params) {
   const tabId = assertTabId(params.tabId);
   await assertTabAllowed(tabId, 'page.accessibilityTree');
-  await ensureContentScripts(tabId);
-  const response = await chrome.tabs.sendMessage(tabId, {
+  
+  await ensureContentScripts(tabId, 0);
+  const mainResponse = await chrome.tabs.sendMessage(tabId, {
     type: 'GET_ACCESSIBILITY_TREE',
     maxNodes: params.maxNodes || 1000
-  });
-  if (!response?.ok) throw new Error(response?.error || 'Failed to read accessibility tree');
-  return response.tree;
+  }, { frameId: 0 });
+  
+  if (!mainResponse?.ok) throw new Error(mainResponse?.error || 'Failed to read accessibility tree');
+  
+  const tree = mainResponse.tree;
+  const collectedIframes = tree.iframes || [];
+  
+  try {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId });
+    frames.sort((a, b) => a.frameId - b.frameId);
+    
+    for (const frame of frames) {
+      if (frame.frameId === 0) continue;
+      
+      const match = collectedIframes.find(sub => {
+        if (!sub.src || !frame.url) return false;
+        try {
+          const subUrl = new URL(sub.src, frame.url).href;
+          return subUrl === frame.url || frame.url.startsWith(subUrl) || subUrl.startsWith(frame.url);
+        } catch {
+          return sub.src.includes(frame.url) || frame.url.includes(sub.src);
+        }
+      });
+      
+      if (match) {
+        await ensureContentScripts(tabId, frame.frameId);
+        const subResponse = await chrome.tabs.sendMessage(tabId, {
+          type: 'GET_ACCESSIBILITY_TREE',
+          maxNodes: params.maxNodes || 1000,
+          offsetX: match.x,
+          offsetY: match.y
+        }, { frameId: frame.frameId });
+        
+        if (subResponse?.ok && subResponse.tree?.nodes) {
+          tree.nodes.push(...subResponse.tree.nodes);
+          if (subResponse.tree.iframes) {
+            collectedIframes.push(...subResponse.tree.iframes);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Subframe accessibility tree collection failed:', e);
+  }
+  
+  delete tree.iframes;
+  return tree;
 }
 
 async function pageScreenshot(params) {
@@ -1084,13 +1129,13 @@ async function cdp(tabId, method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   return withTimeout(chrome.debugger.sendCommand({ tabId }, method, params), timeoutMs, method);
 }
 
-async function ensureContentScripts(tabId) {
+async function ensureContentScripts(tabId, frameId = 0) {
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: 'PING_AGENT_BRIDGE_CONTENT' });
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'PING_AGENT_BRIDGE_CONTENT' }, { frameId });
     if (response?.ok) return;
   } catch {}
   await chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, frameIds: [frameId] },
     files: ['content/accessibility-tree.js', 'content/visual-indicator.js']
   });
 }

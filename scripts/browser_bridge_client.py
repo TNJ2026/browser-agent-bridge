@@ -19,7 +19,21 @@ class BrowserBridgeClient:
     def __init__(self, host=None, port=None, token=None, timeout=120):
         self.host = host or os.environ.get("BROWSER_AGENT_BRIDGE_HOST", DEFAULT_HOST)
         self.port = int(port or os.environ.get("BROWSER_AGENT_BRIDGE_PORT", DEFAULT_PORT))
-        self.token = token if token is not None else os.environ.get("BROWSER_AGENT_BRIDGE_TOKEN", "")
+        
+        if token is None:
+            token = os.environ.get("BROWSER_AGENT_BRIDGE_TOKEN", "")
+            if not token:
+                from pathlib import Path
+                env_file = Path(os.environ.get("BROWSER_AGENT_BRIDGE_ENV_FILE", Path.home() / ".browser-agent-bridge.env"))
+                if env_file.exists():
+                    try:
+                        for line in env_file.read_text(encoding="utf-8").splitlines():
+                            if line.startswith("BROWSER_AGENT_BRIDGE_TOKEN="):
+                                token = line.split("=", 1)[1].strip("'\"")
+                                break
+                    except Exception:
+                        pass
+        self.token = token
         self.timeout = timeout
 
     @property

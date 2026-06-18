@@ -2,6 +2,27 @@
   if (globalThis.__localBrowserAgentVisualIndicatorLoaded) return;
   globalThis.__localBrowserAgentVisualIndicatorLoaded = true;
 
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes local-agent-pulse {
+      0% { transform: scale(0.8); opacity: 0.8; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+    .local-agent-ripple {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid #19a7ce;
+      animation: local-agent-pulse 1.5s infinite ease-out;
+      pointer-events: none;
+      box-sizing: border-box;
+    }
+  `;
+  document.documentElement.append(style);
+
   const root = document.createElement('div');
   root.id = 'local-browser-agent-indicator';
   root.style.cssText = [
@@ -23,8 +44,13 @@
     'border-radius:50%',
     'background:#19a7ce',
     'box-shadow:0 0 0 3px rgba(25,167,206,.25),0 8px 22px rgba(0,0,0,.22)',
-    'border:2px solid white'
+    'border:2px solid white',
+    'position:relative'
   ].join(';');
+
+  const ripple = document.createElement('div');
+  ripple.className = 'local-agent-ripple';
+  dot.append(ripple);
 
   const label = document.createElement('div');
   label.style.cssText = [

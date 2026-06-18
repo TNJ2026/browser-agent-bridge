@@ -36,6 +36,17 @@ def main(argv=None):
     parser.add_argument("--token", default=None)
     args = parser.parse_args(argv)
 
+    # Load BROWSER_AGENT_BRIDGE_TOKEN from env file if present
+    env_file = Path(os.environ.get("BROWSER_AGENT_BRIDGE_ENV_FILE", Path.home() / ".browser-agent-bridge.env"))
+    if not os.environ.get("BROWSER_AGENT_BRIDGE_TOKEN") and env_file.exists():
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                if line.startswith("BROWSER_AGENT_BRIDGE_TOKEN="):
+                    os.environ["BROWSER_AGENT_BRIDGE_TOKEN"] = line.split("=", 1)[1].strip("'\"")
+                    break
+        except Exception:
+            pass
+
     checks = []
     context = {
         "root": str(ROOT),

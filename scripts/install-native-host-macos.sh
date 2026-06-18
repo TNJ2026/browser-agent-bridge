@@ -8,6 +8,18 @@ fi
 
 EXTENSION_ID="$1"
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Ensure secure token authentication by default
+ENV_FILE="$HOME/.browser-agent-bridge.env"
+if [[ ! -f "$ENV_FILE" ]]; then
+  TOKEN="$(openssl rand -hex 16 2>/dev/null || od -vAn -N16 -tx1 /dev/urandom | tr -d ' \n' | tr -d '\r')"
+  cat > "$ENV_FILE" <<EOF
+BROWSER_AGENT_BRIDGE_TOKEN="$TOKEN"
+EOF
+  chmod 600 "$ENV_FILE"
+  echo "Security token generated and saved in $ENV_FILE"
+fi
+
 HOST_PY="$ROOT_DIR/native/host.py"
 PYTHON_BIN="$(command -v python3 || command -v python)"
 HOST_WRAPPER="$ROOT_DIR/native/host-wrapper.macos.sh"

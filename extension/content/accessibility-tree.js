@@ -9,24 +9,54 @@
     }
     if (message?.type !== 'GET_ACCESSIBILITY_TREE') return false;
     try {
-      sendResponse({ ok: true, tree: buildTree(message.maxNodes || 1000) });
+      sendResponse({ ok: true, tree: buildTree(message.maxNodes || 1000, message.offsetX || 0, message.offsetY || 0) });
     } catch (error) {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
     }
     return true;
   });
 
-  function buildTree(maxNodes) {
+  function buildTree(maxNodes, initialOffsetX = 0, initialOffsetY = 0) {
     const nodes = [];
+    const iframes = [];
 
     function traverse(element, offsetX = 0, offsetY = 0) {
       if (nodes.length >= maxNodes) return;
       if (!(element instanceof Element)) return;
 
+      if (element.tagName.toLowerCase() === 'iframe') {
+        const rect = element.getBoundingClientRect();
+        const absoluteX = Math.round(rect.left + offsetX);
+        const absoluteY = Math.round(rect.top + offsetY);
+
+        iframes.push({
+          src: element.src || '',
+          id: element.id || '',
+          name: element.name || '',
+          x: absoluteX,
+          y: absoluteY,
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        });
+
+        try {
+          const iframeDoc = element.contentDocument || element.contentWindow?.document;
+          if (iframeDoc) {
+            let child = iframeDoc.body?.firstElementChild || iframeDoc.documentElement?.firstElementChild;
+            while (child) {
+              traverse(child, absoluteX, absoluteY);
+              child = child.nextElementSibling;
+            }
+            return;
+          }
+        } catch (e) {
+          // Cross-origin iframe, fallback to background-assisted traversal
+        }
+      }
+
       const item = describeElement(element, nodes.length + 1, offsetX, offsetY);
       if (item) nodes.push(item);
 
-      // 1. Traverse Shadow DOM if present
       if (element.shadowRoot) {
         let child = element.shadowRoot.firstElementChild;
         while (child) {
@@ -35,26 +65,6 @@
         }
       }
 
-      // 2. Traverse iframe document if accessible (same-origin)
-      if (element.tagName.toLowerCase() === 'iframe') {
-        try {
-          const iframeDoc = element.contentDocument || element.contentWindow?.document;
-          if (iframeDoc) {
-            const rect = element.getBoundingClientRect();
-            const iframeOffsetX = offsetX + rect.left;
-            const iframeOffsetY = offsetY + rect.top;
-            let child = iframeDoc.body?.firstElementChild || iframeDoc.documentElement?.firstElementChild;
-            while (child) {
-              traverse(child, iframeOffsetX, iframeOffsetY);
-              child = child.nextElementSibling;
-            }
-          }
-        } catch (e) {
-          // Ignore cross-origin iframe security errors
-        }
-      }
-
-      // 3. Traverse regular light DOM children
       let child = element.firstElementChild;
       while (child) {
         traverse(child, offsetX, offsetY);
@@ -62,12 +72,13 @@
       }
     }
 
-    traverse(document.body || document.documentElement, 0, 0);
+    traverse(document.body || document.documentElement, initialOffsetX, initialOffsetY);
 
     return {
       url: location.href,
       title: document.title,
       nodes,
+      iframes,
       truncated: nodes.length >= maxNodes
     };
   }
