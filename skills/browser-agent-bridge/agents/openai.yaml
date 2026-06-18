@@ -1,0 +1,4 @@
+interface:
+  display_name: "Browser Agent Bridge"
+  short_description: "Use the local Chrome Native Messaging browser-control bridge."
+  default_prompt: "Use the local Browser Agent Bridge extension to inspect or control Chrome through JSON-RPC."

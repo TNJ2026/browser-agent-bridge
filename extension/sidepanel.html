@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Browser Agent Bridge</title>
+    <link rel="stylesheet" href="sidepanel.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Browser Agent Bridge</h1>
+        <span id="status" class="status disconnected">Disconnected</span>
+      </header>
+
+      <section>
+        <h2>Native Host</h2>
+        <dl>
+          <div>
+            <dt>Host</dt>
+            <dd id="host-name">-</dd>
+          </div>
+          <div>
+            <dt>Last checked</dt>
+            <dd id="last-checked">-</dd>
+          </div>
+          <div>
+            <dt>Error</dt>
+            <dd id="error">-</dd>
+          </div>
+        </dl>
+        <button id="refresh">Refresh</button>
+      </section>
+
+      <section>
+        <h2>Smoke Test</h2>
+        <button id="list-tabs">List tabs</button>
+        <pre id="output"></pre>
+      </section>
+    </main>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

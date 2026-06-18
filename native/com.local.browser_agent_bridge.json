@@ -1,0 +1,9 @@
+{
+  "name": "com.local.browser_agent_bridge",
+  "description": "Local Browser Agent Bridge native messaging host",
+  "path": "__HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://__EXTENSION_ID__/"
+  ]
+}

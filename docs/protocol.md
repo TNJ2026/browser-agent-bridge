@@ -1,0 +1,364 @@
+# JSON-RPC Protocol
+
+Requests sent to `POST http://127.0.0.1:8765/rpc` are forwarded to the Chrome extension. Agents can also connect to `ws://127.0.0.1:8765/ws` for the same JSON-RPC request/response protocol plus streamed extension notifications.
+
+## Endpoints
+
+```text
+POST http://127.0.0.1:8765/rpc
+GET  http://127.0.0.1:8765/health
+GET  http://127.0.0.1:8765/events
+WS   ws://127.0.0.1:8765/ws
+```
+
+`/ws` sends a `bridge.ready` notification after the handshake. Native extension notifications are delivered as JSON-RPC notifications with `method` and `params`.
+
+The repo includes two helper scripts:
+
+```bash
+scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{}}'
+scripts/ws-rpc.js '{"jsonrpc":"2.0","id":"2","method":"extension.info","params":{}}'
+scripts/ws-rpc.js --listen
+scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+scripts/doctor.py
+```
+
+`scripts/ws-rpc.js` prints one JSON message per line. Notifications do not have `id`; request responses have the matching `id`.
+
+## Authentication
+
+Authentication is disabled unless the native host is started with `BROWSER_AGENT_BRIDGE_TOKEN`.
+
+On macOS, `native/host-wrapper.macos.sh` loads `~/.browser-agent-bridge.env` before starting the host. Put `BROWSER_AGENT_BRIDGE_TOKEN=...` there when Chrome launches the native host.
+
+When enabled, these endpoints require a bearer token:
+
+```text
+POST /rpc
+GET  /events
+WS   /ws
+```
+
+Header:
+
+```text
+Authorization: Bearer <token>
+```
+
+`GET /health` does not require auth and includes `authRequired`.
+
+## Request
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-1",
+  "method": "page.readText",
+  "params": {
+    "tabId": 123
+  }
+}
+```
+
+## Response
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-1",
+  "result": {
+    "url": "https://example.com",
+    "title": "Example Domain",
+    "text": "..."
+  }
+}
+```
+
+Errors use standard JSON-RPC shape:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-1",
+  "error": {
+    "code": -32000,
+    "message": "Tab 123 not found"
+  }
+}
+```
+
+## Method Sketch
+
+### `extension.info`
+
+Returns extension metadata, native status, and tool list.
+
+```json
+{}
+```
+
+### `extension.reload`
+
+Schedules `chrome.runtime.reload()` after returning the JSON-RPC response. Useful after the extension has loaded a version that supports this method.
+
+```json
+{}
+```
+
+### `native.saveDataUrl`
+
+Native-host local method. Saves a data URL to disk and returns the file path. This is useful with `page.screenshot`.
+
+```json
+{
+  "dataUrl": "data:image/png;base64,...",
+  "filename": "page.png",
+  "directory": "~/Downloads/browser-agent-bridge"
+}
+```
+
+### `tabs.list`
+
+```json
+{ "query": { "active": true, "currentWindow": true } }
+```
+
+### `tabs.create`
+
+```json
+{ "url": "https://example.com", "active": true }
+```
+
+### `session.start`
+
+Creates a managed Chrome tab group and main tab.
+
+```json
+{ "name": "Agent Task", "url": "https://example.com", "active": true, "color": "cyan" }
+```
+
+### `session.list`
+
+```json
+{}
+```
+
+### `session.get`
+
+```json
+{ "sessionId": "uuid" }
+```
+
+### `session.stop`
+
+Ungroups tabs by default. Set `closeTabs` to close managed tabs.
+
+```json
+{ "sessionId": "uuid", "closeTabs": false }
+```
+
+### `page.navigate`
+
+```json
+{ "tabId": 123, "url": "https://example.com", "wait": true }
+```
+
+### `page.waitForLoad`
+
+Waits until Chrome reports the tab load status as complete.
+
+```json
+{ "tabId": 123, "timeoutMs": 30000 }
+```
+
+### `page.waitForSelector`
+
+Polls for a CSS selector. Set `visible` to require a visible box. Use `frameSelector` for a same-origin iframe.
+
+```json
+{ "tabId": 123, "selector": "main button", "visible": true, "timeoutMs": 30000, "frameSelector": "iframe[name=app]" }
+```
+
+### `page.waitForText`
+
+Polls the whole page, or a selector subtree, for text. Use `frameSelector` for a same-origin iframe.
+
+```json
+{ "tabId": 123, "text": "Signed in", "selector": "main", "timeoutMs": 30000, "frameSelector": "iframe[name=app]" }
+```
+
+### `page.executeJavaScript`
+
+```json
+{ "tabId": 123, "script": "document.title", "world": "MAIN" }
+```
+
+### `page.domSnapshot`
+
+Uses CDP `DOMSnapshot.captureSnapshot`.
+
+```json
+{ "tabId": 123, "computedStyles": [], "includeDOMRects": true }
+```
+
+### `page.screenshot`
+
+Captures the visible tab and returns a `dataUrl`.
+
+```json
+{ "tabId": 123, "format": "png" }
+```
+
+To save a screenshot to disk, pass the returned `dataUrl` to `native.saveDataUrl`.
+
+### `dom.query`
+
+Returns a bounded list of matching elements with text, value, visibility, and viewport rect. Use `frameSelector` for a same-origin iframe.
+
+```json
+{ "tabId": 123, "selector": "button, input, a", "limit": 50, "frameSelector": "iframe[name=app]" }
+```
+
+### `dom.click`
+
+Clicks one element by CSS selector and optional zero-based `index`.
+
+```json
+{ "tabId": 123, "selector": "button[type=submit]", "index": 0, "frameSelector": "iframe[name=app]" }
+```
+
+### `dom.type`
+
+Types into an input, textarea, or contenteditable element. `replace` defaults to true.
+
+```json
+{ "tabId": 123, "selector": "input[name=q]", "text": "browser bridge", "replace": true, "frameSelector": "iframe[name=app]" }
+```
+
+### `dom.select`
+
+Sets a native `<select>` value and dispatches input/change events.
+
+```json
+{ "tabId": 123, "selector": "select[name=country]", "value": "US", "frameSelector": "iframe[name=app]" }
+```
+
+`frameSelector` requires a same-origin iframe. Cross-origin frames are blocked by the browser and return an explicit accessibility error.
+
+### `computer.click`
+
+Coordinates are CSS viewport coordinates.
+
+```json
+{ "tabId": 123, "x": 300, "y": 240, "button": "left" }
+```
+
+### `computer.drag`
+
+```json
+{ "tabId": 123, "fromX": 100, "fromY": 100, "toX": 400, "toY": 300, "steps": 12 }
+```
+
+### `computer.type`
+
+```json
+{ "tabId": 123, "text": "hello" }
+```
+
+### `computer.scroll`
+
+```json
+{ "tabId": 123, "x": 400, "y": 400, "deltaY": 600 }
+```
+
+### `downloads.list`
+
+```json
+{ "limit": 50, "query": "report" }
+```
+
+### `recording.start`
+
+Starts recording browser actions for a tab or group. Screenshots are off by default because they can make exports large.
+Recordings are stored in Chrome local extension storage until `recording.clear` is called or the extension is removed.
+
+```json
+{ "tabId": 123, "name": "Checkout flow", "captureScreenshots": false }
+```
+
+or:
+
+```json
+{ "groupId": 5, "name": "Research flow", "captureScreenshots": true }
+```
+
+### `recording.stop`
+
+```json
+{ "recordingId": "uuid" }
+```
+
+### `recording.status`
+
+```json
+{}
+```
+
+or:
+
+```json
+{ "recordingId": "uuid" }
+```
+
+### `recording.export`
+
+Return JSON payload:
+
+```json
+{ "recordingId": "uuid" }
+```
+
+Download JSON through Chrome:
+
+```json
+{ "recordingId": "uuid", "download": true, "filename": "flow.json" }
+```
+
+### `recording.clear`
+
+```json
+{ "recordingId": "uuid" }
+```
+
+or clear all in-memory recordings:
+
+```json
+{}
+```
+
+### `policy.get`
+
+Returns URL policy. Defaults block Chrome privileged pages and Chrome Web Store.
+
+```json
+{}
+```
+
+### `policy.set`
+
+URL and method patterns use `*` wildcards. Method patterns match JSON-RPC method names.
+
+```json
+{
+  "blockedUrlPatterns": ["chrome://*", "chrome-extension://*", "https://bank.example/*"],
+  "allowedUrlPatterns": ["https://example.com/safe/*"],
+  "blockedMethods": ["page.executeJavaScript", "computer.*"],
+  "allowedMethods": []
+}
+```
+
+### `policy.checkUrl`
+
+```json
+{ "url": "https://example.com", "method": "dom.click" }
+```

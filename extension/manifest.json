@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Local Browser Agent Bridge",
+  "version": "0.1.0",
+  "description": "Expose Chrome browser-control tools to a local agent through Native Messaging.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "activeTab",
+    "debugger",
+    "downloads",
+    "nativeMessaging",
+    "notifications",
+    "scripting",
+    "sidePanel",
+    "storage",
+    "tabGroups",
+    "tabs",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Local Browser Agent Bridge"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/accessibility-tree.js",
+        "content/visual-indicator.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "commands": {
+    "toggle-side-panel": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Open the browser agent side panel"
+    }
+  }
+}
