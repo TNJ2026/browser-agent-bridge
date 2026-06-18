@@ -136,8 +136,10 @@ or:
 
 ### `tabs.group`
 
+Adds tab(s) to a tab group. If `groupId` is not provided, a new group is created.
+
 ```json
-{"tabIds":[123,124],"title":"Agent","color":"cyan"}
+{"tabIds":[123,124],"groupId":1,"title":"Agent","color":"cyan"}
 ```
 
 ### `session.start`

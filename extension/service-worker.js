@@ -381,7 +381,11 @@ async function tabsClose(params) {
 
 async function tabsGroup(params) {
   const tabIds = Array.isArray(params.tabIds) ? params.tabIds.map(assertTabId) : [assertTabId(params.tabId)];
-  const groupId = await chrome.tabs.group({ tabIds });
+  const options = { tabIds };
+  if (typeof params.groupId === 'number') {
+    options.groupId = params.groupId;
+  }
+  const groupId = await chrome.tabs.group(options);
   if (params.title || params.color) {
     await chrome.tabGroups.update(groupId, {
       ...(params.title ? { title: String(params.title) } : {}),
