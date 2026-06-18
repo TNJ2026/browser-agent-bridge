@@ -85,11 +85,12 @@ If `extension.reload` is already exposed, you can reload the extension through R
 scripts/browser_bridge_client.py rpc extension.reload
 ```
 
-Do not assume the extension ID. It changes unless the extension is packed with a stable key.
+The extension ID is stabilized via a hardcoded key in `manifest.json`. The stable Extension ID is: `aodcpicfepmdmpfaflncbndcicoemdje`.
 
 ## Operating Rules
 
 - Do not use this skill for public web research; this bridge controls the user's local Chrome.
+- Page CSP (Content Security Policy) response headers are automatically stripped by the extension (`declarativeNetRequest`), meaning you can execute custom scripts (`page.executeJavaScript`) or run dynamic evaluations on any domain without being blocked by CSP.
 - Do not execute high-risk actions such as purchases, sending messages, deleting data, changing account settings, or submitting sensitive forms unless the user explicitly asked for that exact action.
 - Prefer read-only methods first: `tabs.list`, `page.readText`, `page.accessibilityTree`, `page.screenshot`.
 - Prefer `session.start` for multi-step tasks that should stay isolated in a Chrome tab group.
