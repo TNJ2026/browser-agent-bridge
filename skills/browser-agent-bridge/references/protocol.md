@@ -297,6 +297,14 @@ Sets a native `<select>` value and dispatches input/change events.
 {"tabId":123,"selector":"select[name=country]","value":"US","frameSelector":"iframe[name=app]"}
 ```
 
+### `dom.hover`
+
+Hovers over an element by CSS selector and optional zero-based `index` (dispatches `mouseover` and `mouseenter` events).
+
+```json
+{"tabId":123,"selector":"button[type=submit]","index":0,"frameSelector":"iframe[name=app]"}
+```
+
 `frameSelector` requires a same-origin iframe. Cross-origin frames are blocked by the browser and return an explicit accessibility error.
 
 ### `computer.click`
@@ -329,12 +337,26 @@ Dispatches one key.
 {"tabId":123,"key":"Enter"}
 ```
 
+For combination shortcut keys (e.g. Copy/Paste/Select All), modifiers can be prepended with a `+`:
+
+```json
+{"tabId":123,"key":"Control+a"}
+```
+
 ### `computer.scroll`
 
 Dispatches a wheel event.
 
 ```json
 {"tabId":123,"x":400,"y":400,"deltaX":0,"deltaY":600}
+```
+
+### `computer.hover`
+
+Moves the mouse cursor to specific CSS viewport coordinates.
+
+```json
+{"tabId":123,"x":300,"y":240}
 ```
 
 ### `console.read`

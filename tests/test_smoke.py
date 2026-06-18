@@ -53,6 +53,13 @@ def run_smoke_test():
             raise RuntimeError("Input element not found")
         print(f"Query succeeded: {elements[0]}")
 
+        # 2.5 Test Hover and Shortcut Key APIs
+        print("\n2.5 Testing Hover and Shortcut Key APIs...")
+        hover_res = client.rpc("dom.hover", {"tabId": tab_id, "selector": "button#submit-btn"})
+        print(f"DOM hover result: {hover_res}")
+        client.rpc("computer.hover", {"tabId": tab_id, "x": 100, "y": 100})
+        client.rpc("computer.key", {"tabId": tab_id, "key": "Control+a"})
+
         # 3. Type text into input
         print("\n3. Typing text...")
         client.rpc("dom.type", {"tabId": tab_id, "selector": "input#input-field", "text": "Scraper Test Value", "replace": True})

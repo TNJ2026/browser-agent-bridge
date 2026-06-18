@@ -240,6 +240,8 @@ async function handleRpc(request) {
       return domType(params);
     case 'dom.select':
       return domSelect(params);
+    case 'dom.hover':
+      return domHover(params);
     case 'computer.click':
       return computerClick(params);
     case 'computer.drag':
@@ -250,6 +252,8 @@ async function handleRpc(request) {
       return computerKey(params);
     case 'computer.scroll':
       return computerScroll(params);
+    case 'computer.hover':
+      return computerHover(params);
     case 'console.read':
       return consoleRead(params);
     case 'network.read':
@@ -313,11 +317,13 @@ async function extensionInfo() {
       'dom.click',
       'dom.type',
       'dom.select',
+      'dom.hover',
       'computer.click',
       'computer.drag',
       'computer.type',
       'computer.key',
       'computer.scroll',
+      'computer.hover',
       'console.read',
       'network.read',
       'downloads.list',
@@ -922,6 +928,49 @@ async function domSelect(params) {
   return { ok: true, element: result };
 }
 
+async function domHover(params) {
+  const tabId = assertTabId(params.tabId);
+  await assertTabAllowed(tabId, 'dom.hover');
+  assertString(params.selector, 'selector');
+  const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (selector, index, scroll, frameSelector) => {
+      const root = resolveDomRoot(frameSelector);
+      const element = root.querySelectorAll(selector)[index];
+      if (!element) throw new Error(`Element not found: ${selector} at index ${index}`);
+      if (scroll !== false) element.scrollIntoView({ block: 'center', inline: 'center' });
+      
+      // Dispatch mouseover/mouseenter events to simulate hover
+      element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+      element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+      
+      const rect = element.getBoundingClientRect();
+      return {
+        tagName: element.tagName.toLowerCase(),
+        text: (element.innerText || element.textContent || '').trim().slice(0, 500),
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+      };
+
+      function resolveDomRoot(frameSelector) {
+        if (!frameSelector) return document;
+        const frame = document.querySelector(frameSelector);
+        if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
+        try {
+          if (!frame.contentDocument) throw new Error('Frame document is not accessible');
+          return frame.contentDocument;
+        } catch {
+          throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
+        }
+      }
+    },
+    args: [params.selector, index, params.scrollIntoView !== false, params.frameSelector || null],
+    world: 'MAIN'
+  });
+  await recordAction(tabId, 'dom.hover', { selector: params.selector, index, frameSelector: params.frameSelector || null }, result);
+  return { ok: true, element: result };
+}
+
 async function computerClick(params) {
   const tabId = assertTabId(params.tabId);
   await assertTabAllowed(tabId, 'computer.click');
@@ -985,22 +1034,43 @@ async function computerType(params) {
   return { ok: true };
 }
 
+function parseKeyModifiers(keyString) {
+  let modifiers = 0;
+  let key = keyString;
+  const parts = keyString.split('+');
+  if (parts.length > 1) {
+    key = parts.pop();
+    for (const part of parts) {
+      const lower = part.toLowerCase();
+      if (lower === 'alt') modifiers |= 1;
+      else if (lower === 'control' || lower === 'ctrl') modifiers |= 2;
+      else if (lower === 'meta' || lower === 'command' || lower === 'cmd') modifiers |= 4;
+      else if (lower === 'shift') modifiers |= 8;
+    }
+  }
+  return { key, modifiers };
+}
+
 async function computerKey(params) {
   const tabId = assertTabId(params.tabId);
   await assertTabAllowed(tabId, 'computer.key');
   assertString(params.key, 'key');
   await attachDebugger(tabId);
-  const key = params.key;
+  
+  const { key, modifiers } = parseKeyModifiers(params.key);
+  
   await cdp(tabId, 'Input.dispatchKeyEvent', {
-    type: 'keyDown',
+    type: 'rawKeyDown',
     key,
+    modifiers,
     text: key.length === 1 ? key : undefined
   });
   await cdp(tabId, 'Input.dispatchKeyEvent', {
     type: 'keyUp',
-    key
+    key,
+    modifiers
   });
-  await recordAction(tabId, 'computer.key', { key });
+  await recordAction(tabId, 'computer.key', { key: params.key });
   return { ok: true };
 }
 
@@ -1020,6 +1090,22 @@ async function computerScroll(params) {
     deltaY
   });
   await recordAction(tabId, 'computer.scroll', { x, y, deltaX, deltaY });
+  return { ok: true };
+}
+
+async function computerHover(params) {
+  const tabId = assertTabId(params.tabId);
+  await assertTabAllowed(tabId, 'computer.hover');
+  await attachDebugger(tabId);
+  const x = assertNumber(params.x, 'x');
+  const y = assertNumber(params.y, 'y');
+  await cdp(tabId, 'Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x,
+    y
+  });
+  await indicatorSet({ tabId, visible: true, x, y, label: 'hover' }).catch(() => {});
+  await recordAction(tabId, 'computer.hover', { x, y });
   return { ok: true };
 }
 
@@ -1189,6 +1275,19 @@ async function policyCheckUrl(params) {
 }
 
 async function attachDebugger(tabId) {
+  // Ensure the tab window is focused and the tab is active
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab) {
+      if (!tab.active) {
+        await chrome.tabs.update(tabId, { active: true });
+      }
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
+  } catch (err) {
+    console.error('Error focusing tab/window:', err);
+  }
+
   if (attachedTabs.has(tabId)) return;
   await withTimeout(chrome.debugger.attach({ tabId }, CDP_VERSION), DEFAULT_TIMEOUT_MS, 'debugger.attach');
   attachedTabs.add(tabId);
