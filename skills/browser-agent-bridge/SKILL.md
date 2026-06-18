@@ -94,14 +94,14 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 - **Bookmarks & History Search**: When asked to locate internal pages or pages the user previously visited, call `history.search` or `bookmarks.search` JSON-RPC methods. This queries the local browser profile databases directly and resolves URLs without querying the public internet.
 - **Domain Experience Accumulation**: Before automating a website, check the `skills/browser-agent-bridge/references/site-patterns/` folder. If a `{domain}.md` exists, read it for selector tricks, known traps, or navigation flows. If you find new selector paths or bypasses during execution, document them in a `{domain}.md` file in that folder to help future sessions.
 - Do not execute high-risk actions such as purchases, sending messages, deleting data, changing account settings, or submitting sensitive forms unless the user explicitly asked for that exact action.
-- Prefer read-only methods first: `tabs.list`, `page.readText`, `page.accessibilityTree`, `page.screenshot`.
+- Prefer read-only methods first: `tabs.list`, `page.readText`, `page.accessibilityTree` (which prunes intermediate layout containers and consolidates element child texts), `page.screenshot`.
 - Prefer `session.start` for multi-step tasks that should stay isolated in a Chrome tab group.
 - Check `policy.get` before operating on sensitive domains or using high-risk methods; use `policy.set` only when the user asks to change local allow/block rules.
 - Use `page.executeJavaScript` only when read-only methods are insufficient or when the user explicitly wants page scripting.
-- Prefer `dom.query`, `dom.click`, `dom.type`, and `dom.select` for ordinary page controls before falling back to viewport coordinates.
+- Prefer `dom.query`, `dom.click`, `dom.type`, `dom.select`, and `dom.hover` for ordinary page controls before falling back to viewport coordinates.
 - Use `frameSelector` with `dom.*` and page wait methods for same-origin iframes. Cross-origin iframes are not accessible through DOM methods.
 - Use `page.waitForLoad`, `page.waitForSelector`, or `page.waitForText` after navigation or UI actions instead of sleeping blindly.
-- Use `computer.*` methods for visible UI automation. Coordinates are CSS viewport coordinates.
+- Use `computer.*` methods for visible UI automation. Coordinates are CSS viewport coordinates. Use `computer.hover` for cursor movements, and `computer.key` with combinations (e.g. "Control+a", "Meta+c") for keyboard shortcuts.
 - If a call returns a restricted-page/debugger error, explain that Chrome blocks extension automation on pages such as `chrome://`, Chrome Web Store, or pages controlled by another debugger.
 
 ## Common Workflows
@@ -120,14 +120,14 @@ When the user asks to look up or navigate to a page they have visited before, or
 2. If URLs are returned, select the most relevant one.
 3. Call `page.navigate` (or `session.start` if isolating) to open and inspect that URL.
 
-### Click Or Type
+### Interact (Click, Type, Hover)
 
 
 1. Read the accessibility tree or screenshot first.
 2. Try `dom.query` to find stable selectors for the target control.
-3. Call `dom.click`, `dom.type`, or `dom.select` when selector targeting is reliable.
+3. Call `dom.click`, `dom.type`, `dom.select`, or `dom.hover` when selector targeting is reliable.
 4. Call `page.waitForSelector` or `page.waitForText` when the action should change page state.
-5. Fall back to `computer.click`, `computer.type`, `computer.key`, or `computer.scroll` when selector targeting is not enough.
+5. Fall back to `computer.click`, `computer.type`, `computer.key` (supporting combination shortcuts like "Control+a"), `computer.scroll`, or `computer.hover` when selector targeting is not enough.
 6. Read the page again to verify the result.
 
 ### Debug A Page
