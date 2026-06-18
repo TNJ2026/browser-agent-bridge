@@ -348,6 +348,21 @@ async function tabsCreate(params) {
     active: params.active !== false,
     ...(typeof params.windowId === 'number' ? { windowId: params.windowId } : {})
   });
+  
+  if (typeof tab.id === 'number') {
+    try {
+      const groups = await chrome.tabGroups.query({ title: 'Agent', windowId: tab.windowId });
+      if (groups.length > 0) {
+        await chrome.tabs.group({ tabIds: [tab.id], groupId: groups[0].id });
+      } else {
+        const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+        await chrome.tabGroups.update(groupId, { title: 'Agent', color: 'cyan' });
+      }
+    } catch (e) {
+      console.warn('Failed to auto-group agent tab:', e);
+    }
+  }
+
   return { tab: normalizeTab(tab) };
 }
 
