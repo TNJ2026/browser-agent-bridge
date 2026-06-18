@@ -26,7 +26,7 @@ Local Agent -> HTTP/WebSocket on 127.0.0.1:8765 -> Native Host -> Chrome Extensi
 - Workflow recording with optional screenshots and JSON export
 - Recording state persisted in `chrome.storage.local`
 - Page visual indicator overlay
-- Side panel connection status and smoke test
+- Side panel connection status
 
 ## Install For Local Development
 
