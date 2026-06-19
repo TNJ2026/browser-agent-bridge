@@ -32,6 +32,9 @@ rpc_id_lock = threading.Lock()
 config_ready = threading.Event()
 configured_port = PORT
 
+allow_read_tabs = True
+allow_read_history = True
+
 # Thread-safe collections
 pending_requests = {}  # msg_id -> {"event": threading.Event(), "response": None}
 pending_lock = threading.Lock()
@@ -60,7 +63,7 @@ def write_native_message(message):
         log(f"Failed to write native message: {e}")
 
 def handle_native_notification(message):
-    global extension_ready, extension_version, configured_port
+    global extension_ready, extension_version, configured_port, allow_read_tabs, allow_read_history
     method = message.get("method")
     params = message.get("params", {})
     if method == "extension.ready":
@@ -72,6 +75,9 @@ def handle_native_notification(message):
             except Exception:
                 pass
         config_ready.set()
+    elif method == "extension.settings":
+        allow_read_tabs = params.get("allowReadTabs", True)
+        allow_read_history = params.get("allowReadHistory", True)
     
     event = {
             "id": str(uuid.uuid4()),
@@ -558,6 +564,13 @@ def list_profiles(data_dir):
     return [{"dir": "Default", "name": "Default"}]
 
 def handle_history_search(request):
+    if not allow_read_history:
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "error": {"code": -32601, "message": "Method blocked by user privacy settings: history search is disabled"}
+        }
+
     params = request.get("params", {}) or {}
     query = params.get("query", "")
     limit = params.get("limit", 20)
@@ -663,6 +676,13 @@ def handle_history_search(request):
     }
 
 def handle_bookmarks_search(request):
+    if not allow_read_history:
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "error": {"code": -32601, "message": "Method blocked by user privacy settings: bookmarks search is disabled"}
+        }
+
     params = request.get("params", {}) or {}
     query = params.get("query", "")
     browser_filter = params.get("browser")

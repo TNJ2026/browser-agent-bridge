@@ -5,6 +5,8 @@ const errorEl = document.querySelector('#error');
 const bypassCspEl = document.querySelector('#bypass-csp');
 const bridgePortEl = document.querySelector('#bridge-port');
 const savePortBtn = document.querySelector('#save-port-btn');
+const allowReadTabsEl = document.querySelector('#allow-read-tabs');
+const allowReadHistoryEl = document.querySelector('#allow-read-history');
 
 const disclaimerScreen = document.querySelector('#disclaimer-screen');
 const mainContent = document.querySelector('#main-content');
@@ -58,12 +60,26 @@ function initializePanel() {
     }
   });
 
+  // Load reading settings on open
+  chrome.storage.local.get(['allowReadTabs', 'allowReadHistory']).then(response => {
+    allowReadTabsEl.checked = response.allowReadTabs !== false;
+    allowReadHistoryEl.checked = response.allowReadHistory !== false;
+  });
+
   // Update settings when toggled
   bypassCspEl.addEventListener('change', async () => {
     await chrome.runtime.sendMessage({
       type: 'SET_CSP_BYPASS',
       enabled: bypassCspEl.checked
     });
+  });
+
+  allowReadTabsEl.addEventListener('change', async () => {
+    await chrome.storage.local.set({ allowReadTabs: allowReadTabsEl.checked });
+  });
+
+  allowReadHistoryEl.addEventListener('change', async () => {
+    await chrome.storage.local.set({ allowReadHistory: allowReadHistoryEl.checked });
   });
 
   savePortBtn.addEventListener('click', async () => {

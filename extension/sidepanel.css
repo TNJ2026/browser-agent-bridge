@@ -247,9 +247,9 @@ pre {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  margin-top: 12px;
-  border-top: 1px dashed var(--border-color);
-  padding-top: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed var(--border-color);
+  padding-bottom: 12px;
 }
 
 .port-settings label {

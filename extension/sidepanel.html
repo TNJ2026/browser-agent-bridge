@@ -125,18 +125,37 @@
       </section>
       <section>
         <h2>Settings</h2>
-        <div class="setting-item">
-          <label>
-            <input type="checkbox" id="bypass-csp">
-            Bypass CSP (Content Security Policy)
-          </label>
-        </div>
+        <!-- Port Setting (At the top) -->
         <div class="setting-item port-settings">
           <label for="bridge-port">Bridge Port:</label>
           <div class="port-input-group">
             <input type="number" id="bridge-port" min="1024" max="65535" value="8765">
             <button id="save-port-btn">Save & Restart</button>
           </div>
+        </div>
+
+        <!-- Bypass CSP -->
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="bypass-csp">
+            Bypass CSP (Content Security Policy)
+          </label>
+        </div>
+
+        <!-- Allow Reading Tabs -->
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="allow-read-tabs" checked>
+            Allow reading open tabs (允许读取标签页)
+          </label>
+        </div>
+
+        <!-- Allow Reading History -->
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="allow-read-history" checked>
+            Allow reading history/bookmarks (允许读取历史记录与书签)
+          </label>
         </div>
       </section>
     </main>

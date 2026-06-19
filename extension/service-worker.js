@@ -95,8 +95,13 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && changes.agreedToDisclaimer?.newValue === true) {
-    connectNative();
+  if (areaName === 'local') {
+    if (changes.agreedToDisclaimer?.newValue === true) {
+      connectNative();
+    }
+    if (changes.allowReadTabs !== undefined || changes.allowReadHistory !== undefined) {
+      pushSettingsToNative();
+    }
   }
 });
 
@@ -153,6 +158,16 @@ async function connectNative() {
   sendNativeNotification('extension.ready', {
     version: chrome.runtime.getManifest().version,
     port: port
+  });
+
+  await pushSettingsToNative();
+}
+
+async function pushSettingsToNative() {
+  const result = await chrome.storage.local.get(['allowReadTabs', 'allowReadHistory']);
+  sendNativeNotification('extension.settings', {
+    allowReadTabs: result.allowReadTabs !== false,
+    allowReadHistory: result.allowReadHistory !== false
   });
 }
 
@@ -1486,6 +1501,13 @@ async function loadPolicy() {
 }
 
 async function assertMethodAllowed(method) {
+  if (method === 'tabs.list' || method === 'session.list' || method === 'session.get') {
+    const result = await chrome.storage.local.get('allowReadTabs');
+    if (result.allowReadTabs === false) {
+      throw new Error(`Method blocked by user privacy settings: ${method}`);
+    }
+  }
+
   const alwaysAllowed = new Set(['extension.info', 'native.status', 'policy.get', 'policy.set', 'policy.checkUrl']);
   if (alwaysAllowed.has(method)) return;
   const policy = await loadPolicy();
