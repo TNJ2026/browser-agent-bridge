@@ -34,6 +34,7 @@ configured_port = PORT
 
 allow_read_tabs = True
 allow_read_history = True
+enable_runtime_approval = True
 
 # Thread-safe collections
 pending_requests = {}  # msg_id -> {"event": threading.Event(), "response": None}
@@ -63,7 +64,7 @@ def write_native_message(message):
         log(f"Failed to write native message: {e}")
 
 def handle_native_notification(message):
-    global extension_ready, extension_version, configured_port, allow_read_tabs, allow_read_history
+    global extension_ready, extension_version, configured_port, allow_read_tabs, allow_read_history, enable_runtime_approval
     method = message.get("method")
     params = message.get("params", {})
     if method == "extension.ready":
@@ -78,6 +79,7 @@ def handle_native_notification(message):
     elif method == "extension.settings":
         allow_read_tabs = params.get("allowReadTabs", True)
         allow_read_history = params.get("allowReadHistory", True)
+        enable_runtime_approval = params.get("enableRuntimeApproval", True)
     
     event = {
             "id": str(uuid.uuid4()),
@@ -158,9 +160,51 @@ def call_extension(request):
         return handle_save_data_url(request)
 
     if request.get("method") == "history.search":
+        if not allow_read_history:
+            return {
+                "jsonrpc": "2.0",
+                "id": request.get("id"),
+                "error": {"code": -32601, "message": "Method blocked by user privacy settings: history search is disabled"}
+            }
+        if enable_runtime_approval:
+            perm_check = call_extension({
+                "jsonrpc": "2.0",
+                "method": "permission.check",
+                "params": {
+                    "method": "history.search",
+                    "params": request.get("params", {})
+                }
+            })
+            if "error" in perm_check:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "error": perm_check["error"]
+                }
         return handle_history_search(request)
 
     if request.get("method") == "bookmarks.search":
+        if not allow_read_history:
+            return {
+                "jsonrpc": "2.0",
+                "id": request.get("id"),
+                "error": {"code": -32601, "message": "Method blocked by user privacy settings: bookmarks search is disabled"}
+            }
+        if enable_runtime_approval:
+            perm_check = call_extension({
+                "jsonrpc": "2.0",
+                "method": "permission.check",
+                "params": {
+                    "method": "bookmarks.search",
+                    "params": request.get("params", {})
+                }
+            })
+            if "error" in perm_check:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "error": perm_check["error"]
+                }
         return handle_bookmarks_search(request)
 
     if not extension_ready:

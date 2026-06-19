@@ -8,15 +8,17 @@
     "activeTab",
     "debugger",
     "declarativeNetRequest",
-    "downloads",
     "nativeMessaging",
     "notifications",
     "scripting",
     "sidePanel",
     "storage",
-    "tabGroups",
-    "tabs",
     "webNavigation"
+  ],
+  "optional_permissions": [
+    "downloads",
+    "tabGroups",
+    "tabs"
   ],
   "host_permissions": [
     "<all_urls>"

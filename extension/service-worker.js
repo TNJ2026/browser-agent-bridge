@@ -20,6 +20,8 @@ const networkEventsByTab = new Map();
 const consoleEventsByTab = new Map();
 const recordings = new Map();
 let recordingsLoaded = false;
+let nextPromptId = 1;
+const pendingPrompts = new Map();
 let recordingsSaveTimer = null;
 const DEFAULT_POLICY = {
   blockedUrlPatterns: [
@@ -33,12 +35,14 @@ const DEFAULT_POLICY = {
 };
 
 chrome.runtime.onInstalled.addListener(async () => {
+  await chrome.storage.local.remove('sessionPermissions').catch(() => {});
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   connectNative();
   await initCspBypass().catch(err => console.error(err));
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  await chrome.storage.local.remove('sessionPermissions').catch(() => {});
   connectNative();
   await initCspBypass().catch(err => console.error(err));
 });
@@ -99,7 +103,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     if (changes.agreedToDisclaimer?.newValue === true) {
       connectNative();
     }
-    if (changes.allowReadTabs !== undefined || changes.allowReadHistory !== undefined) {
+    if (changes.enableRuntimeApproval !== undefined) {
       pushSettingsToNative();
     }
   }
@@ -164,10 +168,11 @@ async function connectNative() {
 }
 
 async function pushSettingsToNative() {
-  const result = await chrome.storage.local.get(['allowReadTabs', 'allowReadHistory']);
+  const result = await chrome.storage.local.get(['enableRuntimeApproval']);
   sendNativeNotification('extension.settings', {
-    allowReadTabs: result.allowReadTabs !== false,
-    allowReadHistory: result.allowReadHistory !== false
+    allowReadTabs: true,
+    allowReadHistory: true,
+    enableRuntimeApproval: result.enableRuntimeApproval !== false
   });
 }
 
@@ -200,6 +205,15 @@ async function handleRuntimeMessage(message, sender) {
       await updateCspRuleset(bypass);
       return { ok: true };
     }
+    case 'PERMISSION_RESPONSE': {
+      const { promptId, response } = message;
+      const pending = pendingPrompts.get(promptId);
+      if (pending) {
+        pendingPrompts.delete(promptId);
+        pending.resolve(response);
+      }
+      return { ok: true };
+    }
     case 'RPC':
       return { ok: true, result: await handleRpc(message.request, sender) };
     case 'CONTENT_ACCESSIBILITY_TREE':
@@ -216,16 +230,17 @@ async function handleRpc(request) {
     throw new Error('Invalid JSON-RPC request');
   }
   await assertMethodAllowed(request.method);
+  await checkPermission(request.method, request.params || {});
   const params = request.params || {};
   switch (request.method) {
+    case 'permission.check':
+      return { allowed: true };
     case 'extension.info':
       return extensionInfo();
     case 'extension.reload':
       return extensionReload();
     case 'extension.getCspBypass':
       return extensionGetCspBypass();
-    case 'extension.setCspBypass':
-      return extensionSetCspBypass(params);
     case 'native.status':
       return nativeStatus;
     case 'tabs.list':
@@ -327,7 +342,6 @@ async function extensionInfo() {
       'extension.info',
       'extension.reload',
       'extension.getCspBypass',
-      'extension.setCspBypass',
       'native.status',
       'tabs.list',
       'tabs.create',
@@ -401,13 +415,6 @@ async function updateCspRuleset(enabled) {
 async function extensionGetCspBypass() {
   const result = await chrome.storage.local.get('bypassCSP');
   return { enabled: result.bypassCSP !== false };
-}
-
-async function extensionSetCspBypass(params) {
-  const bypass = params.enabled !== false;
-  await chrome.storage.local.set({ bypassCSP: bypass });
-  await updateCspRuleset(bypass);
-  return { success: true };
 }
 
 async function extensionReload() {
@@ -1501,14 +1508,8 @@ async function loadPolicy() {
 }
 
 async function assertMethodAllowed(method) {
-  if (method === 'tabs.list' || method === 'session.list' || method === 'session.get') {
-    const result = await chrome.storage.local.get('allowReadTabs');
-    if (result.allowReadTabs === false) {
-      throw new Error(`Method blocked by user privacy settings: ${method}`);
-    }
-  }
 
-  const alwaysAllowed = new Set(['extension.info', 'native.status', 'policy.get', 'policy.set', 'policy.checkUrl']);
+  const alwaysAllowed = new Set(['extension.info', 'native.status', 'policy.get', 'policy.set', 'policy.checkUrl', 'permission.check']);
   if (alwaysAllowed.has(method)) return;
   const policy = await loadPolicy();
   if (!isMethodAllowedByPolicy(method, policy)) {
@@ -1732,4 +1733,91 @@ function assertNumber(value, name) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function getMethodCategory(method) {
+  if (method === 'tabs.list' || method === 'session.list' || method === 'session.get') {
+    return 'read_tabs';
+  }
+  if (method === 'history.search' || method === 'bookmarks.search') {
+    return 'read_history';
+  }
+  if (method === 'downloads.list' || method === 'downloads.download') {
+    return 'read_downloads';
+  }
+  if (method === 'page.screenshot' || method === 'page.domSnapshot') {
+    return 'page_screenshot';
+  }
+  if (method === 'console.read' || method === 'network.read') {
+    return 'page_logs';
+  }
+  return null;
+}
+
+async function isSidepanelOpen() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'PING_SIDEPANEL' });
+    return response && response.ok === true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function checkPermission(method, params) {
+  if (method === 'permission.check') return;
+
+  const category = getMethodCategory(method);
+  if (!category) return; // not a sensitive method requiring approval
+
+  const result = await chrome.storage.local.get([
+    'enableRuntimeApproval',
+    'sessionPermissions'
+  ]);
+
+  // If runtime approval is disabled, allow
+  if (result.enableRuntimeApproval === false) {
+    return;
+  }
+
+  const sessionPermissions = result.sessionPermissions || {};
+  if (sessionPermissions[category] === 'allow') {
+    return;
+  }
+  if (sessionPermissions[category] === 'deny') {
+    throw new Error(`Permission denied by user for this session: ${category}`);
+  }
+
+  // Sidepanel must be open to prompt
+  const open = await isSidepanelOpen();
+  if (!open) {
+    throw new Error(`Runtime permission approval is enabled but the sidepanel is closed. Please open the sidepanel to approve sensitive operations.`);
+  }
+
+  // Prompt the user
+  const promptId = nextPromptId++;
+  const response = await new Promise((resolve) => {
+    pendingPrompts.set(promptId, { resolve, category, method });
+    chrome.runtime.sendMessage({
+      type: 'PROMPT_PERMISSION',
+      promptId,
+      category,
+      method,
+      params
+    }).catch(() => {
+      pendingPrompts.delete(promptId);
+      resolve('deny');
+    });
+  });
+
+  if (response === 'allow') {
+    return;
+  } else if (response === 'session_allow') {
+    sessionPermissions[category] = 'allow';
+    await chrome.storage.local.set({ sessionPermissions });
+    return;
+  } else {
+    sessionPermissions[category] = 'deny';
+    await chrome.storage.local.set({ sessionPermissions });
+    throw new Error(`Permission denied by user: ${category}`);
+  }
 }

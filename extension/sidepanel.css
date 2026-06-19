@@ -272,3 +272,50 @@ pre {
   color: var(--text-color);
   background: var(--button-bg);
 }
+
+.permission-card {
+  border: 1px solid var(--status-disconnected-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--status-disconnected-bg);
+  margin-bottom: 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  transition: all 0.2s ease;
+}
+
+.permission-card h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--status-disconnected-color);
+}
+
+.permission-details {
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 12px;
+  color: var(--text-color);
+}
+
+.permission-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.permission-actions button {
+  flex: 1;
+  font-size: 11px;
+  min-height: 28px;
+  padding: 2px 6px;
+}
+
+.danger-btn {
+  background: var(--status-disconnected-bg);
+  color: var(--status-disconnected-color);
+  border-color: var(--status-disconnected-border);
+}
+
+.danger-btn:hover {
+  filter: brightness(0.95);
+  background: var(--status-disconnected-bg);
+}

@@ -100,6 +100,17 @@
 
     <!-- Main Content Screen -->
     <main id="main-content" style="display: none;">
+      <!-- Permission Approval Card -->
+      <div id="permission-card" style="display: none;" class="permission-card">
+        <h3>⚠️ 授权申请 / Authorization Request</h3>
+        <div id="permission-details" class="permission-details"></div>
+        <div class="permission-actions">
+          <button id="perm-allow-btn" class="primary-btn">允许 / Allow</button>
+          <button id="perm-session-allow-btn">总是允许 / Always</button>
+          <button id="perm-deny-btn" class="danger-btn">拒绝 / Deny</button>
+        </div>
+      </div>
+
       <header>
         <h1>Browser Agent Bridge</h1>
         <span id="status" class="status disconnected">Disconnected</span>
@@ -142,21 +153,14 @@
           </label>
         </div>
 
-        <!-- Allow Reading Tabs -->
+        <!-- Enable Runtime Approval -->
         <div class="setting-item">
           <label>
-            <input type="checkbox" id="allow-read-tabs" checked>
-            Allow reading open tabs (允许读取标签页)
+            <input type="checkbox" id="enable-runtime-approval" checked>
+            Enable Runtime Approval (开启敏感操作运行时审批)
           </label>
         </div>
 
-        <!-- Allow Reading History -->
-        <div class="setting-item">
-          <label>
-            <input type="checkbox" id="allow-read-history" checked>
-            Allow reading history/bookmarks (允许读取历史记录与书签)
-          </label>
-        </div>
       </section>
     </main>
     <script type="module" src="sidepanel.js"></script>

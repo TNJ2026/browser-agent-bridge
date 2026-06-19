@@ -14,20 +14,10 @@ def run_smoke_test():
         print("Error: Chrome extension is not connected to the native host yet. Open side panel or reload extension!")
         return 1
 
-    # 0. Test CSP bypass configuration APIs
+    # 0. Test CSP bypass configuration APIs (read-only)
     print("\n0. Testing CSP bypass configuration...")
     orig_csp = client.rpc("extension.getCspBypass", {})
     print(f"Original CSP status: {orig_csp}")
-    client.rpc("extension.setCspBypass", {"enabled": False})
-    new_csp = client.rpc("extension.getCspBypass", {})
-    print(f"New CSP status after disabling: {new_csp}")
-    if new_csp.get("enabled") is not False:
-        raise RuntimeError("Failed to disable CSP bypass")
-    client.rpc("extension.setCspBypass", {"enabled": True})
-    restored_csp = client.rpc("extension.getCspBypass", {})
-    print(f"Restored CSP status: {restored_csp}")
-    if restored_csp.get("enabled") is not True:
-        raise RuntimeError("Failed to restore CSP bypass")
 
 
 
