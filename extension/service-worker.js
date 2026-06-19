@@ -4,7 +4,9 @@ const DEFAULT_TIMEOUT_MS = 30000;
 const PERMISSION_PROMPT_TIMEOUT_MS = 60000;
 const CSP_BYPASS_DYNAMIC_RULE_ID = 10001;
 const CSP_BYPASS_ALARM = 'clear-temporary-csp-bypass';
-const DEFAULT_CSP_BYPASS_TTL_MS = 60000;
+const DEFAULT_CSP_BYPASS_TTL_MS = 3 * 60 * 1000;
+const APPROVAL_NOTIFICATION_ID = 'browser-agent-bridge-permission-approval';
+const APPROVAL_POPUP_PATH = 'approval.html';
 const DEFAULT_RECORDING_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_RECORDING_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_RECORDING_MAX_ACTIONS = 500;
@@ -30,6 +32,7 @@ const recordings = new Map();
 let recordingsLoaded = false;
 let nextPromptId = 1;
 const pendingPrompts = new Map();
+let approvalPopupWindowId = null;
 let recordingsSaveTimer = null;
 let cspBypassTimer = null;
 let activeCspBypass = null;
@@ -73,6 +76,13 @@ chrome.alarms.onAlarm.addListener(alarm => {
   }
 });
 
+chrome.notifications.onClicked.addListener(notificationId => {
+  if (notificationId === APPROVAL_NOTIFICATION_ID) {
+    openApprovalPopup().catch(err => console.error('Error opening approval popup:', err));
+    chrome.notifications.clear(notificationId).catch(() => {});
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleRuntimeMessage(message, sender).then(sendResponse, error => {
     sendResponse({ ok: false, error: errorMessage(error) });
@@ -96,6 +106,12 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 
 chrome.debugger.onDetach.addListener(source => {
   if (typeof source.tabId === 'number') attachedTabs.delete(source.tabId);
+});
+
+chrome.windows.onRemoved.addListener(windowId => {
+  if (windowId === approvalPopupWindowId) {
+    approvalPopupWindowId = null;
+  }
 });
 
 chrome.tabs.onRemoved.addListener(tabId => {
@@ -239,6 +255,16 @@ async function handleRuntimeMessage(message, sender) {
       }
       return { ok: true };
     }
+    case 'GET_PENDING_PERMISSION_PROMPTS':
+      return {
+        ok: true,
+        prompts: Array.from(pendingPrompts.entries()).map(([promptId, prompt]) => ({
+          promptId,
+          category: prompt.category,
+          method: prompt.method,
+          params: prompt.params
+        }))
+      };
     case 'RPC':
       return { ok: true, result: await handleRpc(message.request, sender) };
     case 'CONTENT_ACCESSIBILITY_TREE':
@@ -428,8 +454,8 @@ async function initCspBypass() {
   const result = await chrome.storage.local.get('bypassCSP');
   let bypass = result.bypassCSP;
   if (bypass === undefined) {
-    bypass = false;
-    await chrome.storage.local.set({ bypassCSP: false });
+    bypass = true;
+    await chrome.storage.local.set({ bypassCSP: true });
   }
   await disableStaticCspRuleset();
   await clearTemporaryCspBypass();
@@ -485,7 +511,7 @@ function cspBypassUrlFilter(origin) {
 
 function normalizeCspBypassTtl(value) {
   if (!Number.isFinite(value)) return DEFAULT_CSP_BYPASS_TTL_MS;
-  return Math.max(1000, Math.min(Math.trunc(value), 5 * 60 * 1000));
+  return Math.max(10 * 1000, Math.min(Math.trunc(value), 10 * 60 * 1000));
 }
 
 async function maybeEnableTemporaryCspBypass(tabId, params = {}) {
@@ -1336,7 +1362,9 @@ async function computerClick(params) {
     button,
     clickCount: params.clickCount || 1
   });
-  await indicatorSet({ tabId, visible: true, x, y, label: 'click' }).catch(() => {});
+  if (params.showIndicator === true) {
+    await indicatorSet({ tabId, visible: true, x, y, label: params.indicatorLabel || 'click' }).catch(() => {});
+  }
   await recordAction(tabId, 'computer.click', { x, y, button, clickCount: params.clickCount || 1 });
   return { ok: true };
 }
@@ -1363,7 +1391,9 @@ async function computerDrag(params) {
     });
   }
   await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: toX, y: toY, button, clickCount: 1 });
-  await indicatorSet({ tabId, visible: true, x: toX, y: toY, label: 'drag' }).catch(() => {});
+  if (params.showIndicator === true) {
+    await indicatorSet({ tabId, visible: true, x: toX, y: toY, label: params.indicatorLabel || 'drag' }).catch(() => {});
+  }
   await recordAction(tabId, 'computer.drag', { fromX, fromY, toX, toY, button, steps });
   return { ok: true };
 }
@@ -1448,7 +1478,9 @@ async function computerHover(params) {
     x,
     y
   });
-  await indicatorSet({ tabId, visible: true, x, y, label: 'hover' }).catch(() => {});
+  if (params.showIndicator === true) {
+    await indicatorSet({ tabId, visible: true, x, y, label: params.indicatorLabel || 'hover' }).catch(() => {});
+  }
   await recordAction(tabId, 'computer.hover', { x, y });
   return { ok: true };
 }
@@ -2114,6 +2146,50 @@ async function isSidepanelOpen() {
   }
 }
 
+async function openApprovalPopup() {
+  const popupUrl = chrome.runtime.getURL(APPROVAL_POPUP_PATH);
+  if (approvalPopupWindowId !== null) {
+    try {
+      await chrome.windows.update(approvalPopupWindowId, { focused: true });
+      return;
+    } catch (e) {
+      approvalPopupWindowId = null;
+    }
+  }
+  const win = await chrome.windows.create({
+    url: popupUrl,
+    type: 'popup',
+    width: 520,
+    height: 560,
+    focused: true
+  });
+  approvalPopupWindowId = win.id ?? null;
+}
+
+async function notifyApprovalPrompt(category, method) {
+  await chrome.notifications.create(APPROVAL_NOTIFICATION_ID, {
+    type: 'basic',
+    iconUrl: 'icon128.png',
+    title: 'Browser Agent Bridge approval needed',
+    message: `${method} needs approval (${category}). A review window has been opened.`
+  }).catch(() => {});
+}
+
+async function showApprovalFallback(category, method) {
+  await notifyApprovalPrompt(category, method);
+  await openApprovalPopup().catch(err => console.error('Error opening approval popup:', err));
+}
+
+async function broadcastPermissionPrompt(promptId, category, method, params) {
+  await chrome.runtime.sendMessage({
+    type: 'PROMPT_PERMISSION',
+    promptId,
+    category,
+    method,
+    params
+  }).catch(() => {});
+}
+
 async function checkPermission(method, params) {
   if (method === 'permission.check') return;
 
@@ -2138,13 +2214,6 @@ async function checkPermission(method, params) {
     throw new Error(`Permission denied by user for this session: ${category}`);
   }
 
-  // Sidepanel must be open to prompt
-  const open = await isSidepanelOpen();
-  if (!open) {
-    throw new Error(`Runtime permission approval is enabled but the sidepanel is closed. Please open the sidepanel to approve sensitive operations.`);
-  }
-
-  // Prompt the user
   const promptId = nextPromptId++;
   const response = await new Promise((resolve) => {
     let finished = false;
@@ -2159,14 +2228,14 @@ async function checkPermission(method, params) {
       finish('timeout');
     }, PERMISSION_PROMPT_TIMEOUT_MS);
 
-    pendingPrompts.set(promptId, { resolve: finish, category, method });
-    chrome.runtime.sendMessage({
-      type: 'PROMPT_PERMISSION',
-      promptId,
-      category,
-      method,
-      params
-    }).catch(() => {
+    pendingPrompts.set(promptId, { resolve: finish, category, method, params });
+    (async () => {
+      const open = await isSidepanelOpen();
+      if (!open) {
+        await showApprovalFallback(category, method);
+      }
+      await broadcastPermissionPrompt(promptId, category, method, params);
+    })().catch(() => {
       finish('deny');
     });
   });

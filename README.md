@@ -37,7 +37,7 @@ graph TD
 - Page inspection with visible text, screenshots, DOM snapshots, and accessibility trees.
 - Event streaming for console and network activity.
 - Workflow recording with input-redaction defaults.
-- Visual overlays for tracing agent actions.
+- Optional visual overlays for tracing agent actions.
 
 ## Installation
 
@@ -204,7 +204,7 @@ node scripts/ws-rpc.js --listen
 
 ## Security and Privacy
 
-- Sensitive operations such as tab listing, screenshots, downloads, and network logs require side-panel approval.
-- If the side panel is closed, sensitive calls fail with a prompt asking the user to open it.
+- Sensitive operations such as tab listing, screenshots, downloads, and network logs require runtime approval.
+- If the side panel is closed, sensitive calls trigger a Chrome notification and open an extension approval popup.
 - Workflow recordings redact typed text by default unless `includeText: true` is explicitly used.
 - The default policy blocks automation on `chrome://*`, `chrome-extension://*`, and Chrome Web Store pages.

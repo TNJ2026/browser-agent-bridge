@@ -87,13 +87,14 @@ Schedules `chrome.runtime.reload()` after returning the JSON-RPC response. It on
 
 ### `extension.getCspBypass`
 
-Gets whether temporary per-origin Content Security Policy (CSP) bypass is enabled by the user, and whether a temporary dynamic rule is currently active.
+Gets whether temporary per-origin Content Security Policy (CSP) bypass is enabled, and whether a temporary dynamic rule is currently active.
 
 ```json
 {"jsonrpc":"2.0","id":"get-csp","method":"extension.getCspBypass","params":{}}
 ```
 
-The user enables or disables this in the side panel. When enabled, `tabs.create`, `session.start`, `page.navigate`, and `page.executeJavaScript` may temporarily strip CSP response headers for the target origin. Pass `"bypassCSP": false` on a call to opt out. Pass `"cspBypassTtlMs"` to request a TTL between 1 second and 5 minutes; the default is 60 seconds.
+This defaults to enabled for new installs. The user can enable or disable it in the side panel. When enabled, `tabs.create`, `session.start`, `page.navigate`, and `page.executeJavaScript` may temporarily strip CSP response headers for the target origin. Pass `"bypassCSP": false` on a call to opt out. Pass `"cspBypassTtlMs"` to request a TTL between 10 seconds and 10 minutes; the default is 3 minutes.
+
 ### `native.status`
 
 Returns Native Messaging status from the extension.
@@ -273,7 +274,7 @@ To save a screenshot to disk, pass the returned `dataUrl` to `native.saveDataUrl
 Runs script in the page. Use sparingly.
 
 ```json
-{"tabId":123,"script":"document.title","world":"MAIN","cspBypassTtlMs":60000}
+{"tabId":123,"script":"document.title","world":"MAIN","cspBypassTtlMs":180000}
 ```
 
 Use `"world":"isolated"` to run in the isolated extension world.
@@ -352,6 +353,8 @@ Coordinates are CSS viewport coordinates.
 ```json
 {"tabId":123,"x":300,"y":240,"button":"left","clickCount":1}
 ```
+
+`computer.click`, `computer.drag`, and `computer.hover` do not show the page visual indicator by default. Pass `"showIndicator": true` to show the dot/label for a specific call, and optionally pass `"indicatorLabel"`.
 
 ### `computer.drag`
 

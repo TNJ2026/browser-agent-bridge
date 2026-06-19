@@ -108,13 +108,14 @@ Schedules `chrome.runtime.reload()` after returning the JSON-RPC response. Usefu
 
 ### `extension.getCspBypass`
 
-Gets whether temporary per-origin Content Security Policy (CSP) bypass is enabled by the user, and whether a temporary dynamic rule is currently active.
+Gets whether temporary per-origin Content Security Policy (CSP) bypass is enabled, and whether a temporary dynamic rule is currently active.
 
 ```json
 {}
 ```
 
-The user enables or disables this in the side panel. When enabled, `tabs.create`, `session.start`, `page.navigate`, and `page.executeJavaScript` may temporarily strip CSP response headers for the target origin. Pass `"bypassCSP": false` on a call to opt out. Pass `"cspBypassTtlMs"` to request a TTL between 1 second and 5 minutes; the default is 60 seconds.
+This defaults to enabled for new installs. The user can enable or disable it in the side panel. When enabled, `tabs.create`, `session.start`, `page.navigate`, and `page.executeJavaScript` may temporarily strip CSP response headers for the target origin. Pass `"bypassCSP": false` on a call to opt out. Pass `"cspBypassTtlMs"` to request a TTL between 10 seconds and 10 minutes; the default is 3 minutes.
+
 ### `native.saveDataUrl`
 
 Native-host local method. Saves a data URL to disk and returns the file path. This is useful with `page.screenshot`.
@@ -295,6 +296,8 @@ Coordinates are CSS viewport coordinates.
 ```json
 { "tabId": 123, "x": 300, "y": 240, "button": "left" }
 ```
+
+`computer.click`, `computer.drag`, and `computer.hover` do not show the page visual indicator by default. Pass `"showIndicator": true` to show the dot/label for a specific call, and optionally pass `"indicatorLabel"`.
 
 ### `computer.drag`
 

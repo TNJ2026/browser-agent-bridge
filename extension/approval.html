@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Browser Agent Bridge Approval</title>
+    <link rel="stylesheet" href="sidepanel.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Authorization Request</h1>
+        <span class="status disconnected">Review</span>
+      </header>
+      <div id="permission-card" class="permission-card">
+        <h3>⚠️ 授权申请 / Authorization Request</h3>
+        <div id="permission-details" class="permission-details">
+          Waiting for a pending request...
+        </div>
+        <div class="permission-actions">
+          <button id="perm-allow-btn" class="primary-btn">允许 / Allow</button>
+          <button id="perm-session-allow-btn">总是允许 / Always</button>
+          <button id="perm-deny-btn" class="danger-btn">拒绝 / Deny</button>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="approval.js"></script>
+  </body>
+</html>

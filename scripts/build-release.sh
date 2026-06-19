@@ -8,8 +8,10 @@ DIST_DIR="$ROOT_DIR/dist"
 RELEASE_DIR="$DIST_DIR/$RELEASE_NAME"
 ZIP_PATH="$DIST_DIR/browser-agent-bridge-$VERSION.zip"
 
-mkdir -p "$DIST_DIR" "$RELEASE_DIR"
+mkdir -p "$DIST_DIR"
 rm -f "$ZIP_PATH"
+rm -rf "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR"
 
 (
   cd "$ROOT_DIR/extension"

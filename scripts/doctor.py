@@ -135,13 +135,19 @@ def find_native_manifest(platform_name=None):
 
 def check_repo_files(checks):
     required = [
+        "extension/approval.html",
+        "extension/approval.js",
         "extension/manifest.json",
         "extension/service-worker.js",
+        "extension/sidepanel.html",
+        "extension/sidepanel.js",
         "native/host.py",
         "native/host-wrapper.sh",
         "native/host-wrapper.win.bat",
         "native/com.local.browser_agent_bridge.json",
+        "scripts/install-native-host-macos.sh",
         "scripts/install-native-host-unix.sh",
+        "scripts/install-native-host-win.ps1",
         "scripts/rpc.sh",
         "scripts/ws-rpc.js",
         "scripts/browser_bridge_client.py",
@@ -151,6 +157,30 @@ def check_repo_files(checks):
         add(checks, "repo.files", "fail", f"missing {', '.join(missing)}")
     else:
         add(checks, "repo.files", "pass", "required project files exist")
+    check_install_layout(checks)
+
+
+def check_install_layout(checks):
+    agent_scripts = [
+        ROOT / "scripts" / "install-native-host-unix.sh",
+        ROOT / "scripts" / "install-native-host-macos.sh",
+        ROOT / "scripts" / "install-native-host-win.ps1",
+    ]
+    native_launchers = [
+        ROOT / "native" / "host-wrapper.sh",
+        ROOT / "native" / "host-wrapper.win.bat",
+    ]
+    misplaced_skill_scripts = list((ROOT / "skills").glob("**/install-native-host*")) if (ROOT / "skills").exists() else []
+    missing_scripts = [path.relative_to(ROOT).as_posix() for path in agent_scripts if not path.exists()]
+    missing_launchers = [path.relative_to(ROOT).as_posix() for path in native_launchers if not path.exists()]
+    if misplaced_skill_scripts:
+        paths = ", ".join(path.relative_to(ROOT).as_posix() for path in misplaced_skill_scripts)
+        add(checks, "repo.install_layout", "warn", f"installer scripts should live in scripts/, not skills/: {paths}")
+    elif missing_scripts or missing_launchers:
+        missing = ", ".join(missing_scripts + missing_launchers)
+        add(checks, "repo.install_layout", "fail", f"missing expected install layout files: {missing}")
+    else:
+        add(checks, "repo.install_layout", "pass", "agent-run installers are in scripts/; generated launchers are in native/")
 
 
 def check_extension_manifest(checks):
