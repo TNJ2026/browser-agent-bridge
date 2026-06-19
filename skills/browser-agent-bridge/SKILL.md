@@ -57,6 +57,39 @@ scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"current
 
 6. For detailed method parameters, read `references/protocol.md`.
 
+## Platform Setup
+
+Use `python3 scripts/doctor.py --skip-live` first. The doctor is platform-aware:
+
+- macOS checks user-level Chrome, Chromium, Brave, and Edge Native Messaging manifest paths under `~/Library/Application Support/.../NativeMessagingHosts/`.
+- Linux checks user-level Chrome, Chromium, Brave, and Edge Native Messaging manifest paths under `~/.config/.../NativeMessagingHosts/`.
+- Windows checks `HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.local.browser_agent_bridge` and the manifest path referenced by its default value.
+
+Install or repair the native host with the platform installer:
+
+```bash
+# macOS/Linux, Google Chrome
+./scripts/install-native-host-unix.sh <extension-id>
+
+# macOS/Linux, a different Chromium browser or all known browser paths
+./scripts/install-native-host-unix.sh --browser chromium <extension-id>
+./scripts/install-native-host-unix.sh --browser brave <extension-id>
+./scripts/install-native-host-unix.sh --browser edge <extension-id>
+./scripts/install-native-host-unix.sh --browser all <extension-id>
+```
+
+```powershell
+# Windows, current user install. Administrator privileges are not required.
+powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 <extension-id>
+```
+
+`scripts/install-native-host-macos.sh` is a compatibility wrapper around `scripts/install-native-host-unix.sh`; prefer the Unix script in new instructions.
+
+Generated token files:
+
+- macOS/Linux: `~/.browser-agent-bridge.env`
+- Windows: `%USERPROFILE%\.browser-agent-bridge.env`
+
 ## Automated Self-Setup / 自动安装与自愈机制
 
 When initialized in a new user workspace, the Agent SHOULD proactively check the connection status. If a connection failure or diagnostic warning occurs, the Agent is authorized to automatically perform self-registration:
@@ -64,10 +97,10 @@ When initialized in a new user workspace, the Agent SHOULD proactively check the
 1. Run `python3 scripts/doctor.py --skip-live` to detect host configuration health.
 2. If `native.manifest.path` or native wrapper diagnostics fail:
    - Identify the user's OS.
-   - For macOS: run `./scripts/install-native-host-macos.sh aodcpicfepmdmpfaflncbndcicoemdje` to register the native messaging host.
-   - For Windows/Linux: generate or update the respective registration settings based on platform guides.
-3. Automatically load the generated Token from `~/.browser-agent-bridge.env` into the environment or credentials and proceed with client operations.
-This ensures a seamless, zero-manual-configuration experience for the user.
+   - For macOS/Linux: run `./scripts/install-native-host-unix.sh aodcpicfepmdmpfaflncbndcicoemdje` to register the native messaging host. Use `--browser chromium|brave|edge|all` when the user is not using Google Chrome.
+   - For Windows: run `powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 aodcpicfepmdmpfaflncbndcicoemdje`.
+3. Automatically load the generated token from `~/.browser-agent-bridge.env` on macOS/Linux or `%USERPROFILE%\.browser-agent-bridge.env` on Windows into the environment or credentials and proceed with client operations.
+4. Reload the unpacked extension in `chrome://extensions`, then open the extension side panel so Chrome starts the native host.
 
 ## Troubleshooting
 
@@ -75,12 +108,12 @@ If `/health` fails, the native host is not running. Native Messaging starts it o
 
 If `/health` works and `authRequired` is true, make sure the agent process has the same `BROWSER_AGENT_BRIDGE_TOKEN` as the native host.
 
-On macOS, the native wrapper loads `~/.browser-agent-bridge.env`. If token auth is enabled, the user's shell or agent process should source the same file before using `scripts/rpc.sh` or `scripts/ws-rpc.js`.
+On macOS/Linux, the native wrapper loads `~/.browser-agent-bridge.env`. On Windows, the batch wrapper loads `%USERPROFILE%\.browser-agent-bridge.env`. If token auth is enabled, the user's shell or agent process should load the same token before using `scripts/rpc.sh` or `scripts/ws-rpc.js`. The Python client auto-loads the default token file.
 
 If `/health` works but `extensionReady` is false:
 
 - Tell the user to load or reload the unpacked extension from the repo's `extension/` directory.
-- Tell the user to run `scripts/install-native-host-macos.sh <extension-id>` after copying the Chrome extension ID.
+- Tell the user to run the platform installer after copying the Chrome extension ID: `scripts/install-native-host-unix.sh <extension-id>` on macOS/Linux or `scripts/install-native-host-win.ps1 <extension-id>` on Windows.
 - Tell the user to reload the extension again after installing the native manifest.
 
 For a full setup check, run:
@@ -88,6 +121,8 @@ For a full setup check, run:
 ```bash
 scripts/doctor.py
 ```
+
+Doctor `package.freshness` warnings mean the release zip is older than the extension source files. This does not block local unpacked-extension development, but rebuild the release package before distributing.
 
 If doctor reports new tools as "not exposed", reload the unpacked extension in `chrome://extensions`.
 
@@ -169,7 +204,10 @@ From this project's root:
 - Extension: `extension/`
 - Native host: `native/host.py`
 - Native manifest template: `native/com.local.browser_agent_bridge.json`
-- macOS installer: `scripts/install-native-host-macos.sh`
+- macOS/Linux installer: `scripts/install-native-host-unix.sh`
+- Legacy macOS installer entrypoint: `scripts/install-native-host-macos.sh`
+- Windows installer: `scripts/install-native-host-win.ps1`
+- Windows launcher: `native/host-wrapper.win.bat`
 - RPC helper: `scripts/rpc.sh`
 - WebSocket helper: `scripts/ws-rpc.js`
 - Python client: `scripts/browser_bridge_client.py`

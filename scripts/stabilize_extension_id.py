@@ -66,7 +66,7 @@ def main():
 
     print("\nStep 5: Updating Native Messaging Manifest using installer...")
     try:
-        installer = ROOT / "scripts" / "install-native-host-macos.sh"
+        installer = ROOT / "scripts" / "install-native-host-unix.sh"
         subprocess.run([str(installer), ext_id], check=True)
     except Exception as e:
         print(f"Failed to run native host installer: {e}")

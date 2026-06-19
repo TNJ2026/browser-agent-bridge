@@ -15,15 +15,8 @@ from browser_bridge_client import BrowserBridgeClient, BrowserBridgeError
 ROOT = Path(__file__).resolve().parent.parent
 HOST_NAME = "com.local.browser_agent_bridge"
 DEFAULT_ZIP = ROOT / "dist" / "browser-agent-bridge-0.1.0.zip"
-MACOS_NATIVE_MANIFEST = (
-    Path.home()
-    / "Library"
-    / "Application Support"
-    / "Google"
-    / "Chrome"
-    / "NativeMessagingHosts"
-    / f"{HOST_NAME}.json"
-)
+NATIVE_MANIFEST_FILENAME = f"{HOST_NAME}.json"
+WINDOWS_REGISTRY_KEY = rf"Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}"
 
 
 def main(argv=None):
@@ -46,10 +39,14 @@ def main(argv=None):
         except Exception:
             pass
 
+    platform_name = current_platform()
+    native_manifest = find_native_manifest(platform_name)
     checks = []
     context = {
         "root": str(ROOT),
-        "nativeManifest": str(MACOS_NATIVE_MANIFEST),
+        "platform": platform_name,
+        "nativeManifest": str(native_manifest) if native_manifest else None,
+        "nativeManifestCandidates": [str(path) for path in native_manifest_candidates(platform_name)],
         "zip": str(DEFAULT_ZIP),
     }
 
@@ -71,9 +68,69 @@ def main(argv=None):
         for check in checks:
             print(f"[{check['status'].upper()}] {check['name']}: {check['message']}")
         print(f"\nroot: {ROOT}")
-        print(f"native manifest: {MACOS_NATIVE_MANIFEST}")
+        print(f"platform: {platform_name}")
+        print(f"native manifest: {context['nativeManifest'] or 'not found'}")
         print(f"zip: {DEFAULT_ZIP}")
     return 0 if status != "fail" else 1
+
+
+def current_platform():
+    if sys.platform == "darwin":
+        return "macos"
+    if sys.platform.startswith("linux"):
+        return "linux"
+    if sys.platform.startswith("win"):
+        return "windows"
+    return sys.platform
+
+
+def native_manifest_candidates(platform_name=None):
+    platform_name = platform_name or current_platform()
+    if platform_name == "macos":
+        base = Path.home() / "Library" / "Application Support"
+        return [
+            base / "Google" / "Chrome" / "NativeMessagingHosts" / NATIVE_MANIFEST_FILENAME,
+            base / "Chromium" / "NativeMessagingHosts" / NATIVE_MANIFEST_FILENAME,
+            base / "BraveSoftware" / "Brave-Browser" / "NativeMessagingHosts" / NATIVE_MANIFEST_FILENAME,
+            base / "Microsoft Edge" / "NativeMessagingHosts" / NATIVE_MANIFEST_FILENAME,
+        ]
+    if platform_name == "linux":
+        base = Path.home() / ".config"
+        return [
+            base / "google-chrome" / "NativeMessagingHosts" / NATIVE_MANIFEST_FILENAME,
+            base / "chromium" / "NativeMessagingHosts" / NATIVE_MANIFEST_FILENAME,
+            base / "BraveSoftware" / "Brave-Browser" / "NativeMessagingHosts" / NATIVE_MANIFEST_FILENAME,
+            base / "microsoft-edge" / "NativeMessagingHosts" / NATIVE_MANIFEST_FILENAME,
+        ]
+    if platform_name == "windows":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return [Path(local_app_data) / "Google" / "Chrome" / "NativeMessagingHosts" / NATIVE_MANIFEST_FILENAME]
+    return []
+
+
+def read_windows_manifest_from_registry():
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_REGISTRY_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, "")
+            return Path(value) if value else None
+    except Exception:
+        return None
+
+
+def find_native_manifest(platform_name=None):
+    platform_name = platform_name or current_platform()
+    if platform_name == "windows":
+        registry_manifest = read_windows_manifest_from_registry()
+        if registry_manifest:
+            return registry_manifest
+    for path in native_manifest_candidates(platform_name):
+        if path.exists():
+            return path
+    return None
 
 
 def check_repo_files(checks):
@@ -82,7 +139,9 @@ def check_repo_files(checks):
         "extension/service-worker.js",
         "native/host.py",
         "native/host-wrapper.macos.sh",
+        "native/host-wrapper.win.bat",
         "native/com.local.browser_agent_bridge.json",
+        "scripts/install-native-host-unix.sh",
         "scripts/rpc.sh",
         "scripts/ws-rpc.js",
         "scripts/browser_bridge_client.py",
@@ -113,24 +172,36 @@ def check_extension_manifest(checks):
 
 
 def check_native_manifest(checks):
-    if not MACOS_NATIVE_MANIFEST.exists():
-        add(checks, "native.manifest.installed", "warn", "Chrome native manifest is not installed")
+    platform_name = current_platform()
+    registry_manifest = read_windows_manifest_from_registry() if platform_name == "windows" else None
+    manifest_path = find_native_manifest(platform_name)
+    if not manifest_path:
+        candidates = ", ".join(str(path) for path in native_manifest_candidates(platform_name)) or "none"
+        add(checks, "native.manifest.installed", "warn", f"Chrome native manifest is not installed; checked {candidates}")
+        if platform_name == "windows":
+            add(checks, "native.manifest.registry", "warn", rf"HKCU:\{WINDOWS_REGISTRY_KEY} default value is not set")
         return
     try:
-        manifest = read_json(MACOS_NATIVE_MANIFEST)
+        manifest = read_json(manifest_path)
     except Exception as error:
         add(checks, "native.manifest.installed", "fail", str(error))
         return
+    add(checks, "native.manifest.installed", "pass", str(manifest_path))
+    if platform_name == "windows":
+        if registry_manifest:
+            add(checks, "native.manifest.registry", "pass", str(registry_manifest))
+        else:
+            add(checks, "native.manifest.registry", "warn", rf"HKCU:\{WINDOWS_REGISTRY_KEY} default value is not set")
     host_path = Path(manifest.get("path", ""))
     origins = manifest.get("allowed_origins", [])
     if manifest.get("name") != HOST_NAME:
         add(checks, "native.manifest.name", "fail", f"unexpected name {manifest.get('name')}")
     else:
         add(checks, "native.manifest.name", "pass", HOST_NAME)
-    if host_path.exists() and os.access(host_path, os.X_OK):
+    if host_path.exists() and is_host_path_runnable(host_path, platform_name):
         add(checks, "native.manifest.path", "pass", str(host_path))
     else:
-        add(checks, "native.manifest.path", "fail", f"path missing or not executable: {host_path}")
+        add(checks, "native.manifest.path", "fail", f"path missing or not runnable: {host_path}")
     if origins:
         add(checks, "native.manifest.origins", "pass", ", ".join(origins))
     else:
@@ -138,14 +209,18 @@ def check_native_manifest(checks):
 
 
 def check_wrapper(checks):
-    wrapper = ROOT / "native" / "host-wrapper.macos.sh"
+    platform_name = current_platform()
+    wrapper = ROOT / "native" / ("host-wrapper.win.bat" if platform_name == "windows" else "host-wrapper.macos.sh")
     if not wrapper.exists():
         add(checks, "native.wrapper", "fail", "missing wrapper")
         return
     text = wrapper.read_text(encoding="utf-8")
-    if ".browser-agent-bridge.env" in text and "native/host.py" in text and "BROWSER_AGENT_BRIDGE_EXTENSION_ID" in text:
+    launches_host = "host.py" in text
+    loads_env = ".browser-agent-bridge.env" in text
+    pins_extension = "BROWSER_AGENT_BRIDGE_EXTENSION_ID" in text
+    if loads_env and launches_host and pins_extension:
         add(checks, "native.wrapper", "pass", "loads env file, pins extension id, and launches host.py")
-    elif ".browser-agent-bridge.env" in text and "native/host.py" in text:
+    elif loads_env and launches_host:
         add(checks, "native.wrapper", "warn", "wrapper should be reinstalled to pin BROWSER_AGENT_BRIDGE_EXTENSION_ID")
     else:
         add(checks, "native.wrapper", "warn", "wrapper may not load token env file")
@@ -156,9 +231,12 @@ def check_env(checks):
     token = os.environ.get("BROWSER_AGENT_BRIDGE_TOKEN", "")
     env_token = ""
     if env_file.exists():
-        mode = env_file.stat().st_mode & 0o777
-        status = "pass" if mode & 0o077 == 0 else "warn"
-        add(checks, "auth.env_file", status, f"{env_file} mode {mode:o}")
+        if current_platform() == "windows":
+            add(checks, "auth.env_file", "pass", str(env_file))
+        else:
+            mode = env_file.stat().st_mode & 0o777
+            status = "pass" if mode & 0o077 == 0 else "warn"
+            add(checks, "auth.env_file", status, f"{env_file} mode {mode:o}")
         try:
             for line in env_file.read_text(encoding="utf-8").splitlines():
                 if line.startswith("BROWSER_AGENT_BRIDGE_TOKEN="):
@@ -202,6 +280,12 @@ def check_zip(checks):
         add(checks, "package.freshness", "warn", "extension files are newer than the zip")
     else:
         add(checks, "package.freshness", "pass", "zip is up to date with extension files")
+
+
+def is_host_path_runnable(path, platform_name):
+    if platform_name == "windows":
+        return path.suffix.lower() in (".bat", ".cmd", ".exe", ".ps1", ".py")
+    return os.access(path, os.X_OK)
 
 
 def check_live(checks, args):
