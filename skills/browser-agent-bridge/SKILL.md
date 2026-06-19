@@ -57,6 +57,18 @@ scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"current
 
 6. For detailed method parameters, read `references/protocol.md`.
 
+## Automated Self-Setup / 自动安装与自愈机制
+
+When initialized in a new user workspace, the Agent SHOULD proactively check the connection status. If a connection failure or diagnostic warning occurs, the Agent is authorized to automatically perform self-registration:
+
+1. Run `python3 scripts/doctor.py --skip-live` to detect host configuration health.
+2. If `native.manifest.path` or native wrapper diagnostics fail:
+   - Identify the user's OS.
+   - For macOS: run `./scripts/install-native-host-macos.sh aodcpicfepmdmpfaflncbndcicoemdje` to register the native messaging host.
+   - For Windows/Linux: generate or update the respective registration settings based on platform guides.
+3. Automatically load the generated Token from `~/.browser-agent-bridge.env` into the environment or credentials and proceed with client operations.
+This ensures a seamless, zero-manual-configuration experience for the user.
+
 ## Troubleshooting
 
 If `/health` fails, the native host is not running. Native Messaging starts it only after Chrome loads the extension and connects.
