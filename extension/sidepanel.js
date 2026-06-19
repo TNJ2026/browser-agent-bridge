@@ -4,28 +4,63 @@ const lastCheckedEl = document.querySelector('#last-checked');
 const errorEl = document.querySelector('#error');
 const bypassCspEl = document.querySelector('#bypass-csp');
 
+const disclaimerScreen = document.querySelector('#disclaimer-screen');
+const mainContent = document.querySelector('#main-content');
+const agreeBtn = document.querySelector('#agree-btn');
+const declineBtn = document.querySelector('#decline-btn');
+const declineWarning = document.querySelector('#decline-warning');
+
 document.querySelector('#refresh').addEventListener('click', refresh);
 
-// Load settings on open
-chrome.runtime.sendMessage({ type: 'GET_CSP_BYPASS' }).then(response => {
-  if (response && 'enabled' in response) {
-    bypassCspEl.checked = response.enabled;
+// Check user agreement status on load
+chrome.storage.local.get('agreedToDisclaimer').then(result => {
+  if (result.agreedToDisclaimer === true) {
+    disclaimerScreen.style.display = 'none';
+    mainContent.style.display = 'block';
+    initializePanel();
+  } else {
+    disclaimerScreen.style.display = 'flex';
+    mainContent.style.display = 'none';
   }
 });
 
-// Update settings when toggled
-bypassCspEl.addEventListener('change', async () => {
-  await chrome.runtime.sendMessage({
-    type: 'SET_CSP_BYPASS',
-    enabled: bypassCspEl.checked
+agreeBtn.addEventListener('click', async () => {
+  await chrome.storage.local.set({ agreedToDisclaimer: true });
+  disclaimerScreen.style.display = 'none';
+  mainContent.style.display = 'block';
+  initializePanel();
+});
+
+declineBtn.addEventListener('click', () => {
+  declineWarning.style.display = 'block';
+});
+
+let initialized = false;
+function initializePanel() {
+  if (initialized) return;
+  initialized = true;
+
+  // Load settings on open
+  chrome.runtime.sendMessage({ type: 'GET_CSP_BYPASS' }).then(response => {
+    if (response && 'enabled' in response) {
+      bypassCspEl.checked = response.enabled;
+    }
   });
-});
 
-chrome.runtime.onMessage.addListener(message => {
-  if (message?.type === 'NATIVE_STATUS_CHANGED') renderStatus(message.status);
-});
+  // Update settings when toggled
+  bypassCspEl.addEventListener('change', async () => {
+    await chrome.runtime.sendMessage({
+      type: 'SET_CSP_BYPASS',
+      enabled: bypassCspEl.checked
+    });
+  });
 
-refresh();
+  chrome.runtime.onMessage.addListener(message => {
+    if (message?.type === 'NATIVE_STATUS_CHANGED') renderStatus(message.status);
+  });
+
+  refresh();
+}
 
 async function refresh() {
   const response = await chrome.runtime.sendMessage({ type: 'GET_NATIVE_STATUS' });

@@ -176,3 +176,69 @@ pre {
   cursor: pointer;
   accent-color: var(--accent-color);
 }
+
+#disclaimer-screen {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.disclaimer-content {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--button-bg);
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+.disclaimer-content h3 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 14px 0 6px;
+}
+
+.disclaimer-content ul {
+  margin: 0 0 12px;
+  padding-left: 18px;
+}
+
+.disclaimer-content li {
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.disclaimer-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.disclaimer-actions button {
+  flex: 1;
+}
+
+.primary-btn {
+  background: var(--accent-color);
+  color: var(--bg-color);
+  border-color: var(--accent-color);
+  font-weight: 600;
+}
+
+.primary-btn:hover {
+  filter: brightness(0.95);
+  background: var(--accent-color);
+}
+
+.warning-box {
+  border: 1px solid var(--status-disconnected-border);
+  color: var(--status-disconnected-color);
+  background: var(--status-disconnected-bg);
+  padding: 10px;
+  border-radius: 6px;
+  font-weight: 500;
+  text-align: center;
+}
