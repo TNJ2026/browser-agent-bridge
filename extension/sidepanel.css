@@ -154,6 +154,15 @@ pre {
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
+.permission-params {
+  max-height: 80px;
+  margin: 4px 0 0;
+  padding: 4px;
+  font-size: 10px;
+  border-radius: 4px;
+  background: var(--button-hover);
+}
+
 .setting-item {
   display: flex;
   align-items: center;

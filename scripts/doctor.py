@@ -5,7 +5,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -207,26 +206,28 @@ def check_live(checks, args):
 
 
 def check_save_data_url(checks, client):
-    with tempfile.TemporaryDirectory(prefix="browser-agent-bridge-doctor-") as tmpdir:
-        try:
-            result = client.rpc(
-                "native.saveDataUrl",
-                {
-                    "dataUrl": "data:text/plain;base64,YnJvd3Nlci1hZ2VudC1icmlkZ2UK",
-                    "filename": "doctor.txt",
-                    "directory": tmpdir,
-                },
-                "doctor-save-data-url",
-                10000,
-            )
-        except BrowserBridgeError as error:
-            add(checks, "live.native.saveDataUrl", "fail", str(error))
-            return
-        path = Path(result.get("path", ""))
-        if path.exists() and path.read_text(encoding="utf-8") == "browser-agent-bridge\n":
+    try:
+        result = client.rpc(
+            "native.saveDataUrl",
+            {
+                "dataUrl": "data:text/plain;base64,YnJvd3Nlci1hZ2VudC1icmlkZ2UK",
+                "filename": f"doctor-{int(time.time())}.txt",
+            },
+            "doctor-save-data-url",
+            10000,
+        )
+    except BrowserBridgeError as error:
+        add(checks, "live.native.saveDataUrl", "fail", str(error))
+        return
+    path = Path(result.get("path", ""))
+    try:
+        content_matches = path.exists() and path.read_text(encoding="utf-8") == "browser-agent-bridge\n"
+        if content_matches:
             add(checks, "live.native.saveDataUrl", "pass", str(path))
         else:
             add(checks, "live.native.saveDataUrl", "fail", f"unexpected save result: {result}")
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def check_websocket(checks, args):

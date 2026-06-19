@@ -21,6 +21,7 @@ PORT = int(os.environ.get('BROWSER_AGENT_BRIDGE_PORT', 8765))
 HOST = os.environ.get('BROWSER_AGENT_BRIDGE_HOST', '127.0.0.1')
 AUTH_TOKEN = os.environ.get('BROWSER_AGENT_BRIDGE_TOKEN', '')
 SAVE_DIR = Path(os.environ.get('BROWSER_AGENT_BRIDGE_SAVE_DIR', str(Path.home() / 'Downloads' / 'browser-agent-bridge')))
+ALLOW_CUSTOM_SAVE_DIR = os.environ.get('BROWSER_AGENT_BRIDGE_ALLOW_CUSTOM_SAVE_DIR', '').lower() in ('1', 'true', 'yes')
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 DATA_URL_RE = re.compile(r'^data:([^;,]+)?(;base64)?,(.*)$', re.DOTALL)
 
@@ -301,6 +302,11 @@ def save_data_url(params):
 
     target_dir = SAVE_DIR
     if isinstance(params.get("directory"), str) and params["directory"].strip():
+        if not ALLOW_CUSTOM_SAVE_DIR:
+            raise ValueError(
+                "Custom save directories are disabled. Set "
+                "BROWSER_AGENT_BRIDGE_ALLOW_CUSTOM_SAVE_DIR=1 to enable them."
+            )
         target_dir = Path(params["directory"]).expanduser()
     target_dir.mkdir(parents=True, exist_ok=True)
     path = (target_dir / safe_name).resolve()

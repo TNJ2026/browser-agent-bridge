@@ -9,10 +9,11 @@ RELEASE_DIR="$DIST_DIR/$RELEASE_NAME"
 ZIP_PATH="$DIST_DIR/local-browser-agent-bridge-$VERSION.zip"
 
 mkdir -p "$DIST_DIR" "$RELEASE_DIR"
+rm -f "$ZIP_PATH"
 
 (
   cd "$ROOT_DIR/extension"
-  zip -r "$ZIP_PATH" . -x '*.DS_Store'
+  zip -r "$ZIP_PATH" . -x '*.DS_Store' '_metadata/*'
 )
 
 mkdir -p \

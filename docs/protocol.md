@@ -125,12 +125,13 @@ Enables or disables Content Security Policy (CSP) header stripping.
 ### `native.saveDataUrl`
 
 Native-host local method. Saves a data URL to disk and returns the file path. This is useful with `page.screenshot`.
+By default, files are written under `BROWSER_AGENT_BRIDGE_SAVE_DIR` or `~/Downloads/browser-agent-bridge`.
+The `directory` parameter is accepted only when the native host is started with `BROWSER_AGENT_BRIDGE_ALLOW_CUSTOM_SAVE_DIR=1`.
 
 ```json
 {
   "dataUrl": "data:image/png;base64,...",
-  "filename": "page.png",
-  "directory": "~/Downloads/browser-agent-bridge"
+  "filename": "page.png"
 }
 ```
 

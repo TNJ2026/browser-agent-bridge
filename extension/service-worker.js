@@ -1,6 +1,7 @@
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
 const DEFAULT_TIMEOUT_MS = 30000;
+const PERMISSION_PROMPT_TIMEOUT_MS = 60000;
 const SESSION_STORAGE_KEY = 'browserAgentBridgeSessions';
 const POLICY_STORAGE_KEY = 'browserAgentBridgePolicy';
 const RECORDINGS_STORAGE_KEY = 'browserAgentBridgeRecordings';
@@ -209,7 +210,6 @@ async function handleRuntimeMessage(message, sender) {
       const { promptId, response } = message;
       const pending = pendingPrompts.get(promptId);
       if (pending) {
-        pendingPrompts.delete(promptId);
         pending.resolve(response);
       }
       return { ok: true };
@@ -230,8 +230,9 @@ async function handleRpc(request) {
     throw new Error('Invalid JSON-RPC request');
   }
   await assertMethodAllowed(request.method);
-  await checkPermission(request.method, request.params || {});
   const params = request.params || {};
+  await assertOptionalPermissions(request.method, params);
+  await checkPermission(request.method, params);
   switch (request.method) {
     case 'permission.check':
       return { allowed: true };
@@ -1735,6 +1736,37 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function optionalPermissionsForMethod(method, params = {}) {
+  if (method === 'tabs.group') return ['tabs', 'tabGroups'];
+  if (method.startsWith('tabs.')) return ['tabs'];
+  if (method.startsWith('session.')) return ['tabs', 'tabGroups'];
+  if (method === 'downloads.list' || method === 'downloads.download') return ['downloads'];
+  if (method === 'recording.export' && params.download === true) return ['downloads'];
+  if (
+    method.startsWith('page.') ||
+    method.startsWith('dom.') ||
+    method.startsWith('computer.') ||
+    method === 'console.read' ||
+    method === 'network.read' ||
+    method === 'recording.start'
+  ) {
+    return ['tabs'];
+  }
+  return [];
+}
+
+async function assertOptionalPermissions(method, params = {}) {
+  const permissions = optionalPermissionsForMethod(method, params);
+  if (permissions.length === 0) return;
+  const granted = await chrome.permissions.contains({ permissions });
+  if (!granted) {
+    throw new Error(
+      `Missing Chrome optional permissions for ${method}: ${permissions.join(', ')}. ` +
+      'Open the side panel and grant permissions.'
+    );
+  }
+}
+
 function getMethodCategory(method) {
   if (method === 'tabs.list' || method === 'session.list' || method === 'session.get') {
     return 'read_tabs';
@@ -1796,7 +1828,19 @@ async function checkPermission(method, params) {
   // Prompt the user
   const promptId = nextPromptId++;
   const response = await new Promise((resolve) => {
-    pendingPrompts.set(promptId, { resolve, category, method });
+    let finished = false;
+    const finish = (value) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      pendingPrompts.delete(promptId);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      finish('timeout');
+    }, PERMISSION_PROMPT_TIMEOUT_MS);
+
+    pendingPrompts.set(promptId, { resolve: finish, category, method });
     chrome.runtime.sendMessage({
       type: 'PROMPT_PERMISSION',
       promptId,
@@ -1804,8 +1848,7 @@ async function checkPermission(method, params) {
       method,
       params
     }).catch(() => {
-      pendingPrompts.delete(promptId);
-      resolve('deny');
+      finish('deny');
     });
   });
 
@@ -1815,6 +1858,8 @@ async function checkPermission(method, params) {
     sessionPermissions[category] = 'allow';
     await chrome.storage.local.set({ sessionPermissions });
     return;
+  } else if (response === 'timeout') {
+    throw new Error(`Permission approval timed out after ${PERMISSION_PROMPT_TIMEOUT_MS / 1000}s: ${category}`);
   } else {
     sessionPermissions[category] = 'deny';
     await chrome.storage.local.set({ sessionPermissions });

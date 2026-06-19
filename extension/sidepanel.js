@@ -19,6 +19,7 @@ const mainContent = document.querySelector('#main-content');
 const agreeBtn = document.querySelector('#agree-btn');
 const declineBtn = document.querySelector('#decline-btn');
 const declineWarning = document.querySelector('#decline-warning');
+const REQUIRED_OPTIONAL_PERMISSIONS = ['tabs', 'tabGroups', 'downloads'];
 
 document.querySelector('#refresh').addEventListener('click', refresh);
 
@@ -35,14 +36,27 @@ chrome.storage.local.get('agreedToDisclaimer').then(result => {
 });
 
 agreeBtn.addEventListener('click', async () => {
+  declineWarning.style.display = 'none';
+  let granted = false;
   try {
-    await chrome.permissions.request({
-      permissions: ['tabs', 'tabGroups', 'downloads']
+    granted = await chrome.permissions.request({
+      permissions: REQUIRED_OPTIONAL_PERMISSIONS
     });
   } catch (e) {
     console.error('Failed to request optional permissions:', e);
+    declineWarning.textContent = 'Chrome permissions request failed. Please try again.';
+    declineWarning.style.display = 'block';
+    return;
   }
-  await chrome.storage.local.set({ agreedToDisclaimer: true });
+  if (!granted) {
+    declineWarning.textContent = 'Required Chrome permissions were not granted. The bridge cannot control tabs, tab groups, or downloads without them.';
+    declineWarning.style.display = 'block';
+    return;
+  }
+  await chrome.storage.local.set({
+    agreedToDisclaimer: true,
+    optionalPermissionsGranted: true
+  });
   disclaimerScreen.style.display = 'none';
   mainContent.style.display = 'block';
   initializePanel();
@@ -55,6 +69,16 @@ declineBtn.addEventListener('click', () => {
 let activePrompts = [];
 let currentPrompt = null;
 
+function appendLabeledValue(parent, label, value, valueTag = 'span') {
+  const strong = document.createElement('strong');
+  strong.textContent = label;
+  parent.appendChild(strong);
+  const valueEl = document.createElement(valueTag);
+  valueEl.textContent = value;
+  parent.appendChild(valueEl);
+  parent.appendChild(document.createElement('br'));
+}
+
 function showNextPrompt() {
   if (currentPrompt) return;
   if (activePrompts.length === 0) {
@@ -63,13 +87,25 @@ function showNextPrompt() {
   }
 
   currentPrompt = activePrompts.shift();
-  permissionDetails.innerHTML = `
-    <strong>Method/操作:</strong> <code>${currentPrompt.method}</code><br>
-    <strong>Description/说明:</strong><br>
-    中: ${currentPrompt.labels.zh}<br>
-    En: ${currentPrompt.labels.en}<br>
-    <strong>Params/参数:</strong> <pre style="font-size:10px; margin: 4px 0 0; max-height:80px; padding:4px; overflow:auto; background:var(--button-hover); border:1px solid var(--border-color); border-radius:4px;">${JSON.stringify(currentPrompt.params, null, 2)}</pre>
-  `;
+  permissionDetails.textContent = '';
+  appendLabeledValue(permissionDetails, 'Method/操作: ', currentPrompt.method, 'code');
+
+  const descriptionLabel = document.createElement('strong');
+  descriptionLabel.textContent = 'Description/说明:';
+  permissionDetails.appendChild(descriptionLabel);
+  permissionDetails.appendChild(document.createElement('br'));
+  permissionDetails.appendChild(document.createTextNode(`中: ${currentPrompt.labels.zh}`));
+  permissionDetails.appendChild(document.createElement('br'));
+  permissionDetails.appendChild(document.createTextNode(`En: ${currentPrompt.labels.en}`));
+  permissionDetails.appendChild(document.createElement('br'));
+
+  const paramsLabel = document.createElement('strong');
+  paramsLabel.textContent = 'Params/参数:';
+  permissionDetails.appendChild(paramsLabel);
+  const paramsPre = document.createElement('pre');
+  paramsPre.className = 'permission-params';
+  paramsPre.textContent = JSON.stringify(currentPrompt.params, null, 2);
+  permissionDetails.appendChild(paramsPre);
   permissionCard.style.display = 'block';
 }
 

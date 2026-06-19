@@ -110,9 +110,11 @@ Returns Native Messaging status from the extension.
 ### `native.saveDataUrl`
 
 Native-host local method. Saves a data URL to disk and returns the file path. Useful with `page.screenshot`.
+By default, files are written under `BROWSER_AGENT_BRIDGE_SAVE_DIR` or `~/Downloads/browser-agent-bridge`.
+The `directory` parameter requires the native host to start with `BROWSER_AGENT_BRIDGE_ALLOW_CUSTOM_SAVE_DIR=1`.
 
 ```json
-{"jsonrpc":"2.0","id":"save","method":"native.saveDataUrl","params":{"dataUrl":"data:image/png;base64,...","filename":"page.png","directory":"~/Downloads/browser-agent-bridge"}}
+{"jsonrpc":"2.0","id":"save","method":"native.saveDataUrl","params":{"dataUrl":"data:image/png;base64,...","filename":"page.png"}}
 ```
 
 ### `tabs.list`
