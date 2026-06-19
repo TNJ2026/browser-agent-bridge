@@ -62,5 +62,21 @@ class TestHostUtilities(unittest.TestCase):
             finally:
                 host.safe_filename = original_safe_filename
 
+    def test_origin_validation(self):
+        class Dummy:
+            pass
+        dummy = Dummy()
+        dummy.is_origin_allowed = host.RpcRequestHandler.is_origin_allowed.__get__(dummy)
+        
+        self.assertTrue(dummy.is_origin_allowed(None))
+        self.assertTrue(dummy.is_origin_allowed(""))
+        self.assertTrue(dummy.is_origin_allowed("http://localhost:3000"))
+        self.assertTrue(dummy.is_origin_allowed("http://localhost"))
+        self.assertTrue(dummy.is_origin_allowed("http://127.0.0.1:8000"))
+        self.assertTrue(dummy.is_origin_allowed("chrome-extension://aodcpicfepmdmpfaflncbndcicoemdje"))
+        
+        self.assertFalse(dummy.is_origin_allowed("https://example.com"))
+        self.assertFalse(dummy.is_origin_allowed("http://malicious.com:8765"))
+
 if __name__ == "__main__":
     unittest.main()

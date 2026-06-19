@@ -374,8 +374,25 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps({"error": "Unauthorized"}).encode('utf-8'))
 
+    def is_origin_allowed(self, origin):
+        if not origin:
+            return True
+        origin_lower = origin.lower()
+        if (origin_lower.startswith("http://localhost:") or origin_lower == "http://localhost" or
+            origin_lower.startswith("http://127.0.0.1:") or origin_lower == "http://127.0.0.1" or
+            origin_lower.startswith("chrome-extension://")):
+            return True
+        return False
+
     def set_cors_headers(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
+        origin = self.headers.get('Origin')
+        if origin and self.is_origin_allowed(origin):
+            self.send_header('Access-Control-Allow-Origin', origin)
+        else:
+            if origin:
+                self.send_header('Access-Control-Allow-Origin', 'null')
+            else:
+                self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Headers', 'authorization,content-type')
         self.send_header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
 
@@ -386,6 +403,11 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         global extension_ready, extension_version
+        origin = self.headers.get('Origin')
+        if not self.is_origin_allowed(origin):
+            self.send_json(403, {"error": "Forbidden: Origin not allowed"})
+            return
+
         if self.path == '/ws' and self.headers.get('Upgrade', '').lower() == 'websocket':
             if not is_authorized(self.headers):
                 self.send_unauthorized()
@@ -462,6 +484,11 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
             unregister_websocket(sock)
 
     def do_POST(self):
+        origin = self.headers.get('Origin')
+        if not self.is_origin_allowed(origin):
+            self.send_json(403, {"error": "Forbidden: Origin not allowed"})
+            return
+
         if self.path != '/rpc':
             self.send_json(404, {"error": "Not found"})
             return
