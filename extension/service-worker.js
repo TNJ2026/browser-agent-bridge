@@ -94,12 +94,25 @@ chrome.tabs.onRemoved.addListener(tabId => {
   }).catch(() => {});
 });
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.agreedToDisclaimer?.newValue === true) {
+    connectNative();
+  }
+});
+
 connectNative();
 initCspBypass().catch(err => console.error(err));
 
-function connectNative() {
+async function connectNative() {
   if (nativePort) return;
   clearTimeout(reconnectTimer);
+
+  const result = await chrome.storage.local.get('agreedToDisclaimer');
+  if (result.agreedToDisclaimer !== true) {
+    setNativeStatus('disconnected', 'Pending disclaimer agreement');
+    return;
+  }
+
   try {
     nativePort = chrome.runtime.connectNative(NATIVE_HOST);
   } catch (error) {
