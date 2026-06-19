@@ -147,8 +147,12 @@ async function connectNative() {
     scheduleReconnect();
   });
 
+  const portResult = await chrome.storage.local.get('bridgePort');
+  const port = Number.isInteger(portResult.bridgePort) ? portResult.bridgePort : 8765;
+
   sendNativeNotification('extension.ready', {
-    version: chrome.runtime.getManifest().version
+    version: chrome.runtime.getManifest().version,
+    port: port
   });
 }
 

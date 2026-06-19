@@ -131,6 +131,13 @@
             Bypass CSP (Content Security Policy)
           </label>
         </div>
+        <div class="setting-item port-settings">
+          <label for="bridge-port">Bridge Port:</label>
+          <div class="port-input-group">
+            <input type="number" id="bridge-port" min="1024" max="65535" value="8765">
+            <button id="save-port-btn">Save & Restart</button>
+          </div>
+        </div>
       </section>
     </main>
     <script type="module" src="sidepanel.js"></script>

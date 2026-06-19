@@ -242,3 +242,33 @@ pre {
   font-weight: 500;
   text-align: center;
 }
+
+.port-settings {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  border-top: 1px dashed var(--border-color);
+  padding-top: 12px;
+}
+
+.port-settings label {
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.port-input-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.port-input-group input[type="number"] {
+  flex: 1;
+  min-height: 30px;
+  border: 1px solid var(--button-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--text-color);
+  background: var(--button-bg);
+}

@@ -3,6 +3,8 @@ const hostNameEl = document.querySelector('#host-name');
 const lastCheckedEl = document.querySelector('#last-checked');
 const errorEl = document.querySelector('#error');
 const bypassCspEl = document.querySelector('#bypass-csp');
+const bridgePortEl = document.querySelector('#bridge-port');
+const savePortBtn = document.querySelector('#save-port-btn');
 
 const disclaimerScreen = document.querySelector('#disclaimer-screen');
 const mainContent = document.querySelector('#main-content');
@@ -47,12 +49,31 @@ function initializePanel() {
     }
   });
 
+  // Load bridge port on open
+  chrome.storage.local.get('bridgePort').then(response => {
+    if (response && 'bridgePort' in response) {
+      bridgePortEl.value = response.bridgePort;
+    } else {
+      bridgePortEl.value = 8765;
+    }
+  });
+
   // Update settings when toggled
   bypassCspEl.addEventListener('change', async () => {
     await chrome.runtime.sendMessage({
       type: 'SET_CSP_BYPASS',
       enabled: bypassCspEl.checked
     });
+  });
+
+  savePortBtn.addEventListener('click', async () => {
+    const port = parseInt(bridgePortEl.value, 10);
+    if (Number.isInteger(port) && port >= 1024 && port <= 65535) {
+      await chrome.storage.local.set({ bridgePort: port });
+      chrome.runtime.reload();
+    } else {
+      alert('Please enter a valid port number between 1024 and 65535.');
+    }
   });
 
   chrome.runtime.onMessage.addListener(message => {

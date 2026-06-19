@@ -29,6 +29,9 @@ extension_version = None
 next_rpc_id = 1
 rpc_id_lock = threading.Lock()
 
+config_ready = threading.Event()
+configured_port = PORT
+
 # Thread-safe collections
 pending_requests = {}  # msg_id -> {"event": threading.Event(), "response": None}
 pending_lock = threading.Lock()
@@ -57,12 +60,18 @@ def write_native_message(message):
         log(f"Failed to write native message: {e}")
 
 def handle_native_notification(message):
-    global extension_ready, extension_version
+    global extension_ready, extension_version, configured_port
     method = message.get("method")
     params = message.get("params", {})
     if method == "extension.ready":
         extension_ready = True
         extension_version = params.get("version")
+        if "port" in params:
+            try:
+                configured_port = int(params["port"])
+            except Exception:
+                pass
+        config_ready.set()
     
     event = {
             "id": str(uuid.uuid4()),
@@ -717,6 +726,12 @@ def main():
     reader_thread = threading.Thread(target=native_reader_loop, name="NativeReader")
     reader_thread.daemon = True
     reader_thread.start()
+
+    # Wait for the extension to send the config/port, or timeout after 3 seconds
+    config_received = config_ready.wait(timeout=3.0)
+    
+    global PORT
+    PORT = configured_port
 
     log(f"HTTP JSON-RPC listening on http://{HOST}:{PORT}/rpc")
     log(f"WebSocket JSON-RPC listening on ws://{HOST}:{PORT}/ws")
