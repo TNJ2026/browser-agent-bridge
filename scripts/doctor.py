@@ -14,7 +14,7 @@ from browser_bridge_client import BrowserBridgeClient, BrowserBridgeError
 
 ROOT = Path(__file__).resolve().parent.parent
 HOST_NAME = "com.local.browser_agent_bridge"
-DEFAULT_ZIP = ROOT / "dist" / "local-browser-agent-bridge-0.1.0.zip"
+DEFAULT_ZIP = ROOT / "dist" / "browser-agent-bridge-0.1.0.zip"
 MACOS_NATIVE_MANIFEST = (
     Path.home()
     / "Library"
@@ -27,7 +27,7 @@ MACOS_NATIVE_MANIFEST = (
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Diagnose the local Browser Agent Bridge setup.")
+    parser = argparse.ArgumentParser(description="Diagnose the Browser Agent Bridge setup.")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     parser.add_argument("--skip-live", action="store_true", help="Skip HTTP/WebSocket live checks.")
     parser.add_argument("--host", default=None)
@@ -143,8 +143,10 @@ def check_wrapper(checks):
         add(checks, "native.wrapper", "fail", "missing wrapper")
         return
     text = wrapper.read_text(encoding="utf-8")
-    if ".browser-agent-bridge.env" in text and "native/host.py" in text:
-        add(checks, "native.wrapper", "pass", "loads optional env file and launches host.py")
+    if ".browser-agent-bridge.env" in text and "native/host.py" in text and "BROWSER_AGENT_BRIDGE_EXTENSION_ID" in text:
+        add(checks, "native.wrapper", "pass", "loads env file, pins extension id, and launches host.py")
+    elif ".browser-agent-bridge.env" in text and "native/host.py" in text:
+        add(checks, "native.wrapper", "warn", "wrapper should be reinstalled to pin BROWSER_AGENT_BRIDGE_EXTENSION_ID")
     else:
         add(checks, "native.wrapper", "warn", "wrapper may not load token env file")
 
@@ -152,13 +154,30 @@ def check_wrapper(checks):
 def check_env(checks):
     env_file = Path(os.environ.get("BROWSER_AGENT_BRIDGE_ENV_FILE", Path.home() / ".browser-agent-bridge.env"))
     token = os.environ.get("BROWSER_AGENT_BRIDGE_TOKEN", "")
+    env_token = ""
     if env_file.exists():
         mode = env_file.stat().st_mode & 0o777
         status = "pass" if mode & 0o077 == 0 else "warn"
         add(checks, "auth.env_file", status, f"{env_file} mode {mode:o}")
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                if line.startswith("BROWSER_AGENT_BRIDGE_TOKEN="):
+                    env_token = line.split("=", 1)[1].strip("'\"")
+                    break
+        except OSError as error:
+            add(checks, "auth.env_file_read", "warn", str(error))
     else:
-        add(checks, "auth.env_file", "warn", f"{env_file} does not exist; token auth is optional")
-    add(checks, "auth.env_token", "pass" if token else "warn", "BROWSER_AGENT_BRIDGE_TOKEN is set" if token else "BROWSER_AGENT_BRIDGE_TOKEN is not set")
+        add(checks, "auth.env_file", "fail", f"{env_file} does not exist; token auth is required by default")
+
+    allow_no_auth = os.environ.get("BROWSER_AGENT_BRIDGE_ALLOW_NO_AUTH", "").lower() in ("1", "true", "yes")
+    has_token = bool(token or env_token)
+    if has_token:
+        source = "environment" if token else str(env_file)
+        add(checks, "auth.env_token", "pass", f"BROWSER_AGENT_BRIDGE_TOKEN is set in {source}")
+    elif allow_no_auth:
+        add(checks, "auth.env_token", "warn", "token missing but BROWSER_AGENT_BRIDGE_ALLOW_NO_AUTH is enabled")
+    else:
+        add(checks, "auth.env_token", "fail", "BROWSER_AGENT_BRIDGE_TOKEN is required")
 
 
 def check_zip(checks):

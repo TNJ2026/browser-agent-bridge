@@ -6,7 +6,7 @@ VERSION="$(jq -r '.version' "$ROOT_DIR/extension/manifest.json")"
 RELEASE_NAME="browser-agent-bridge-$VERSION"
 DIST_DIR="$ROOT_DIR/dist"
 RELEASE_DIR="$DIST_DIR/$RELEASE_NAME"
-ZIP_PATH="$DIST_DIR/local-browser-agent-bridge-$VERSION.zip"
+ZIP_PATH="$DIST_DIR/browser-agent-bridge-$VERSION.zip"
 
 mkdir -p "$DIST_DIR" "$RELEASE_DIR"
 rm -f "$ZIP_PATH"

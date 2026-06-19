@@ -2,6 +2,13 @@ const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
 const DEFAULT_TIMEOUT_MS = 30000;
 const PERMISSION_PROMPT_TIMEOUT_MS = 60000;
+const CSP_BYPASS_DYNAMIC_RULE_ID = 10001;
+const CSP_BYPASS_ALARM = 'clear-temporary-csp-bypass';
+const DEFAULT_CSP_BYPASS_TTL_MS = 60000;
+const DEFAULT_RECORDING_RETENTION_MS = 24 * 60 * 60 * 1000;
+const MAX_RECORDING_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_RECORDING_MAX_ACTIONS = 500;
+const MAX_RECORDING_MAX_ACTIONS = 5000;
 const SESSION_STORAGE_KEY = 'browserAgentBridgeSessions';
 const POLICY_STORAGE_KEY = 'browserAgentBridgePolicy';
 const RECORDINGS_STORAGE_KEY = 'browserAgentBridgeRecordings';
@@ -24,6 +31,8 @@ let recordingsLoaded = false;
 let nextPromptId = 1;
 const pendingPrompts = new Map();
 let recordingsSaveTimer = null;
+let cspBypassTimer = null;
+let activeCspBypass = null;
 const DEFAULT_POLICY = {
   blockedUrlPatterns: [
     'chrome://*',
@@ -58,6 +67,12 @@ chrome.commands.onCommand.addListener(async command => {
   if (tab?.id) await chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
 });
 
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === CSP_BYPASS_ALARM) {
+    clearTemporaryCspBypass().catch(err => console.error('Error clearing temporary CSP bypass:', err));
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleRuntimeMessage(message, sender).then(sendResponse, error => {
     sendResponse({ ok: false, error: errorMessage(error) });
@@ -86,6 +101,17 @@ chrome.debugger.onDetach.addListener(source => {
 chrome.tabs.onRemoved.addListener(tabId => {
   networkEventsByTab.delete(tabId);
   consoleEventsByTab.delete(tabId);
+  loadSessions().then(async sessions => {
+    let changed = false;
+    for (const session of Object.values(sessions)) {
+      if (!Array.isArray(session.tabIds) || !session.tabIds.includes(tabId)) continue;
+      session.tabIds = session.tabIds.filter(id => id !== tabId);
+      if (session.mainTabId === tabId) session.mainTabId = session.tabIds[0] || null;
+      session.updatedAt = new Date().toISOString();
+      changed = true;
+    }
+    if (changed) await saveSessions(sessions);
+  }).catch(() => {});
   ensureRecordingsLoaded().then(() => {
     let changed = false;
     for (const recording of recordings.values()) {
@@ -172,7 +198,6 @@ async function pushSettingsToNative() {
   const result = await chrome.storage.local.get(['enableRuntimeApproval']);
   sendNativeNotification('extension.settings', {
     allowReadTabs: true,
-    allowReadHistory: true,
     enableRuntimeApproval: result.enableRuntimeApproval !== false
   });
 }
@@ -199,11 +224,11 @@ async function handleRuntimeMessage(message, sender) {
       connectNative();
       return { ok: nativeStatus.state === 'connected', status: nativeStatus };
     case 'GET_CSP_BYPASS':
-      return { ok: true, enabled: (await chrome.storage.local.get('bypassCSP')).bypassCSP !== false };
+      return { ok: true, ...(await extensionGetCspBypass()) };
     case 'SET_CSP_BYPASS': {
       const bypass = message.enabled !== false;
       await chrome.storage.local.set({ bypassCSP: bypass });
-      await updateCspRuleset(bypass);
+      if (!bypass) await clearTemporaryCspBypass();
       return { ok: true };
     }
     case 'PERMISSION_RESPONSE': {
@@ -260,6 +285,12 @@ async function handleRpc(request) {
       return sessionList();
     case 'session.get':
       return sessionGet(params);
+    case 'session.createTab':
+      return sessionCreateTab(params);
+    case 'session.addTab':
+      return sessionAddTab(params);
+    case 'session.closeTab':
+      return sessionCloseTab(params);
     case 'session.stop':
       return sessionStop(params);
     case 'page.navigate':
@@ -352,6 +383,9 @@ async function extensionInfo() {
       'session.start',
       'session.list',
       'session.get',
+      'session.createTab',
+      'session.addTab',
+      'session.closeTab',
       'session.stop',
       'page.navigate',
       'page.waitForLoad',
@@ -394,28 +428,127 @@ async function initCspBypass() {
   const result = await chrome.storage.local.get('bypassCSP');
   let bypass = result.bypassCSP;
   if (bypass === undefined) {
-    bypass = true;
-    await chrome.storage.local.set({ bypassCSP: true });
+    bypass = false;
+    await chrome.storage.local.set({ bypassCSP: false });
   }
-  await updateCspRuleset(bypass);
+  await disableStaticCspRuleset();
+  await clearTemporaryCspBypass();
 }
 
-async function updateCspRuleset(enabled) {
+async function disableStaticCspRuleset() {
   const rulesetId = 'ruleset_1';
-  if (enabled) {
-    await chrome.declarativeNetRequest.updateEnabledRulesets({
-      enableRulesetIds: [rulesetId]
-    }).catch(err => console.error('Error enabling CSP ruleset:', err));
-  } else {
-    await chrome.declarativeNetRequest.updateEnabledRulesets({
-      disableRulesetIds: [rulesetId]
-    }).catch(err => console.error('Error disabling CSP ruleset:', err));
-  }
+  await chrome.declarativeNetRequest.updateEnabledRulesets({
+    disableRulesetIds: [rulesetId]
+  }).catch(() => {});
 }
 
 async function extensionGetCspBypass() {
   const result = await chrome.storage.local.get('bypassCSP');
-  return { enabled: result.bypassCSP !== false };
+  const activeResult = await chrome.storage.local.get('cspBypassActive');
+  return {
+    enabled: result.bypassCSP === true,
+    mode: 'temporary-origin',
+    active: activeCspBypass || activeResult.cspBypassActive || null
+  };
+}
+
+function cspBypassResponseHeaders() {
+  return [
+    { header: 'content-security-policy', operation: 'remove' },
+    { header: 'content-security-policy-report-only', operation: 'remove' },
+    { header: 'x-webkit-csp', operation: 'remove' },
+    { header: 'x-content-security-policy', operation: 'remove' }
+  ];
+}
+
+function cspBypassResourceTypes() {
+  return [
+    'main_frame',
+    'sub_frame',
+    'stylesheet',
+    'script',
+    'image',
+    'font',
+    'object',
+    'xmlhttprequest',
+    'ping',
+    'csp_report',
+    'media',
+    'websocket',
+    'other'
+  ];
+}
+
+function cspBypassUrlFilter(origin) {
+  return `|${origin}/*`;
+}
+
+function normalizeCspBypassTtl(value) {
+  if (!Number.isFinite(value)) return DEFAULT_CSP_BYPASS_TTL_MS;
+  return Math.max(1000, Math.min(Math.trunc(value), 5 * 60 * 1000));
+}
+
+async function maybeEnableTemporaryCspBypass(tabId, params = {}) {
+  const tab = await chrome.tabs.get(tabId);
+  return maybeEnableTemporaryCspBypassForUrl(tab.url || '', params);
+}
+
+async function maybeEnableTemporaryCspBypassForUrl(urlString, params = {}) {
+  const result = await chrome.storage.local.get('bypassCSP');
+  if (result.bypassCSP !== true || params.bypassCSP === false) return null;
+
+  let url;
+  try {
+    url = new URL(urlString);
+  } catch (e) {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return null;
+  }
+
+  const ttlMs = normalizeCspBypassTtl(params.cspBypassTtlMs);
+  const expiresAt = Date.now() + ttlMs;
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [CSP_BYPASS_DYNAMIC_RULE_ID],
+    addRules: [{
+      id: CSP_BYPASS_DYNAMIC_RULE_ID,
+      priority: 1,
+      action: {
+        type: 'modifyHeaders',
+        responseHeaders: cspBypassResponseHeaders()
+      },
+      condition: {
+        urlFilter: cspBypassUrlFilter(url.origin),
+        resourceTypes: cspBypassResourceTypes()
+      }
+    }]
+  });
+
+  activeCspBypass = {
+    origin: url.origin,
+    ruleId: CSP_BYPASS_DYNAMIC_RULE_ID,
+    expiresAt,
+    ttlMs
+  };
+  await chrome.storage.local.set({ cspBypassActive: activeCspBypass });
+  clearTimeout(cspBypassTimer);
+  cspBypassTimer = setTimeout(() => {
+    clearTemporaryCspBypass().catch(err => console.error('Error clearing temporary CSP bypass:', err));
+  }, ttlMs);
+  await chrome.alarms.create(CSP_BYPASS_ALARM, { when: expiresAt });
+  return activeCspBypass;
+}
+
+async function clearTemporaryCspBypass() {
+  clearTimeout(cspBypassTimer);
+  cspBypassTimer = null;
+  activeCspBypass = null;
+  await chrome.storage.local.remove('cspBypassActive').catch(() => {});
+  await chrome.alarms.clear(CSP_BYPASS_ALARM).catch(() => {});
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [CSP_BYPASS_DYNAMIC_RULE_ID]
+  }).catch(err => console.error('Error removing temporary CSP bypass rule:', err));
 }
 
 async function extensionReload() {
@@ -444,6 +577,7 @@ async function tabsList(params) {
 async function tabsCreate(params) {
   assertString(params.url, 'url');
   await assertUrlAllowed(params.url, 'tabs.create');
+  await maybeEnableTemporaryCspBypassForUrl(params.url, params);
   const tab = await chrome.tabs.create({
     url: params.url,
     active: params.active !== false,
@@ -452,12 +586,12 @@ async function tabsCreate(params) {
   
   if (typeof tab.id === 'number') {
     try {
-      const groups = await chrome.tabGroups.query({ title: 'Agent', windowId: tab.windowId });
+      const groups = await chrome.tabGroups.query({ title: '🤖 Agent', windowId: tab.windowId });
       if (groups.length > 0) {
         await chrome.tabs.group({ tabIds: [tab.id], groupId: groups[0].id });
       } else {
         const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-        await chrome.tabGroups.update(groupId, { title: 'Agent', color: 'cyan' });
+        await chrome.tabGroups.update(groupId, { title: '🤖 Agent', color: 'cyan' });
       }
     } catch (e) {
       console.warn('Failed to auto-group agent tab:', e);
@@ -497,20 +631,35 @@ async function tabsGroup(params) {
 }
 
 async function sessionStart(params) {
-  const name = typeof params.name === 'string' && params.name.trim() ? params.name.trim() : 'Agent';
+  let name = typeof params.name === 'string' && params.name.trim() ? params.name.trim() : 'Agent';
+  if (!name.startsWith('🤖')) {
+    name = `🤖 ${name}`;
+  }
   const url = typeof params.url === 'string' && params.url ? params.url : 'about:blank';
   if (url !== 'about:blank') await assertUrlAllowed(url, 'session.start');
+  if (url !== 'about:blank') await maybeEnableTemporaryCspBypassForUrl(url, params);
   const tab = await chrome.tabs.create({
     url,
     active: params.active !== false,
     ...(typeof params.windowId === 'number' ? { windowId: params.windowId } : {})
   });
   if (typeof tab.id !== 'number') throw new Error('Created tab has no id');
-  const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-  await chrome.tabGroups.update(groupId, {
-    title: name,
-    color: params.color || 'cyan'
-  }).catch(() => {});
+  
+  let groupId = null;
+  if (chrome.tabs.group) {
+    try {
+      groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+      if (chrome.tabGroups && typeof groupId === 'number') {
+        await chrome.tabGroups.update(groupId, {
+          title: name,
+          color: params.color || 'cyan'
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('Failed to group session tab:', e);
+    }
+  }
+
   const session = {
     id: crypto.randomUUID(),
     name,
@@ -541,6 +690,89 @@ async function sessionGet(params) {
   return { session, tabs };
 }
 
+function uniqueTabIds(tabIds) {
+  return Array.from(new Set(tabIds.filter(Number.isInteger)));
+}
+
+async function sessionCreateTab(params) {
+  const session = await requireSession(params.sessionId);
+  let windowId = undefined;
+  if (typeof session.groupId === 'number' && chrome.tabGroups) {
+    try {
+      const group = await chrome.tabGroups.get(session.groupId);
+      if (group) windowId = group.windowId;
+    } catch (e) {
+      console.warn('Failed to get session tab group:', e);
+    }
+  }
+  const url = typeof params.url === 'string' && params.url ? params.url : 'about:blank';
+  if (url !== 'about:blank') await assertUrlAllowed(url, 'session.createTab');
+  if (url !== 'about:blank') await maybeEnableTemporaryCspBypassForUrl(url, params);
+  const tab = await chrome.tabs.create({
+    url,
+    active: params.active !== false,
+    ...(windowId !== undefined ? { windowId } : {})
+  });
+  if (typeof tab.id !== 'number') throw new Error('Created tab has no id');
+  if (typeof session.groupId === 'number' && chrome.tabs.group) {
+    await chrome.tabs.group({ tabIds: [tab.id], groupId: session.groupId }).catch(e => {
+      console.warn('Failed to add created tab to session group:', e);
+    });
+  }
+  const sessions = await loadSessions();
+  const storedSession = sessions[session.id];
+  storedSession.tabIds = uniqueTabIds([...(storedSession.tabIds || []), tab.id]);
+  storedSession.updatedAt = new Date().toISOString();
+  await saveSessions(sessions);
+  return { session: storedSession, tab: normalizeTab(await chrome.tabs.get(tab.id)) };
+}
+
+async function sessionAddTab(params) {
+  const session = await requireSession(params.sessionId);
+  const tabId = assertTabId(params.tabId);
+  await assertTabAllowed(tabId, 'session.addTab');
+  const tab = await chrome.tabs.get(tabId);
+  if (typeof session.groupId === 'number' && chrome.tabGroups) {
+    try {
+      const group = await chrome.tabGroups.get(session.groupId);
+      if (group && tab.windowId !== group.windowId) {
+        throw new Error(`Tab ${tabId} is in a different window from session ${session.id}`);
+      }
+    } catch (e) {
+      console.warn('Failed to check session tab group window:', e);
+    }
+  }
+  if (typeof session.groupId === 'number' && chrome.tabs.group) {
+    await chrome.tabs.group({ tabIds: [tabId], groupId: session.groupId }).catch(e => {
+      console.warn('Failed to add tab to session group:', e);
+    });
+  }
+  const sessions = await loadSessions();
+  const storedSession = sessions[session.id];
+  storedSession.tabIds = uniqueTabIds([...(storedSession.tabIds || []), tabId]);
+  storedSession.updatedAt = new Date().toISOString();
+  await saveSessions(sessions);
+  return { session: storedSession, tab: normalizeTab(await chrome.tabs.get(tabId)) };
+}
+
+async function sessionCloseTab(params) {
+  const session = await requireSession(params.sessionId);
+  const tabId = assertTabId(params.tabId);
+  if (!Array.isArray(session.tabIds) || !session.tabIds.includes(tabId)) {
+    throw new Error(`Tab ${tabId} is not part of session ${session.id}`);
+  }
+  const sessions = await loadSessions();
+  const storedSession = sessions[session.id];
+  storedSession.tabIds = (storedSession.tabIds || []).filter(id => id !== tabId);
+  storedSession.updatedAt = new Date().toISOString();
+  if (storedSession.mainTabId === tabId) {
+    storedSession.mainTabId = storedSession.tabIds[0] || null;
+  }
+  await saveSessions(sessions);
+  await chrome.tabs.remove(tabId);
+  return { session: storedSession, closed: tabId };
+}
+
 async function sessionStop(params) {
   const session = await requireSession(params.sessionId);
   if (params.closeTabs === true && Array.isArray(session.tabIds) && session.tabIds.length > 0) {
@@ -558,6 +790,7 @@ async function pageNavigate(params) {
   const tabId = assertTabId(params.tabId);
   assertString(params.url, 'url');
   await assertUrlAllowed(params.url, 'page.navigate');
+  await maybeEnableTemporaryCspBypassForUrl(params.url, params);
   await recordAction(tabId, 'navigate.start', { url: params.url });
   const tab = await chrome.tabs.update(tabId, { url: params.url });
   if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
@@ -757,6 +990,7 @@ async function pageScreenshot(params) {
 async function pageExecuteJavaScript(params) {
   const tabId = assertTabId(params.tabId);
   await assertTabAllowed(tabId, 'page.executeJavaScript');
+  await maybeEnableTemporaryCspBypass(tabId, params);
   assertString(params.script, 'script');
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
@@ -1265,10 +1499,14 @@ async function downloadsList(params) {
 
 async function recordingStart(params) {
   await ensureRecordingsLoaded();
+  await pruneExpiredRecordings();
   const tabId = params.tabId == null ? null : assertTabId(params.tabId);
   const hasExplicitGroup = typeof params.groupId === 'number';
   const groupId = hasExplicitGroup ? params.groupId : tabId == null ? null : (await chrome.tabs.get(tabId)).groupId;
   if (tabId == null && groupId == null) throw new Error('recording.start requires tabId or groupId');
+  const retentionMs = normalizeRecordingRetention(params.retentionMs);
+  const maxActions = normalizeRecordingMaxActions(params.maxActions);
+  const now = Date.now();
   const recording = {
     id: crypto.randomUUID(),
     name: typeof params.name === 'string' && params.name.trim() ? params.name.trim() : 'Recording',
@@ -1276,8 +1514,12 @@ async function recordingStart(params) {
     tabId,
     groupId,
     captureScreenshots: params.captureScreenshots === true,
+    includeText: params.includeText === true,
+    maxActions,
+    retentionMs,
+    expiresAt: new Date(now + retentionMs).toISOString(),
     isRecording: true,
-    startedAt: new Date().toISOString(),
+    startedAt: new Date(now).toISOString(),
     stoppedAt: null,
     actions: []
   };
@@ -1291,6 +1533,7 @@ async function recordingStart(params) {
 
 async function recordingStop(params) {
   await ensureRecordingsLoaded();
+  await pruneExpiredRecordings();
   const recording = requireRecording(params.recordingId);
   recording.isRecording = false;
   recording.stoppedAt = new Date().toISOString();
@@ -1300,6 +1543,7 @@ async function recordingStop(params) {
 
 async function recordingStatus(params) {
   await ensureRecordingsLoaded();
+  await pruneExpiredRecordings();
   if (params.recordingId) {
     return { recording: summarizeRecording(requireRecording(params.recordingId)) };
   }
@@ -1308,6 +1552,7 @@ async function recordingStatus(params) {
 
 async function recordingExport(params) {
   await ensureRecordingsLoaded();
+  await pruneExpiredRecordings();
   const recording = requireRecording(params.recordingId);
   const payload = {
     schemaVersion: 1,
@@ -1325,6 +1570,7 @@ async function recordingExport(params) {
 
 async function recordingClear(params) {
   await ensureRecordingsLoaded();
+  await pruneExpiredRecordings();
   if (params.recordingId) {
     recordings.delete(params.recordingId);
     await saveRecordingsNow();
@@ -1510,7 +1756,7 @@ async function loadPolicy() {
 
 async function assertMethodAllowed(method) {
 
-  const alwaysAllowed = new Set(['extension.info', 'native.status', 'policy.get', 'policy.set', 'policy.checkUrl', 'permission.check']);
+  const alwaysAllowed = new Set(['extension.info', 'native.status', 'policy.get', 'policy.checkUrl', 'permission.check']);
   if (alwaysAllowed.has(method)) return;
   const policy = await loadPolicy();
   if (!isMethodAllowedByPolicy(method, policy)) {
@@ -1551,7 +1797,7 @@ async function recordAction(tabId, type, input = {}, result, forcedRecordingId) 
       type,
       timestamp: new Date().toISOString(),
       tab: normalizeTab(tab),
-      input,
+      input: sanitizeRecordingInput(input, recording),
       ...(result !== undefined ? { result: compactResult(result) } : {})
     };
     if (recording.captureScreenshots && tab.url && isUrlAllowedByPolicy(tab.url, await loadPolicy())) {
@@ -1562,6 +1808,12 @@ async function recordAction(tabId, type, input = {}, result, forcedRecordingId) 
       }
     }
     recording.actions.push(action);
+    if (recording.actions.length > recording.maxActions) {
+      recording.actions.splice(0, recording.actions.length - recording.maxActions);
+      recording.actions.forEach((item, index) => {
+        item.index = index;
+      });
+    }
     recording.updatedAt = new Date().toISOString();
   }
   if (matching.length > 0) scheduleRecordingsSave();
@@ -1590,15 +1842,30 @@ async function ensureRecordingsLoaded() {
   const result = await chrome.storage.local.get(RECORDINGS_STORAGE_KEY);
   recordings.clear();
   const stored = result[RECORDINGS_STORAGE_KEY];
+  let pruned = false;
   if (Array.isArray(stored)) {
     for (const recording of stored) {
-      if (recording && typeof recording.id === 'string') recordings.set(recording.id, normalizeRecording(recording));
+      if (!recording || typeof recording.id !== 'string') continue;
+      const normalized = normalizeRecording(recording);
+      if (isRecordingExpired(normalized)) {
+        pruned = true;
+        continue;
+      }
+      recordings.set(normalized.id, normalized);
     }
   }
   recordingsLoaded = true;
+  if (pruned) await saveRecordingsNow();
 }
 
 function normalizeRecording(recording) {
+  const startedAtTimestamp = Date.parse(recording.startedAt);
+  const startedAt = Number.isFinite(startedAtTimestamp) ? recording.startedAt : new Date().toISOString();
+  const startedAtMs = Date.parse(startedAt);
+  const retentionMs = normalizeRecordingRetention(recording.retentionMs);
+  const expiresAt = Number.isFinite(Date.parse(recording.expiresAt))
+    ? recording.expiresAt
+    : new Date(startedAtMs + retentionMs).toISOString();
   return {
     id: recording.id,
     name: typeof recording.name === 'string' ? recording.name : 'Recording',
@@ -1606,12 +1873,42 @@ function normalizeRecording(recording) {
     tabId: Number.isInteger(recording.tabId) ? recording.tabId : null,
     groupId: typeof recording.groupId === 'number' ? recording.groupId : null,
     captureScreenshots: recording.captureScreenshots === true,
+    includeText: recording.includeText === true,
+    maxActions: normalizeRecordingMaxActions(recording.maxActions),
+    retentionMs,
+    expiresAt,
     isRecording: recording.isRecording === true,
-    startedAt: typeof recording.startedAt === 'string' ? recording.startedAt : new Date().toISOString(),
+    startedAt,
     stoppedAt: typeof recording.stoppedAt === 'string' ? recording.stoppedAt : null,
     updatedAt: typeof recording.updatedAt === 'string' ? recording.updatedAt : null,
     actions: Array.isArray(recording.actions) ? recording.actions : []
   };
+}
+
+function normalizeRecordingRetention(value) {
+  if (!Number.isFinite(value)) return DEFAULT_RECORDING_RETENTION_MS;
+  return Math.max(60 * 1000, Math.min(Math.trunc(value), MAX_RECORDING_RETENTION_MS));
+}
+
+function normalizeRecordingMaxActions(value) {
+  if (!Number.isInteger(value)) return DEFAULT_RECORDING_MAX_ACTIONS;
+  return Math.max(1, Math.min(value, MAX_RECORDING_MAX_ACTIONS));
+}
+
+function isRecordingExpired(recording) {
+  return typeof recording.expiresAt === 'string' && Date.parse(recording.expiresAt) <= Date.now();
+}
+
+function pruneExpiredRecordingsSync() {
+  for (const [id, recording] of recordings.entries()) {
+    if (isRecordingExpired(recording)) recordings.delete(id);
+  }
+}
+
+async function pruneExpiredRecordings() {
+  const before = recordings.size;
+  pruneExpiredRecordingsSync();
+  if (recordings.size !== before) await saveRecordingsNow();
 }
 
 function scheduleRecordingsSave() {
@@ -1624,6 +1921,7 @@ function scheduleRecordingsSave() {
 async function saveRecordingsNow() {
   clearTimeout(recordingsSaveTimer);
   recordingsSaveTimer = null;
+  pruneExpiredRecordingsSync();
   await chrome.storage.local.set({
     [RECORDINGS_STORAGE_KEY]: Array.from(recordings.values())
   });
@@ -1637,12 +1935,33 @@ function summarizeRecording(recording) {
     tabId: recording.tabId,
     groupId: recording.groupId,
     captureScreenshots: recording.captureScreenshots,
+    includeText: recording.includeText,
+    maxActions: recording.maxActions,
+    retentionMs: recording.retentionMs,
     isRecording: recording.isRecording,
     startedAt: recording.startedAt,
     stoppedAt: recording.stoppedAt,
+    expiresAt: recording.expiresAt,
     updatedAt: recording.updatedAt,
     actionCount: recording.actions.length
   };
+}
+
+function sanitizeRecordingInput(input, recording) {
+  if (!input || typeof input !== 'object') return input;
+  const sanitized = {};
+  for (const [key, value] of Object.entries(input)) {
+    if ((key === 'text' || key === 'value' || key === 'key') && typeof value === 'string' && !recording.includeText) {
+      sanitized[key] = {
+        redacted: true,
+        length: value.length,
+        empty: value.length === 0
+      };
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
 }
 
 function compactResult(result) {
@@ -1771,9 +2090,6 @@ function getMethodCategory(method) {
   if (method === 'tabs.list' || method === 'session.list' || method === 'session.get') {
     return 'read_tabs';
   }
-  if (method === 'history.search' || method === 'bookmarks.search') {
-    return 'read_history';
-  }
   if (method === 'downloads.list' || method === 'downloads.download') {
     return 'read_downloads';
   }
@@ -1782,6 +2098,9 @@ function getMethodCategory(method) {
   }
   if (method === 'console.read' || method === 'network.read') {
     return 'page_logs';
+  }
+  if (method === 'policy.set') {
+    return 'policy_admin';
   }
   return null;
 }

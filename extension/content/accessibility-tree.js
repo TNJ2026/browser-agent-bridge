@@ -29,7 +29,6 @@
     function isElementVisible(el, rect, style) {
       if (rect.width <= 0 || rect.height <= 0) return false;
       if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-      if (rect.bottom < -200 || rect.right < -200) return false;
       return true;
     }
 

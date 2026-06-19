@@ -101,7 +101,7 @@ def parse_json(value, label):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Client for the local Browser Agent Bridge.")
+    parser = argparse.ArgumentParser(description="Client for the Browser Agent Bridge.")
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--token", default=None)

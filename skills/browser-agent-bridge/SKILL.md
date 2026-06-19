@@ -1,11 +1,11 @@
 ---
 name: browser-agent-bridge
-description: Use the local Chrome Native Messaging browser-control bridge extension from an agent. Trigger when a user asks Codex/agent to inspect or control Chrome through the locally built Browser Agent Bridge, call browser tools exposed at http://127.0.0.1:8765/rpc or ws://127.0.0.1:8765/ws, verify the bridge/native host connection, troubleshoot the extension connection, or automate Chrome tabs/pages without embedding an LLM client in the extension.
+description: Use the Chrome Native Messaging browser-control bridge extension (Browser Agent Bridge) from an agent. Trigger when a user asks Codex/agent to inspect or control Chrome through the locally built Browser Agent Bridge, call browser tools exposed at http://127.0.0.1:8765/rpc or ws://127.0.0.1:8765/ws, verify the bridge/native host connection, troubleshoot the extension connection, or automate Chrome tabs/pages without embedding an LLM client in the extension.
 ---
 
 # Browser Agent Bridge
 
-Use the local Browser Agent Bridge extension as a browser tool runtime. The extension contains no agent; an agent calls the native host HTTP or WebSocket endpoint, which forwards JSON-RPC over Native Messaging to Chrome.
+Use the Browser Agent Bridge extension as a browser tool runtime. The extension contains no agent; an agent calls the native host HTTP or WebSocket endpoint, which forwards JSON-RPC over Native Messaging to Chrome.
 
 ```text
 Agent -> 127.0.0.1:8765 /rpc or /ws -> native/host.py -> Chrome extension -> Chrome APIs/CDP
@@ -90,15 +90,15 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 ## Operating Rules
 
 - Do not use this skill for public web research; this bridge controls the user's local Chrome.
-- Page CSP (Content Security Policy) response headers are automatically stripped by the extension (`declarativeNetRequest`) by default, allowing you to run custom scripts (`page.executeJavaScript`) on any domain. You can check the current toggle state using `extension.getCspBypass`. It can only be changed by the user in the sidepanel UI.
-- **Bookmarks & History Search**: When asked to locate internal pages or pages the user previously visited, call `history.search` or `bookmarks.search` JSON-RPC methods. This queries the local browser profile databases directly and resolves URLs without querying the public internet.
-- **Runtime Permission Approval**: By default, sensitive operations (tab list/session state, history/bookmarks search, downloads records, screenshots/DOM snapshots, console/network logs) are intercepted by the extension and prompt the user in the sidepanel UI for approval (Allow once, Always for session, or Deny).
+- Page CSP (Content Security Policy) response headers are not stripped globally. If the user enables temporary CSP bypass in the sidepanel, `tabs.create`, `session.start`, `page.navigate`, and `page.executeJavaScript` may add a short-lived dynamic rule for the target origin only. Check the current state with `extension.getCspBypass`; the toggle can only be changed by the user in the sidepanel UI. Pass `bypassCSP:false` to opt out for a call.
+- Browser history and bookmark search are intentionally not supported; ask the user for a URL or use currently open tabs instead.
+- **Runtime Permission Approval**: By default, sensitive operations (tab list/session state, downloads records, screenshots/DOM snapshots, console/network logs, and `policy.set`) are intercepted by the extension and prompt the user in the sidepanel UI for approval (Allow once, Always for session, or Deny).
   - If the sidepanel is closed when making a sensitive call, the request fails with a `BrowserBridgeError`. If this happens, **explicitly ask the user to open the sidepanel** so they can approve the request.
   - If the user denies the request, the call will fail. Respect this choice and do not retry repeatedly; instead, explain the limitation to the user or ask for the information directly.
 - **Domain Experience Accumulation**: Before automating a website, check the `skills/browser-agent-bridge/references/site-patterns/` folder. If a `{domain}.md` exists, read it for selector tricks, known traps, or navigation flows. If you find new selector paths or bypasses during execution, document them in a `{domain}.md` file in that folder to help future sessions.
 - Do not execute high-risk actions such as purchases, sending messages, deleting data, changing account settings, or submitting sensitive forms unless the user explicitly asked for that exact action.
 - Prefer read-only methods first: `tabs.list`, `page.readText`, `page.accessibilityTree` (which prunes intermediate layout containers and consolidates element child texts), `page.screenshot`.
-- Prefer `session.start` for multi-step tasks that should stay isolated in a Chrome tab group.
+- Prefer `session.start` for multi-step tasks that should stay isolated in a Chrome tab group. Use `session.createTab` for new tabs inside the session, `session.addTab` only when the user wants an existing tab adopted into the session, and `session.closeTab` to close one managed tab while keeping session metadata clean.
 - Check `policy.get` before operating on sensitive domains or using high-risk methods; use `policy.set` only when the user asks to change local allow/block rules.
 - Use `page.executeJavaScript` only when read-only methods are insufficient or when the user explicitly wants page scripting.
 - Prefer `dom.query`, `dom.click`, `dom.type`, `dom.select`, `dom.hover`, and `dom.scroll` for ordinary page controls before falling back to viewport coordinates.
@@ -115,13 +115,6 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 2. `page.readText` for visible text
 3. `page.accessibilityTree` for interactable elements
 4. `page.screenshot` when visual confirmation matters
-
-### Locate Local Pages (Bookmarks/History)
-
-When the user asks to look up or navigate to a page they have visited before, or mentions an internal system (e.g. "my dashboard", "the wiki page", "the code repo I visited yesterday"):
-1. Call `history.search` or `bookmarks.search` with a query of the system name or keywords.
-2. If URLs are returned, select the most relevant one.
-3. Call `page.navigate` (or `session.start` if isolating) to open and inspect that URL.
 
 ### Interact (Click, Type, Hover)
 
@@ -149,9 +142,9 @@ When the user asks to look up or navigate to a page they have visited before, or
 
 ### Record A Workflow
 
-Recordings persist in Chrome local extension storage until cleared.
+Recordings persist in Chrome local extension storage with privacy defaults: 24-hour retention, 500 actions per recording, screenshots off by default, and typed text/value fields redacted unless `includeText:true` is passed.
 
-1. Call `recording.start` with a `tabId` or `groupId`; keep `captureScreenshots` false unless visual replay matters.
+1. Call `recording.start` with a `tabId` or `groupId`; keep `captureScreenshots` false unless visual replay matters and use `includeText:true` only when the user explicitly needs typed text captured.
 2. Perform `page.navigate`, `dom.*`, and `computer.*` actions normally.
 3. Call `recording.stop`.
 4. Call `recording.export`; use `download: true` when the user wants a JSON artifact saved through Chrome.

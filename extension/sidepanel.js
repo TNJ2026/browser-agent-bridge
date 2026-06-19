@@ -127,10 +127,6 @@ function getCategoryLabel(category) {
       zh: '读取标签页列表 (获取您当前打开的所有标签页标题和网址)',
       en: 'Read tab list (access titles and URLs of all your open tabs)'
     },
-    'read_history': {
-      zh: '搜索浏览器历史记录与书签 (读取历史和书签数据库)',
-      en: 'Search browser history and bookmarks (access local history and bookmarks databases)'
-    },
     'read_downloads': {
       zh: '读取浏览器下载记录 (获取您已下载的文件列表和路径)',
       en: 'Read downloads history (access list of downloaded files and local paths)'
@@ -142,6 +138,10 @@ function getCategoryLabel(category) {
     'page_logs': {
       zh: '读取当前网页的控制台报错与网络请求日志',
       en: 'Read console logs and network request summaries of the current page'
+    },
+    'policy_admin': {
+      zh: '修改本地安全策略 (允许/阻止 URL 或 RPC 方法)',
+      en: 'Modify local security policy (allow/block URLs or RPC methods)'
     }
   }[category] || { zh: category, en: category };
 }

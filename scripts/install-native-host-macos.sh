@@ -45,6 +45,8 @@ if [[ -f "\$env_file" ]]; then
   set +a
 fi
 
+export BROWSER_AGENT_BRIDGE_EXTENSION_ID="$EXTENSION_ID"
+
 exec "$PYTHON_BIN" "$HOST_PY"
 EOF
 chmod +x "$HOST_WRAPPER"

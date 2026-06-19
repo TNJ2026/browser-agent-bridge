@@ -1,4 +1,4 @@
-# Local Browser Agent Bridge
+# Browser Agent Bridge
 
 An unpacked Chrome extension plus Native Messaging host that exposes browser-control tools to a local agent.
 
@@ -54,7 +54,7 @@ Use HTTP `/rpc` for one-shot JSON-RPC calls. Use WebSocket `/ws` when an agent w
 
 ## Local Token Auth
 
-Token auth is optional and controlled by the native host environment:
+Token auth is required by default and controlled by the native host environment:
 
 ```bash
 export BROWSER_AGENT_BRIDGE_TOKEN="$(openssl rand -hex 32)"
@@ -68,7 +68,9 @@ chmod 600 ~/.browser-agent-bridge.env
 source ~/.browser-agent-bridge.env
 ```
 
-When `BROWSER_AGENT_BRIDGE_TOKEN` is set, `/rpc`, `/events`, and `/ws` require:
+The installer also pins `BROWSER_AGENT_BRIDGE_EXTENSION_ID` in the native wrapper so local HTTP/WebSocket requests from other Chrome extensions are rejected.
+
+`BROWSER_AGENT_BRIDGE_TOKEN` is required by default. Without a token, `/rpc`, `/events`, and `/ws` reject requests unless the host is explicitly started with `BROWSER_AGENT_BRIDGE_ALLOW_NO_AUTH=1`.
 
 ```text
 Authorization: Bearer <token>
@@ -81,7 +83,7 @@ Authorization: Bearer <token>
 The packaged MV3 extension zip is written to:
 
 ```text
-dist/local-browser-agent-bridge-0.1.0.zip
+dist/browser-agent-bridge-0.1.0.zip
 ```
 
 ## Try It
@@ -199,5 +201,5 @@ policy.checkUrl
 - `chrome.debugger` cannot attach to restricted pages such as `chrome://` and may conflict with DevTools or another debugger.
 - `page.screenshot` uses `chrome.tabs.captureVisibleTab`, so it focuses the target tab/window first.
 - The default URL policy blocks `chrome://*`, `chrome-extension://*`, and `chromewebstore.google.com/*`.
-- Recordings are persisted in Chrome local extension storage, but large screenshot-heavy recordings should be exported and cleared.
+- Recordings are persisted in Chrome local extension storage with privacy defaults: 24-hour retention, 500 actions per recording, screenshots off by default, and typed text redacted unless `includeText: true` is passed to `recording.start`.
 - The first version intentionally has no built-in LLM/agent logic and no cloud service dependency.

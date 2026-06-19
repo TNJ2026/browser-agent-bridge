@@ -10,9 +10,6 @@ import base64
 import hashlib
 import hmac
 import re
-import sqlite3
-import shutil
-import tempfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from socketserver import ThreadingTCPServer
@@ -20,6 +17,8 @@ from socketserver import ThreadingTCPServer
 PORT = int(os.environ.get('BROWSER_AGENT_BRIDGE_PORT', 8765))
 HOST = os.environ.get('BROWSER_AGENT_BRIDGE_HOST', '127.0.0.1')
 AUTH_TOKEN = os.environ.get('BROWSER_AGENT_BRIDGE_TOKEN', '')
+ALLOW_NO_AUTH = os.environ.get('BROWSER_AGENT_BRIDGE_ALLOW_NO_AUTH', '').lower() in ('1', 'true', 'yes')
+EXTENSION_ID = os.environ.get('BROWSER_AGENT_BRIDGE_EXTENSION_ID', '').strip()
 SAVE_DIR = Path(os.environ.get('BROWSER_AGENT_BRIDGE_SAVE_DIR', str(Path.home() / 'Downloads' / 'browser-agent-bridge')))
 ALLOW_CUSTOM_SAVE_DIR = os.environ.get('BROWSER_AGENT_BRIDGE_ALLOW_CUSTOM_SAVE_DIR', '').lower() in ('1', 'true', 'yes')
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
@@ -34,7 +33,6 @@ config_ready = threading.Event()
 configured_port = PORT
 
 allow_read_tabs = True
-allow_read_history = True
 enable_runtime_approval = True
 
 # Thread-safe collections
@@ -65,7 +63,7 @@ def write_native_message(message):
         log(f"Failed to write native message: {e}")
 
 def handle_native_notification(message):
-    global extension_ready, extension_version, configured_port, allow_read_tabs, allow_read_history, enable_runtime_approval
+    global extension_ready, extension_version, configured_port, allow_read_tabs, enable_runtime_approval
     method = message.get("method")
     params = message.get("params", {})
     if method == "extension.ready":
@@ -79,7 +77,6 @@ def handle_native_notification(message):
         config_ready.set()
     elif method == "extension.settings":
         allow_read_tabs = params.get("allowReadTabs", True)
-        allow_read_history = params.get("allowReadHistory", True)
         enable_runtime_approval = params.get("enableRuntimeApproval", True)
     
     event = {
@@ -159,54 +156,6 @@ def call_extension(request):
 
     if request.get("method") == "native.saveDataUrl":
         return handle_save_data_url(request)
-
-    if request.get("method") == "history.search":
-        if not allow_read_history:
-            return {
-                "jsonrpc": "2.0",
-                "id": request.get("id"),
-                "error": {"code": -32601, "message": "Method blocked by user privacy settings: history search is disabled"}
-            }
-        if enable_runtime_approval:
-            perm_check = call_extension({
-                "jsonrpc": "2.0",
-                "method": "permission.check",
-                "params": {
-                    "method": "history.search",
-                    "params": request.get("params", {})
-                }
-            })
-            if "error" in perm_check:
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "error": perm_check["error"]
-                }
-        return handle_history_search(request)
-
-    if request.get("method") == "bookmarks.search":
-        if not allow_read_history:
-            return {
-                "jsonrpc": "2.0",
-                "id": request.get("id"),
-                "error": {"code": -32601, "message": "Method blocked by user privacy settings: bookmarks search is disabled"}
-            }
-        if enable_runtime_approval:
-            perm_check = call_extension({
-                "jsonrpc": "2.0",
-                "method": "permission.check",
-                "params": {
-                    "method": "bookmarks.search",
-                    "params": request.get("params", {})
-                }
-            })
-            if "error" in perm_check:
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "error": perm_check["error"]
-                }
-        return handle_bookmarks_search(request)
 
     if not extension_ready:
         return {
@@ -329,11 +278,13 @@ def safe_filename(value):
     return cleaned or f"artifact-{uuid.uuid4().hex[:8]}"
 
 def auth_enabled():
-    return bool(AUTH_TOKEN)
+    return bool(AUTH_TOKEN) or not ALLOW_NO_AUTH
 
 def is_authorized(headers):
-    if not auth_enabled():
+    if ALLOW_NO_AUTH and not AUTH_TOKEN:
         return True
+    if not AUTH_TOKEN:
+        return False
     value = headers.get('Authorization', '')
     prefix = 'Bearer '
     if not value.startswith(prefix):
@@ -444,9 +395,13 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
             return True
         origin_lower = origin.lower()
         if (origin_lower.startswith("http://localhost:") or origin_lower == "http://localhost" or
-            origin_lower.startswith("http://127.0.0.1:") or origin_lower == "http://127.0.0.1" or
-            origin_lower.startswith("chrome-extension://")):
+            origin_lower.startswith("http://127.0.0.1:") or origin_lower == "http://127.0.0.1"):
             return True
+        if origin_lower.startswith("chrome-extension://"):
+            if not EXTENSION_ID:
+                return True
+            allowed = f"chrome-extension://{EXTENSION_ID.lower()}"
+            return origin_lower == allowed or origin_lower == f"{allowed}/"
         return False
 
     def set_cors_headers(self):
@@ -488,6 +443,8 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
                 "extensionReady": extension_ready,
                 "extensionVersion": extension_version,
                 "authRequired": auth_enabled(),
+                "authConfigured": bool(AUTH_TOKEN),
+                "allowNoAuth": ALLOW_NO_AUTH,
                 "pending": pending_size
             })
             return
@@ -580,217 +537,6 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
                 "error": {"code": -32000, "message": str(e)}
             })
 
-def get_browser_data_dirs():
-    home = Path.home()
-    if sys.platform == "darwin":
-        return [
-            {"id": "chrome", "label": "Chrome", "dir": home / "Library/Application Support/Google/Chrome"},
-            {"id": "edge", "label": "Edge", "dir": home / "Library/Application Support/Microsoft Edge"}
-        ]
-    elif sys.platform.startswith("linux"):
-        return [
-            {"id": "chrome", "label": "Chrome", "dir": home / ".config/google-chrome"},
-            {"id": "edge", "label": "Edge", "dir": home / ".config/microsoft-edge"}
-        ]
-    elif sys.platform == "win32":
-        local_app_data = Path(os.environ.get("LOCALAPPDATA", str(home / "AppData" / "Local")))
-        return [
-            {"id": "chrome", "label": "Chrome", "dir": local_app_data / "Google" / "Chrome" / "User Data"},
-            {"id": "edge", "label": "Edge", "dir": local_app_data / "Microsoft" / "Edge" / "User Data"}
-        ]
-    return []
-
-def list_profiles(data_dir):
-    local_state_path = data_dir / "Local State"
-    if local_state_path.exists():
-        try:
-            state = json.loads(local_state_path.read_text(encoding="utf-8", errors="ignore"))
-            info = state.get("profile", {}).get("info_cache", {})
-            profiles = [{"dir": d, "name": info[d].get("name", d)} for d in info]
-            if profiles:
-                return profiles
-        except Exception:
-            pass
-    return [{"dir": "Default", "name": "Default"}]
-
-def handle_history_search(request):
-    if not allow_read_history:
-        return {
-            "jsonrpc": "2.0",
-            "id": request.get("id"),
-            "error": {"code": -32601, "message": "Method blocked by user privacy settings: history search is disabled"}
-        }
-
-    params = request.get("params", {}) or {}
-    query = params.get("query", "")
-    limit = params.get("limit", 20)
-    since = params.get("since")
-    browser_filter = params.get("browser")
-    
-    keywords = [k.strip() for k in query.split() if k.strip()]
-    since_dt = None
-    if since:
-        try:
-            if isinstance(since, (int, float)):
-                since_dt = time.time() - since
-            elif isinstance(since, str):
-                m = re.match(r"^(\d+)([dhm])$", since.strip().lower())
-                if m:
-                    val = int(m.group(1))
-                    unit = m.group(2)
-                    sec = {"d": 86400, "h": 3600, "m": 60}[unit]
-                    since_dt = time.time() - (val * sec)
-                else:
-                    since_dt = time.mktime(time.strptime(since.strip(), "%Y-%m-%d"))
-        except Exception as e:
-            log(f"Failed to parse since parameter {since}: {e}")
-            
-    WEBKIT_EPOCH_DIFF_US = 11644473600000000
-    results = []
-    
-    browser_dirs = get_browser_data_dirs()
-    for b in browser_dirs:
-        if not b["dir"].exists():
-            continue
-        if browser_filter and b["id"] != browser_filter:
-            continue
-            
-        profiles = list_profiles(b["dir"])
-        for p in profiles:
-            p_dir = b["dir"] / p["dir"]
-            history_file = p_dir / "History"
-            if not history_file.exists():
-                continue
-                
-            temp_db = None
-            try:
-                fd, temp_path = tempfile.mkstemp(suffix=".sqlite")
-                os.close(fd)
-                temp_db = Path(temp_path)
-                shutil.copy2(history_file, temp_db)
-                
-                conn = sqlite3.connect(str(temp_db))
-                cursor = conn.cursor()
-                
-                conds = ["last_visit_time > 0"]
-                sql_params = []
-                for kw in keywords:
-                    conds.append("LOWER(title || ' ' || url) LIKE ?")
-                    sql_params.append(f"%{kw.lower()}%")
-                    
-                if since_dt:
-                    webkit_us = int(since_dt * 1000000) + WEBKIT_EPOCH_DIFF_US
-                    conds.append("last_visit_time >= ?")
-                    sql_params.append(webkit_us)
-                    
-                where_clause = " AND ".join(conds)
-                sql_limit = limit * 2 if limit > 0 else 1000
-                sql = f"""
-                SELECT title, url, last_visit_time, visit_count
-                FROM urls WHERE {where_clause}
-                ORDER BY last_visit_time DESC LIMIT {sql_limit}
-                """
-                cursor.execute(sql, sql_params)
-                for row in cursor.fetchall():
-                    title, url, last_visit_time, visit_count = row
-                    unix_time = (last_visit_time - WEBKIT_EPOCH_DIFF_US) / 1000000
-                    results.append({
-                        "browser": b["label"],
-                        "profile": p["name"],
-                        "title": title or "",
-                        "url": url or "",
-                        "visitTime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(unix_time)),
-                        "timestamp": unix_time,
-                        "visitCount": visit_count
-                    })
-                conn.close()
-            except Exception as e:
-                log(f"Failed to query history for {b['label']} {p['name']}: {e}")
-            finally:
-                if temp_db and temp_db.exists():
-                    try:
-                        temp_db.unlink()
-                    except Exception:
-                        pass
-                        
-    results.sort(key=lambda x: x["timestamp"], reverse=True)
-    if limit > 0:
-        results = results[:limit]
-        
-    return {
-        "jsonrpc": "2.0",
-        "id": request.get("id"),
-        "result": {
-            "history": results
-        }
-    }
-
-def handle_bookmarks_search(request):
-    if not allow_read_history:
-        return {
-            "jsonrpc": "2.0",
-            "id": request.get("id"),
-            "error": {"code": -32601, "message": "Method blocked by user privacy settings: bookmarks search is disabled"}
-        }
-
-    params = request.get("params", {}) or {}
-    query = params.get("query", "")
-    browser_filter = params.get("browser")
-    
-    keywords = [k.strip().lower() for k in query.split() if k.strip()]
-    results = []
-    
-    browser_dirs = get_browser_data_dirs()
-    for b in browser_dirs:
-        if not b["dir"].exists():
-            continue
-        if browser_filter and b["id"] != browser_filter:
-            continue
-            
-        profiles = list_profiles(b["dir"])
-        for p in profiles:
-            p_dir = b["dir"] / p["dir"]
-            bookmarks_file = p_dir / "Bookmarks"
-            if not bookmarks_file.exists():
-                continue
-                
-            try:
-                data = json.loads(bookmarks_file.read_text(encoding="utf-8", errors="ignore"))
-                
-                def walk(node, trail):
-                    if not node:
-                        return
-                    if node.get("type") == "url":
-                        url = node.get("url", "")
-                        name = node.get("name", "")
-                        hay = f"{name} {url}".lower()
-                        if not keywords or all(kw in hay for kw in keywords):
-                            results.append({
-                                "browser": b["label"],
-                                "profile": p["name"],
-                                "name": name,
-                                "url": url,
-                                "folder": " / ".join(trail)
-                            })
-                    if isinstance(node.get("children"), list):
-                        sub_trail = trail + [node["name"]] if node.get("name") else trail
-                        for child in node["children"]:
-                            walk(child, sub_trail)
-                            
-                for root in data.get("roots", {}).values():
-                    walk(root, [])
-            except Exception as e:
-                log(f"Failed to read bookmarks for {b['label']} {p['name']}: {e}")
-                
-    results = results[:1000]
-    return {
-        "jsonrpc": "2.0",
-        "id": request.get("id"),
-        "result": {
-            "bookmarks": results
-        }
-    }
-
 def main():
     # Run the Native Messaging listener in a daemon background thread
     reader_thread = threading.Thread(target=native_reader_loop, name="NativeReader")
@@ -805,8 +551,12 @@ def main():
 
     log(f"HTTP JSON-RPC listening on http://{HOST}:{PORT}/rpc")
     log(f"WebSocket JSON-RPC listening on ws://{HOST}:{PORT}/ws")
-    if auth_enabled():
+    if AUTH_TOKEN:
         log("Bearer token authentication enabled for /rpc, /events, and /ws")
+    elif ALLOW_NO_AUTH:
+        log("WARNING: bearer token authentication is disabled by BROWSER_AGENT_BRIDGE_ALLOW_NO_AUTH")
+    else:
+        log("ERROR: BROWSER_AGENT_BRIDGE_TOKEN is not set; /rpc, /events, and /ws will reject requests")
     server = ThreadingHTTPServer((HOST, PORT), RpcRequestHandler)
     try:
         server.serve_forever()

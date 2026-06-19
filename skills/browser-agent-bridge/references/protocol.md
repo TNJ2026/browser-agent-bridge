@@ -35,9 +35,10 @@ The WebSocket helper writes newline-delimited JSON. Ignore notification lines wh
 
 ## Authentication
 
-If the native host was started with `BROWSER_AGENT_BRIDGE_TOKEN`, these endpoints require a bearer token:
+Authentication is required by default. Start the native host with `BROWSER_AGENT_BRIDGE_TOKEN`; otherwise `/rpc`, `/events`, and `/ws` reject requests. For local debugging only, `BROWSER_AGENT_BRIDGE_ALLOW_NO_AUTH=1` explicitly disables this requirement.
 
 On macOS, `native/host-wrapper.macos.sh` sources `~/.browser-agent-bridge.env` before launching `native/host.py`, so use that file for persistent token auth.
+The installer also pins `BROWSER_AGENT_BRIDGE_EXTENSION_ID` in the wrapper so local HTTP/WebSocket requests from other Chrome extensions are rejected.
 
 ```text
 POST /rpc
@@ -86,19 +87,13 @@ Schedules `chrome.runtime.reload()` after returning the JSON-RPC response. It on
 
 ### `extension.getCspBypass`
 
-Gets whether the extension is currently stripping Content Security Policy (CSP) headers.
+Gets whether temporary per-origin Content Security Policy (CSP) bypass is enabled by the user, and whether a temporary dynamic rule is currently active.
 
 ```json
 {"jsonrpc":"2.0","id":"get-csp","method":"extension.getCspBypass","params":{}}
 ```
 
-### `extension.setCspBypass`
-
-Enables or disables Content Security Policy (CSP) header stripping.
-
-```json
-{"jsonrpc":"2.0","id":"set-csp","method":"extension.setCspBypass","params":{"enabled":false}}
-```
+The user enables or disables this in the side panel. When enabled, `tabs.create`, `session.start`, `page.navigate`, and `page.executeJavaScript` may temporarily strip CSP response headers for the target origin. Pass `"bypassCSP": false` on a call to opt out. Pass `"cspBypassTtlMs"` to request a TTL between 1 second and 5 minutes; the default is 60 seconds.
 ### `native.status`
 
 Returns Native Messaging status from the extension.
@@ -179,6 +174,30 @@ Creates a managed tab group and records session metadata in extension storage.
 {"sessionId":"uuid"}
 ```
 
+### `session.createTab`
+
+Creates a new tab inside an existing Agent session group and records it in the session. The tab is created in the session group's window.
+
+```json
+{"sessionId":"uuid","url":"https://example.com","active":true}
+```
+
+### `session.addTab`
+
+Adds an existing tab to an Agent session group and records it in the session. The tab must be in the same Chrome window as the session group.
+
+```json
+{"sessionId":"uuid","tabId":123}
+```
+
+### `session.closeTab`
+
+Closes one tab from an Agent session and removes it from the session metadata.
+
+```json
+{"sessionId":"uuid","tabId":123}
+```
+
 ### `session.stop`
 
 Ungroups tabs unless `closeTabs` is true.
@@ -254,7 +273,7 @@ To save a screenshot to disk, pass the returned `dataUrl` to `native.saveDataUrl
 Runs script in the page. Use sparingly.
 
 ```json
-{"tabId":123,"script":"document.title","world":"MAIN"}
+{"tabId":123,"script":"document.title","world":"MAIN","cspBypassTtlMs":60000}
 ```
 
 Use `"world":"isolated"` to run in the isolated extension world.
@@ -403,10 +422,10 @@ Attaches debugger, enables Network events, and returns buffered network events.
 ### `recording.start`
 
 Starts recording browser actions for a tab or group. Screenshots are off by default.
-Recordings are persisted in Chrome local extension storage until cleared.
+Recordings are persisted in Chrome local extension storage with privacy defaults: 24-hour retention, 500 actions per recording, screenshots off by default, and typed text/value fields redacted unless `includeText` is true.
 
 ```json
-{"tabId":123,"name":"Checkout flow","captureScreenshots":false}
+{"tabId":123,"name":"Checkout flow","captureScreenshots":false,"includeText":false,"retentionMs":86400000,"maxActions":500}
 ```
 
 or:
@@ -484,6 +503,7 @@ Returns URL policy. Default blocked patterns include `chrome://*`, `chrome-exten
 ### `policy.set`
 
 URL and method patterns use `*` wildcards. Method patterns match JSON-RPC method names.
+This method changes the local security policy and requires runtime approval when approval is enabled.
 
 ```json
 {
@@ -499,31 +519,3 @@ URL and method patterns use `*` wildcards. Method patterns match JSON-RPC method
 ```json
 {"url":"https://example.com","method":"dom.click"}
 ```
-
-### `history.search`
-
-Exposed by the native host to search the local browser (Chrome and Edge) history database.
-
-Parameters:
-
-```json
-{"query":"github","limit":20,"since":"7d","browser":"chrome"}
-```
-
-* `query` (string, optional): Keywords to search, space-separated.
-* `limit` (int, optional): Max results, defaults to 20.
-* `since` (string or number, optional): Time window (e.g., "1d", "7h", "30m", or seconds).
-* `browser` (string, optional): "chrome" or "edge" to filter.
-
-### `bookmarks.search`
-
-Exposed by the native host to search the local browser (Chrome and Edge) bookmarks.
-
-Parameters:
-
-```json
-{"query":"github","browser":"chrome"}
-```
-
-* `query` (string, optional): Keywords to search, space-separated.
-* `browser` (string, optional): "chrome" or "edge" to filter.

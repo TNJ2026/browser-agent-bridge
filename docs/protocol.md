@@ -27,11 +27,12 @@ scripts/doctor.py
 
 ## Authentication
 
-Authentication is disabled unless the native host is started with `BROWSER_AGENT_BRIDGE_TOKEN`.
+Authentication is required by default. Start the native host with `BROWSER_AGENT_BRIDGE_TOKEN`; otherwise `/rpc`, `/events`, and `/ws` reject requests. For local debugging only, `BROWSER_AGENT_BRIDGE_ALLOW_NO_AUTH=1` explicitly disables this requirement.
 
 On macOS, `native/host-wrapper.macos.sh` loads `~/.browser-agent-bridge.env` before starting the host. Put `BROWSER_AGENT_BRIDGE_TOKEN=...` there when Chrome launches the native host.
+The installer also pins `BROWSER_AGENT_BRIDGE_EXTENSION_ID` in the wrapper so local HTTP/WebSocket requests from other Chrome extensions are rejected.
 
-When enabled, these endpoints require a bearer token:
+These endpoints require a bearer token by default:
 
 ```text
 POST /rpc
@@ -45,7 +46,7 @@ Header:
 Authorization: Bearer <token>
 ```
 
-`GET /health` does not require auth and includes `authRequired`.
+`GET /health` does not require auth and includes `authRequired`, `authConfigured`, and `allowNoAuth`.
 
 ## Request
 
@@ -107,21 +108,13 @@ Schedules `chrome.runtime.reload()` after returning the JSON-RPC response. Usefu
 
 ### `extension.getCspBypass`
 
-Gets whether the extension is currently stripping Content Security Policy (CSP) headers.
+Gets whether temporary per-origin Content Security Policy (CSP) bypass is enabled by the user, and whether a temporary dynamic rule is currently active.
 
 ```json
 {}
 ```
 
-### `extension.setCspBypass`
-
-Enables or disables Content Security Policy (CSP) header stripping.
-
-```json
-{
-  "enabled": false
-}
-```
+The user enables or disables this in the side panel. When enabled, `tabs.create`, `session.start`, `page.navigate`, and `page.executeJavaScript` may temporarily strip CSP response headers for the target origin. Pass `"bypassCSP": false` on a call to opt out. Pass `"cspBypassTtlMs"` to request a TTL between 1 second and 5 minutes; the default is 60 seconds.
 ### `native.saveDataUrl`
 
 Native-host local method. Saves a data URL to disk and returns the file path. This is useful with `page.screenshot`.
@@ -167,6 +160,30 @@ Creates a managed Chrome tab group and main tab.
 { "sessionId": "uuid" }
 ```
 
+### `session.createTab`
+
+Creates a new tab inside an existing Agent session group and records it in the session. The tab is created in the session group's window.
+
+```json
+{ "sessionId": "uuid", "url": "https://example.com", "active": true }
+```
+
+### `session.addTab`
+
+Adds an existing tab to an Agent session group and records it in the session. The tab must be in the same Chrome window as the session group.
+
+```json
+{ "sessionId": "uuid", "tabId": 123 }
+```
+
+### `session.closeTab`
+
+Closes one tab from an Agent session and removes it from the session metadata.
+
+```json
+{ "sessionId": "uuid", "tabId": 123 }
+```
+
 ### `session.stop`
 
 Ungroups tabs by default. Set `closeTabs` to close managed tabs.
@@ -208,7 +225,7 @@ Polls the whole page, or a selector subtree, for text. Use `frameSelector` for a
 ### `page.executeJavaScript`
 
 ```json
-{ "tabId": 123, "script": "document.title", "world": "MAIN" }
+{ "tabId": 123, "script": "document.title", "world": "MAIN", "cspBypassTtlMs": 60000 }
 ```
 
 ### `page.domSnapshot`
@@ -322,10 +339,10 @@ Moves the mouse cursor to specific CSS viewport coordinates.
 ### `recording.start`
 
 Starts recording browser actions for a tab or group. Screenshots are off by default because they can make exports large.
-Recordings are stored in Chrome local extension storage until `recording.clear` is called or the extension is removed.
+Recordings are stored in Chrome local extension storage with privacy defaults: 24-hour retention, 500 actions per recording, screenshots off by default, and typed text/value fields redacted unless `includeText` is true.
 
 ```json
-{ "tabId": 123, "name": "Checkout flow", "captureScreenshots": false }
+{ "tabId": 123, "name": "Checkout flow", "captureScreenshots": false, "includeText": false, "retentionMs": 86400000, "maxActions": 500 }
 ```
 
 or:
@@ -389,6 +406,7 @@ Returns URL policy. Defaults block Chrome privileged pages and Chrome Web Store.
 ### `policy.set`
 
 URL and method patterns use `*` wildcards. Method patterns match JSON-RPC method names.
+This method changes the local security policy and requires runtime approval when approval is enabled.
 
 ```json
 {

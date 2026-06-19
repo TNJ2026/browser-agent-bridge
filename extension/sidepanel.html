@@ -14,8 +14,8 @@
       </header>
       <div class="disclaimer-content">
         <p>
-          欢迎使用 <strong>Local Browser Agent Bridge</strong>。在启用本插件前，请仔细阅读以下声明：<br>
-          <em>Welcome to <strong>Local Browser Agent Bridge</strong>. Before enabling this extension, please carefully read the declaration below:</em>
+          欢迎使用 <strong>Browser Agent Bridge</strong>。在启用本插件前，请仔细阅读以下声明：<br>
+          <em>Welcome to <strong>Browser Agent Bridge</strong>. Before enabling this extension, please carefully read the declaration below:</em>
         </p>
         
         <h3>🔌 申请的系统权限 / System Permissions Requested:</h3>
@@ -33,8 +33,8 @@
             <em>Connects to and launches the locally running Python host backend.</em>
           </li>
           <li>
-            <strong>declarativeNetRequest (网络请求拦截)</strong>: 实现 CSP (内容安全策略) 的绕过开关，方便本地 Agent 操控网页。<br>
-            <em>Intercepts and strips CSP headers to facilitate page script execution by the Agent.</em>
+            <strong>declarativeNetRequest (网络请求拦截)</strong>: 在您允许时，为当前 Agent 操作的站点临时剥离 CSP (内容安全策略) 响应头。<br>
+            <em>Temporarily strips CSP headers for the site currently operated by the Agent when you allow it.</em>
           </li>
           <li>
             <strong>storage (本地存储)</strong>: 存储插件配置项（例如您的此项同意状态及 CSP 绕过设置）。<br>
@@ -53,14 +53,6 @@
         <h3>🔒 可能会读取的隐私和数据信息 / Private Information & Data Collected:</h3>
         <ul>
           <li>
-            <strong>本地浏览器历史记录 / Local Browser History</strong>：通过本地 Python 宿主读取 Chrome/Edge 浏览器历史数据库（仅在本地响应 Agent 查询，绝不外发）。<br>
-            <em>Reads Chrome/Edge browser history databases locally (only queries locally for your Agent, never sent externally).</em>
-          </li>
-          <li>
-            <strong>本地浏览器书签 / Local Browser Bookmarks</strong>：读取本地书签文件以检索快捷方式。<br>
-            <em>Reads local bookmarks files to retrieve shortcuts.</em>
-          </li>
-          <li>
             <strong>页面会话数据与快照 / Page Session Data & Snapshots</strong>：获取当前打开页面的完整 URL、标题、DOM 树、可读文本，以及网页视觉截图。<br>
             <em>Accesses current page URLs, titles, DOM trees, readable text, and screenshots.</em>
           </li>
@@ -72,8 +64,8 @@
 
         <h3>⚠️ 绕过 CSP 的风险提示 / Risks of Bypassing CSP:</h3>
         <p>
-          本插件提供了可选的“Bypass CSP”选项，开启后会拦截并剥离网页的 Content Security Policy 响应头。这能让您的 Agent 顺利在任意网页注入和运行自定义脚本，<strong>但它会降低浏览器对跨站脚本 (XSS) 攻击的防御能力</strong>。在开启此功能期间，请避免浏览不受信任的网页，并确保仅运行来自可信来源的 Agent 任务。<br>
-          <em>This extension provides an optional "Bypass CSP" feature which intercepts and strips Content Security Policy response headers. While this allows your Agent to run custom scripts on any webpage, <strong>it lowers the browser's defense-in-depth security against Cross-Site Scripting (XSS) attacks</strong>. During the period this feature is active, please avoid browsing untrusted webpages and ensure you only execute Agent tasks from trusted sources.</em>
+          本插件提供了可选的“Bypass CSP”选项。开启后，Agent 在新建标签页、导航或执行脚本时，可为当前目标站点临时剥离 Content Security Policy 响应头，默认 60 秒后自动关闭。<strong>这会在短时间内降低该站点的跨站脚本 (XSS) 防护强度</strong>。请仅在可信 Agent 任务中开启。<br>
+          <em>This extension provides an optional "Bypass CSP" feature. When enabled, the Agent can temporarily strip Content Security Policy headers for the target site while creating tabs, navigating, or executing scripts; it automatically clears after 60 seconds by default. <strong>This temporarily lowers that site's defense-in-depth against Cross-Site Scripting (XSS)</strong>. Enable it only for trusted Agent tasks.</em>
         </p>
 
         <h3>⚠️ 免责与风险承担声明 / Liability & Assumption of Risk Disclaimer:</h3>
@@ -149,7 +141,7 @@
         <div class="setting-item">
           <label>
             <input type="checkbox" id="bypass-csp">
-            Bypass CSP (Content Security Policy)
+            Allow temporary CSP bypass for target site
           </label>
         </div>
 
