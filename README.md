@@ -1,205 +1,182 @@
-# Browser Agent Bridge
+# Browser Agent Bridge (浏览器 Agent 桥接器)
 
-An unpacked Chrome extension plus Native Messaging host that exposes browser-control tools to a local agent.
+An unpacked Chrome extension plus Native Messaging host that exposes high-fidelity browser-control tools to a local agent through JSON-RPC over HTTP and WebSocket.
 
-The extension does not contain an agent or model client. It only provides browser capabilities through JSON-RPC:
+这是一个未打包的 Chrome 浏览器插件及原生消息传递（Native Messaging）宿主程序。它通过 HTTP 和 WebSocket 上的 JSON-RPC 协议，向本地 Agent 暴露高保真的浏览器控制工具。
 
-```text
-Local Agent -> HTTP/WebSocket on 127.0.0.1:8765 -> Native Host -> Chrome Extension -> Chrome APIs/CDP
+---
+
+## 📖 Table of Contents / 目录
+- [Architecture / 系统架构](#-architecture--系统架构)
+- [Key Features / 主要特性](#-key-features--主要特性)
+- [Installation / 安装指南](#-installation--安装指南)
+- [Authentication / 本地安全认证](#-authentication--本地安全认证)
+- [Quick Start & Examples / 快速上手与示例](#-quick-start--examples--快速上手与示例)
+- [JSON-RPC API Reference / 接口参考](#-json-rpc-api-reference--接口参考)
+- [Security & Privacy / 安全与隐私](#-security--privacy--安全与隐私)
+
+---
+
+## 📐 Architecture / 系统架构
+
+The extension acts as a capabilities provider without containing any agent or model logic. It bridges local software to Chrome's internals:
+
+该插件本身不包含任何 Agent 或模型逻辑，它作为一个纯粹的能力提供者，将本地软件与 Chrome 内部机制相连接：
+
+```mermaid
+graph TD
+    Agent[Local Agent / 本地智能体] -->|HTTP / WS JSON-RPC| Host[Native Host / python3 native/host.py]
+    Host -->|Stdio Native Messaging / 标准输入输出| Ext[Chrome Extension / service-worker.js]
+    Ext -->|Chrome APIs & CDP / 浏览器底层 API| Browser[Chrome Browser / 谷歌浏览器]
 ```
 
-## What Works
+- **HTTP Endpoint**: `http://127.0.0.1:8765/rpc` (For one-shot commands / 用于单次调用)
+- **WebSocket Endpoint**: `ws://127.0.0.1:8765/ws` (For long-lived sessions and stream events / 用于长连接和事件流推送)
 
-- Native Messaging connection to `native/host.py`
-- Local HTTP JSON-RPC endpoint for agents
-- Local WebSocket JSON-RPC endpoint for long-lived agent sessions and extension events
-- Tab list/create/activate/close/group
-- Session workspace management backed by Chrome tab groups
-- Page navigation, text extraction, accessibility tree, screenshot
-- DOM snapshot capture through CDP
-- JavaScript execution in the page
-- Mouse click, drag, text insertion, key press, wheel scroll via Chrome Debugger Protocol
-- Console and network event buffers
-- Download listing
-- Basic URL allow/block policy
-- Basic JSON-RPC method allow/block policy
-- Workflow recording with optional screenshots and JSON export
-- Recording state persisted in `chrome.storage.local`
-- Page visual indicator overlay
-- Side panel connection status
+---
 
-## Install For Local Development
+## 🌟 Key Features / 主要特性
 
-1. Open Chrome and go to `chrome://extensions`.
-2. Enable Developer mode.
-3. Click "Load unpacked" and choose this repo's `extension/` directory.
-4. Copy the extension ID shown by Chrome.
-5. Install the Native Messaging manifest:
+- **Native Integration / 原生连接**: Fast and reliable communication via Chrome Native Messaging stdio channel.
+- **Tab & Session Isolation / 标签与会话隔离**: Clean sandbox workspace management utilizing Chrome Tab Groups.
+- **High-Fidelity Interaction / 高保真页面控制**: Perform clicks, drag-and-drop, scroll, and key combinations via Chrome DevTools Protocol (CDP).
+- **Page Inspection / 页面状态感知**: Read full visible texts, capture screenshots, extract DOM snapshots, and retrieve structured accessibility trees.
+- **Event Streaming / 实时事件缓冲**: Real-time buffering and access to page console logs and network events.
+- **Workflow Recording / 交互录制归档**: Record browser interactions with automatic input-redaction policies to protect passwords and sensitive data.
+- **Visual Overlays / 视觉交互高亮**: Dynamic visual indicators overlaid on active elements to trace Agent behavior.
 
+---
+
+## 🛠 Installation / 安装指南
+
+### Prerequisites / 前置条件
+- Google Chrome browser (version 116+)
+- Python 3.x installed locally
+
+### Step-by-Step Setup / 步骤说明
+
+1. **Load Unpacked Extension / 加载未打包插件**
+   - Open Chrome and navigate to `chrome://extensions`.
+   - Enable **Developer mode** (右上角开启“开发者模式”).
+   - Click **Load unpacked** (点击“加载已解压的扩展程序”) and select the `extension/` directory of this repository.
+   - Copy the generated **Extension ID** (复制生成出的插件 ID，例如：`aodcpicfepmdmpfaflncbndcicoemdje`).
+
+2. **Install Native Messaging Host / 安装原生消息宿主**
+   Run the installation script with your Extension ID as the argument:
+   
+   使用复制的插件 ID 作为参数运行以下安装脚本：
+   ```bash
+   ./scripts/install-native-host-macos.sh <extension-id>
+   ```
+
+3. **Verify Connection / 验证连接**
+   - Reload the extension in `chrome://extensions`.
+   - Open the extension side panel. It should display **Connected / 已连接**.
+
+---
+
+## 🔒 Authentication / 本地安全认证
+
+For security, local token authentication is enabled by default to prevent unauthorized local processes from hijacking your browser.
+
+出于安全考虑，系统默认启用了本地 Token 认证，防止本地其他未授权进程篡改或劫持您的浏览器。
+
+> [!IMPORTANT]
+> The installation script automatically generates a secure token and saves it in `~/.browser-agent-bridge.env`.
+> 
+> 安装脚本会自动生成一个安全的随机 Token 并保存在本地的 `~/.browser-agent-bridge.env` 配置文件中。
+
+To execute scripts or client tools, make sure to load this environment file:
+
+运行脚本或客户端工具前，请确保已加载此环境变量文件：
 ```bash
-scripts/install-native-host-macos.sh <extension-id>
-```
-
-6. Reload the extension in `chrome://extensions`.
-7. Open the extension side panel. It should show `Connected`.
-
-The native host starts when the extension connects to it. It then listens on:
-
-```text
-http://127.0.0.1:8765/rpc
-ws://127.0.0.1:8765/ws
-```
-
-Use HTTP `/rpc` for one-shot JSON-RPC calls. Use WebSocket `/ws` when an agent wants one long-lived connection; it accepts the same JSON-RPC request shape and also streams extension notifications such as `extension.ready`.
-
-## Local Token Auth
-
-Token auth is required by default and controlled by the native host environment:
-
-```bash
-export BROWSER_AGENT_BRIDGE_TOKEN="$(openssl rand -hex 32)"
-```
-
-For Chrome-launched Native Messaging on macOS, put the token in the wrapper env file so the host process can see it:
-
-```bash
-printf 'BROWSER_AGENT_BRIDGE_TOKEN=%s\n' "$(openssl rand -hex 32)" > ~/.browser-agent-bridge.env
-chmod 600 ~/.browser-agent-bridge.env
 source ~/.browser-agent-bridge.env
 ```
 
-The installer also pins `BROWSER_AGENT_BRIDGE_EXTENSION_ID` in the native wrapper so local HTTP/WebSocket requests from other Chrome extensions are rejected.
+All API requests must include the Token in the HTTP/WebSocket headers:
 
-`BROWSER_AGENT_BRIDGE_TOKEN` is required by default. Without a token, `/rpc`, `/events`, and `/ws` reject requests unless the host is explicitly started with `BROWSER_AGENT_BRIDGE_ALLOW_NO_AUTH=1`.
-
+所有的 API 请求都必须在 HTTP/WebSocket 请求头中包含该 Token：
 ```text
-Authorization: Bearer <token>
+Authorization: Bearer <your-token-here>
 ```
 
-`/health` stays readable and reports whether auth is enabled through `authRequired`. The bundled helpers automatically send the bearer token when `BROWSER_AGENT_BRIDGE_TOKEN` is present in their environment.
+---
 
-## Packaged Extension
+## 🚀 Quick Start & Examples / 快速上手与示例
 
-The packaged MV3 extension zip is written to:
+### Shell RPC Commands / 终端命令行调用
+You can use the built-in helper scripts to quickly execute actions.
 
-```text
-dist/browser-agent-bridge-0.1.0.zip
-```
+你可以使用内置的助手脚本来快速执行命令：
 
-## Try It
-
-List tabs:
-
+#### 1. List active tabs / 获取当前活跃标签页
 ```bash
-scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{}}'
+scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{"query":{"active":true}}}'
 ```
 
-Create a tab:
-
+#### 2. Create a new tab / 新建标签页
 ```bash
 scripts/rpc.sh '{"jsonrpc":"2.0","id":"2","method":"tabs.create","params":{"url":"https://example.com"}}'
 ```
 
-Read page text:
-
+#### 3. Read visible page text / 读取当前页面文本
 ```bash
 scripts/rpc.sh '{"jsonrpc":"2.0","id":"3","method":"page.readText","params":{"tabId":123}}'
 ```
 
-Click at viewport coordinates:
+#### 4. Run Doctor Diagnostics / 运行系统诊断
+Verify if your local environment is correctly configured:
 
+验证您的本地环境配置是否正确：
 ```bash
-scripts/rpc.sh '{"jsonrpc":"2.0","id":"4","method":"computer.click","params":{"tabId":123,"x":300,"y":240}}'
+python3 scripts/doctor.py
 ```
 
-Use the WebSocket endpoint:
+---
 
-```bash
-scripts/ws-rpc.js '{"jsonrpc":"2.0","id":"5","method":"extension.info","params":{}}'
-```
+## 📡 JSON-RPC API Reference / 接口参考
 
-Listen for bridge and extension notifications:
+| Category / 分类 | Method / 接口方法 | Description / 说明 |
+| :--- | :--- | :--- |
+| **System / 系统** | `extension.info` | Get extension version and configuration. / 获取插件版本与配置。 |
+| | `extension.reload` | Force reload the extension background. / 强制重载插件后台。 |
+| | `native.status` | Get Native host process status. / 获取 Native 进程运行状态。 |
+| **Tabs / 标签页** | `tabs.list` | List open browser tabs. / 列出当前浏览器打开的标签页。 |
+| | `tabs.create` | Create a new browser tab. / 打开新的标签页。 |
+| | `tabs.activate` | Set target tab to active focus. / 激活并聚焦指定标签页。 |
+| | `tabs.close` | Close specified tab(s). / 关闭指定的标签页。 |
+| **Session / 会话** | `session.start` | Initialize an isolated workspace group. / 创建并初始化一个隔离的会话组。 |
+| | `session.list` | List active workspace sessions. / 列出所有活跃的会话。 |
+| | `session.get` | Get session details and its tab list. / 获取特定会话详情及标签。 |
+| | `session.stop` | Close and teardown a session workspace. / 关闭会话并清除对应工作区。 |
+| **Page / 页面动作** | `page.navigate` | Navigate to a specific URL. / 跳转至指定网址。 |
+| | `page.readText` | Extract all visible text from the page. / 读取并提取页面上的可视文本。 |
+| | `page.accessibilityTree` | Fetch structured clean accessibility tree. / 获取格式化的树状无障碍树。 |
+| | `page.screenshot` | Take a high-resolution screenshot. / 对当前可视视口进行高解析度截图。 |
+| | `page.domSnapshot` | Retrieve a structured CDP DOM snapshot. / 获取完整的 CDP 结构化 DOM 快照。 |
+| **Interactive / 控制**| `dom.click` | Click on an element by its CSS selector. / 通过 CSS 选择器点击网页元素。 |
+| | `dom.type` | Insert text into a specific selector. / 通过选择器向输入框内输入文本。 |
+| | `computer.click` | Perform click at exact coordinate. / 在指定的屏幕坐标进行鼠标点击。 |
+| | `computer.key` | Send keyboard stroke combinations. / 发送组合键盘按键（如 `Ctrl+A`）。 |
+| | `computer.scroll` | Scroll by specific pixel offsets. / 按照像素偏移量进行页面滚动。 |
+| **Privacy / 录制** | `recording.start` | Start recording user actions. / 开始录制用户与 Agent 操作流程。 |
+| | `recording.stop` | Stop current recording session. / 停止并归档当前的录制。 |
 
-```bash
-scripts/ws-rpc.js --listen
-```
+---
 
-Use the Python client:
+## 🛡 Security & Privacy / 安全与隐私
 
-```bash
-scripts/browser_bridge_client.py health
-scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
-```
+- **Sensitive Operations Approval / 敏感操作交互授权**: 
+  Actions involving tab listing, screenshot capture, file downloads, or network logs interception require user approval via the side panel. If the side panel is closed, requests will gracefully fail with a prompt asking the user to open it.
+  
+  涉及标签页列表、截图、文件下载或网络日志拦截等敏感操作时，系统会在侧边栏中弹窗提示用户授权。若侧边栏未打开，操作将被拦截并提示用户开启侧边栏进行确认。
 
-Run diagnostics:
+- **Input Redaction / 输入脱敏机制**:
+  To protect private data, keyboard entries and typed text are automatically redacted in the workflow recordings unless `includeText: true` is explicitly granted when starting a recording session.
+  
+  系统默认对键入的字符及输入框内容进行遮蔽。除非在调用 `recording.start` 时显式指定 `includeText: true`，否则在录制流中所有输入细节都将作为 `redacted` 处理，防止密码或隐私泄露。
 
-```bash
-scripts/doctor.py
-scripts/doctor.py --json
-```
-
-Build a release bundle:
-
-```bash
-scripts/build-release.sh
-```
-
-## JSON-RPC Methods
-
-```text
-extension.info
-extension.reload
-native.status
-native.saveDataUrl
-tabs.list
-tabs.create
-tabs.activate
-tabs.close
-tabs.group
-session.start
-session.list
-session.get
-session.stop
-page.navigate
-page.waitForLoad
-page.waitForSelector
-page.waitForText
-page.readText
-page.accessibilityTree
-page.screenshot
-page.executeJavaScript
-page.domSnapshot
-dom.query
-dom.click
-dom.type
-dom.select
-dom.hover
-dom.scroll
-computer.click
-computer.drag
-computer.type
-computer.key
-computer.scroll
-console.read
-network.read
-downloads.list
-recording.start
-recording.stop
-recording.status
-recording.export
-recording.clear
-indicator.set
-policy.get
-policy.set
-policy.checkUrl
-```
-
-## Notes
-
-- This is intended for local development or internal deployment.
-- `scripts/ws-rpc.js` prints one JSON message per line. The first line is usually a `bridge.ready` notification; request responses include the matching `id`.
-- `chrome.debugger` cannot attach to restricted pages such as `chrome://` and may conflict with DevTools or another debugger.
-- `page.screenshot` uses `chrome.tabs.captureVisibleTab`, so it focuses the target tab/window first.
-- The default URL policy blocks `chrome://*`, `chrome-extension://*`, and `chromewebstore.google.com/*`.
-- Recordings are persisted in Chrome local extension storage with privacy defaults: 24-hour retention, 500 actions per recording, screenshots off by default, and typed text redacted unless `includeText: true` is passed to `recording.start`.
-- The first version intentionally has no built-in LLM/agent logic and no cloud service dependency.
+- **URL Access Control / 域名白名单策略**:
+  The default security policy strictly blocks operations on system pages (e.g., `chrome://*`, `chrome-extension://*`, and Google Chrome Web Store).
+  
+  系统内置安全拦截名单，默认严格禁止对浏览器系统页面、插件后台页面、以及谷歌应用商店执行任何自动化操控。
