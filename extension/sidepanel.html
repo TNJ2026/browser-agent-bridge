@@ -10,42 +10,91 @@
     <!-- Disclaimer Screen -->
     <div id="disclaimer-screen" style="display: none;">
       <header>
-        <h1>免责声明与隐私说明</h1>
+        <h1>免责声明与隐私说明 / Disclaimer and Privacy Policy</h1>
       </header>
       <div class="disclaimer-content">
-        <p>欢迎使用 <strong>Local Browser Agent Bridge</strong>。在启用本插件前，请仔细阅读以下关于本插件所需申请的系统权限以及可能会读取的隐私和数据信息的声明：</p>
+        <p>
+          欢迎使用 <strong>Local Browser Agent Bridge</strong>。在启用本插件前，请仔细阅读以下声明：<br>
+          <em>Welcome to <strong>Local Browser Agent Bridge</strong>. Before enabling this extension, please carefully read the declaration below:</em>
+        </p>
         
-        <h3>🔌 申请的系统权限：</h3>
+        <h3>🔌 申请的系统权限 / System Permissions Requested:</h3>
         <ul>
-          <li><strong>debugger (调试器)</strong>: 通过开发者工具协议 (CDP) 模拟鼠标点击、键盘输入、页面滚动、元素悬停、抓取页面截图，以及记录控制台与网络请求日志。</li>
-          <li><strong>activeTab / scripting (活动标签页/脚本注入)</strong>: 获取活动网页的文本和结构信息，并向页面注入辅助工具脚本。</li>
-          <li><strong>nativeMessaging (本地消息通信)</strong>: 连接并启动本地运行的 Python 宿主后台程序（进行进程间通信）。</li>
-          <li><strong>declarativeNetRequest (网络请求拦截)</strong>: 用于实现 CSP (内容安全策略) 的绕过开关，方便本地 Agent 进行自由的网页脚本操控。</li>
-          <li><strong>storage (本地存储)</strong>: 存储插件配置项（例如您的此项同意状态及 CSP 绕过设置）。</li>
-          <li><strong>tabs / tabGroups (标签及群组)</strong>: 创建、激活、编组、关闭浏览器标签页以管理任务工作区。</li>
-          <li><strong>downloads (下载管理)</strong>: 列出并管理浏览器下载任务。</li>
+          <li>
+            <strong>debugger (调试器)</strong>: 通过开发者工具协议 (CDP) 模拟鼠标点击、键盘输入、页面滚动、悬停、截图，以及记录控制台与网络日志。<br>
+            <em>Simulates mouse clicks, keyboard input, page scrolling, hovering, capturing screenshots, and recording console/network logs via CDP.</em>
+          </li>
+          <li>
+            <strong>activeTab / scripting (活动标签页/脚本注入)</strong>: 获取活动网页的文本和结构信息，并向页面注入辅助工具脚本。<br>
+            <em>Accesses active webpage text/structure and injects helper scripts.</em>
+          </li>
+          <li>
+            <strong>nativeMessaging (本地消息通信)</strong>: 连接并启动本地运行的 Python 宿主后台程序。<br>
+            <em>Connects to and launches the locally running Python host backend.</em>
+          </li>
+          <li>
+            <strong>declarativeNetRequest (网络请求拦截)</strong>: 实现 CSP (内容安全策略) 的绕过开关，方便本地 Agent 操控网页。<br>
+            <em>Intercepts and strips CSP headers to facilitate page script execution by the Agent.</em>
+          </li>
+          <li>
+            <strong>storage (本地存储)</strong>: 存储插件配置项（例如您的此项同意状态及 CSP 绕过设置）。<br>
+            <em>Stores configuration settings (such as agreement status and CSP bypass settings).</em>
+          </li>
+          <li>
+            <strong>tabs / tabGroups (标签及群组)</strong>: 创建、激活、编组、关闭浏览器标签页以管理工作区。<br>
+            <em>Creates, activates, groups, and closes browser tabs to manage workspaces.</em>
+          </li>
+          <li>
+            <strong>downloads (下载管理)</strong>: 列出并管理浏览器下载任务。<br>
+            <em>Lists and manages browser download tasks.</em>
+          </li>
         </ul>
 
-        <h3>🔒 可能会读取的隐私和数据信息：</h3>
+        <h3>🔒 可能会读取的隐私和数据信息 / Private Information & Data Collected:</h3>
         <ul>
-          <li><strong>本地浏览器历史记录</strong>：通过本地 Python 宿主直接读取 Chrome/Edge 浏览器历史数据库（仅在本地响应 Agent 查询请求，绝不外发）。</li>
-          <li><strong>本地浏览器书签</strong>：读取本地书签文件以检索快捷方式。</li>
-          <li><strong>页面会话数据与快照</strong>：获取当前打开页面的完整 URL、标题、DOM 树、可读文本，以及页面视觉渲染截图。</li>
-          <li><strong>页面操作记录</strong>：在录制模式下记录您对页面的交互行为。</li>
+          <li>
+            <strong>本地浏览器历史记录 / Local Browser History</strong>：通过本地 Python 宿主读取 Chrome/Edge 浏览器历史数据库（仅在本地响应 Agent 查询，绝不外发）。<br>
+            <em>Reads Chrome/Edge browser history databases locally (only queries locally for your Agent, never sent externally).</em>
+          </li>
+          <li>
+            <strong>本地浏览器书签 / Local Browser Bookmarks</strong>：读取本地书签文件以检索快捷方式。<br>
+            <em>Reads local bookmarks files to retrieve shortcuts.</em>
+          </li>
+          <li>
+            <strong>页面会话数据与快照 / Page Session Data & Snapshots</strong>：获取当前打开页面的完整 URL、标题、DOM 树、可读文本，以及网页视觉截图。<br>
+            <em>Accesses current page URLs, titles, DOM trees, readable text, and screenshots.</em>
+          </li>
+          <li>
+            <strong>页面操作记录 / Page Interaction Recording</strong>：在录制模式下记录您对页面的交互行为。<br>
+            <em>Records your page interaction activities when recording mode is active.</em>
+          </li>
         </ul>
 
-        <h3>⚠️ 绕过 CSP (内容安全策略) 的风险提示：</h3>
-        <p>本插件提供了可选的“Bypass CSP”选项，开启后会拦截并剥离网页的 Content Security Policy 响应头。这能让您的 Agent 顺利在任意网页注入和运行自定义脚本，<strong>但它会降低浏览器对跨站脚本 (XSS) 攻击的防御能力</strong>。在开启此功能期间，请避免浏览不受信任的网页，并确保仅运行来自可信来源的 Agent 任务。</p>
+        <h3>⚠️ 绕过 CSP 的风险提示 / Risks of Bypassing CSP:</h3>
+        <p>
+          本插件提供了可选的“Bypass CSP”选项，开启后会拦截并剥离网页的 Content Security Policy 响应头。这能让您的 Agent 顺利在任意网页注入和运行自定义脚本，<strong>但它会降低浏览器对跨站脚本 (XSS) 攻击的防御能力</strong>。在开启此功能期间，请避免浏览不受信任的网页，并确保仅运行来自可信来源的 Agent 任务。<br>
+          <em>This extension provides an optional "Bypass CSP" feature which intercepts and strips Content Security Policy response headers. While this allows your Agent to run custom scripts on any webpage, <strong>it lowers the browser's defense-in-depth security against Cross-Site Scripting (XSS) attacks</strong>. During the period this feature is active, please avoid browsing untrusted webpages and ensure you only execute Agent tasks from trusted sources.</em>
+        </p>
 
-        <h3>⚠️ 安全承诺与提示：</h3>
-        <p>本插件和本地宿主服务<strong>完全运行在您本地的系统环境中，不包含任何远程云端服务或数据上报代码</strong>。所有敏感信息仅通过本地回环地址端口（127.0.0.1）提供给您自己运行的本地 Agent 使用，绝不会上传给任何第三方。请确保您运行的本地 Agent 也是安全可信的。</p>
+        <h3>⚠️ 免责与风险承担声明 / Liability & Assumption of Risk Disclaimer:</h3>
+        <p>
+          <strong>本插件完全基于您自愿选择启用。一旦您点击“同意并继续”，即代表您确认理解上述权限及隐私数据读取行为，并自愿承担因使用本插件所产生的一切安全与隐私风险。本插件及其开发者不承担任何直接、间接、附带或特殊的法律责任与损失。</strong><br>
+          <em><strong>Enabling this extension is entirely voluntary. By clicking "Agree and Continue", you acknowledge that you fully understand the requested permissions and private data access, and voluntarily assume all security and privacy risks associated with the use of this extension. The developers and contributors of this extension shall bear no liability for any direct, indirect, incidental, or special damages or losses.</strong></em>
+        </p>
+
+        <h3>⚠️ 安全承诺与提示 / Safety Commitments & General Tips:</h3>
+        <p>
+          本插件和本地宿主服务<strong>完全运行在您本地的系统环境中，不包含任何远程云端服务或数据上报代码</strong>。所有敏感信息仅通过本地回环地址端口（127.0.0.1）提供给您自己运行的本地 Agent 使用，绝不会上传给任何第三方。请确保您运行的本地 Agent 也是安全可信的。<br>
+          <em>This extension and its local host service <strong>run entirely within your local system environment and contain no remote cloud service communication or telemetry reporting code</strong>. All sensitive information is exposed solely via the local loopback address (127.0.0.1) for use by your own local Agent and is never uploaded to any third party. Please ensure that the local Agent you run is also secure and trusted.</em>
+        </p>
       </div>
       <div class="disclaimer-actions">
-        <button id="agree-btn" class="primary-btn">同意并继续</button>
-        <button id="decline-btn">拒绝</button>
+        <button id="agree-btn" class="primary-btn">同意并继续 / Agree and Continue</button>
+        <button id="decline-btn">拒绝 / Decline</button>
       </div>
       <div id="decline-warning" style="display: none;" class="warning-box">
-        您必须同意免责声明才能开始使用本插件。
+        您必须同意免责声明才能开始使用本插件。<br>
+        <em>You must agree to the disclaimer to use this extension.</em>
       </div>
     </div>
 
