@@ -242,6 +242,8 @@ async function handleRpc(request) {
       return domSelect(params);
     case 'dom.hover':
       return domHover(params);
+    case 'dom.scroll':
+      return domScroll(params);
     case 'computer.click':
       return computerClick(params);
     case 'computer.drag':
@@ -318,6 +320,7 @@ async function extensionInfo() {
       'dom.type',
       'dom.select',
       'dom.hover',
+      'dom.scroll',
       'computer.click',
       'computer.drag',
       'computer.type',
@@ -970,6 +973,72 @@ async function domHover(params) {
   });
   await recordAction(tabId, 'dom.hover', { selector: params.selector, index, frameSelector: params.frameSelector || null }, result);
   return { ok: true, element: result };
+}
+
+async function domScroll(params) {
+  const tabId = assertTabId(params.tabId);
+  await assertTabAllowed(tabId, 'dom.scroll');
+  const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+  const x = typeof params.x === 'number' ? params.x : 0;
+  const y = typeof params.y === 'number' ? params.y : 0;
+  const mode = params.mode === 'scrollTo' ? 'scrollTo' : 'scrollBy';
+  const behavior = params.behavior === 'smooth' ? 'smooth' : 'auto';
+
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (selector, index, x, y, mode, behavior, frameSelector) => {
+      const root = resolveDomRoot(frameSelector);
+      let target;
+      if (selector) {
+        target = root.querySelectorAll(selector)[index];
+        if (!target) throw new Error(`Element not found: ${selector} at index ${index}`);
+      } else {
+        target = frameSelector ? root.defaultView || root : window;
+      }
+
+      if (target.scrollBy || target.scrollTo) {
+        target[mode]({ left: x, top: y, behavior });
+      } else if (target.document && (target.document.documentElement || target.document.body)) {
+        const docEl = target.document.documentElement || target.document.body;
+        docEl[mode]({ left: x, top: y, behavior });
+      } else {
+        target[mode]({ left: x, top: y, behavior });
+      }
+
+      let currentX = 0;
+      let currentY = 0;
+      if (target === window || target.defaultView) {
+        currentX = window.scrollX;
+        currentY = window.scrollY;
+      } else if (target) {
+        currentX = target.scrollLeft;
+        currentY = target.scrollTop;
+      }
+
+      return {
+        scrolled: true,
+        scrollLeft: currentX,
+        scrollTop: currentY
+      };
+
+      function resolveDomRoot(frameSelector) {
+        if (!frameSelector) return document;
+        const frame = document.querySelector(frameSelector);
+        if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
+        try {
+          if (!frame.contentDocument) throw new Error('Frame document is not accessible');
+          return frame.contentDocument;
+        } catch {
+          throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
+        }
+      }
+    },
+    args: [params.selector || null, index, x, y, mode, behavior, params.frameSelector || null],
+    world: 'MAIN'
+  });
+
+  await recordAction(tabId, 'dom.scroll', { selector: params.selector || null, index, x, y, mode, behavior, frameSelector: params.frameSelector || null }, result);
+  return { ok: true, result };
 }
 
 async function computerClick(params) {

@@ -171,6 +171,8 @@ dom.query
 dom.click
 dom.type
 dom.select
+dom.hover
+dom.scroll
 computer.click
 computer.drag
 computer.type

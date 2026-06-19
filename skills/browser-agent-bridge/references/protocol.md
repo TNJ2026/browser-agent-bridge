@@ -307,6 +307,23 @@ Hovers over an element by CSS selector and optional zero-based `index` (dispatch
 
 `frameSelector` requires a same-origin iframe. Cross-origin frames are blocked by the browser and return an explicit accessibility error.
 
+### `dom.scroll`
+
+Scrolls a specific element or the entire page/window.
+
+* `tabId` (number, required)
+* `selector` (string, optional): Selector of the element to scroll. If omitted, the main page/window is scrolled.
+* `index` (number, optional): Zero-based index of the matching selector, defaults to 0.
+* `x` (number, optional): Horizontal scroll position/offset (pixels), defaults to 0.
+* `y` (number, optional): Vertical scroll position/offset (pixels), defaults to 0.
+* `mode` (string, optional): `'scrollBy'` (scroll relative to current position) or `'scrollTo'` (scroll to absolute position). Defaults to `'scrollBy'`.
+* `behavior` (string, optional): `'auto'` or `'smooth'`. Defaults to `'auto'`.
+* `frameSelector` (string, optional): Selector of a same-origin iframe.
+
+```json
+{"tabId":123,"selector":"div.scrollable-list","x":0,"y":300,"mode":"scrollBy","behavior":"auto"}
+```
+
 ### `computer.click`
 
 Coordinates are CSS viewport coordinates.

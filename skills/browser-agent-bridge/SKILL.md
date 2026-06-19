@@ -98,7 +98,7 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 - Prefer `session.start` for multi-step tasks that should stay isolated in a Chrome tab group.
 - Check `policy.get` before operating on sensitive domains or using high-risk methods; use `policy.set` only when the user asks to change local allow/block rules.
 - Use `page.executeJavaScript` only when read-only methods are insufficient or when the user explicitly wants page scripting.
-- Prefer `dom.query`, `dom.click`, `dom.type`, `dom.select`, and `dom.hover` for ordinary page controls before falling back to viewport coordinates.
+- Prefer `dom.query`, `dom.click`, `dom.type`, `dom.select`, `dom.hover`, and `dom.scroll` for ordinary page controls before falling back to viewport coordinates.
 - Use `frameSelector` with `dom.*` and page wait methods for same-origin iframes. Cross-origin iframes are not accessible through DOM methods.
 - Use `page.waitForLoad`, `page.waitForSelector`, or `page.waitForText` after navigation or UI actions instead of sleeping blindly.
 - Use `computer.*` methods for visible UI automation. Coordinates are CSS viewport coordinates. Use `computer.hover` for cursor movements, and `computer.key` with combinations (e.g. "Control+a", "Meta+c") for keyboard shortcuts.
@@ -125,7 +125,7 @@ When the user asks to look up or navigate to a page they have visited before, or
 
 1. Read the accessibility tree or screenshot first.
 2. Try `dom.query` to find stable selectors for the target control.
-3. Call `dom.click`, `dom.type`, `dom.select`, or `dom.hover` when selector targeting is reliable.
+3. Call `dom.click`, `dom.type`, `dom.select`, `dom.hover`, or `dom.scroll` when selector targeting is reliable.
 4. Call `page.waitForSelector` or `page.waitForText` when the action should change page state.
 5. Fall back to `computer.click`, `computer.type`, `computer.key` (supporting combination shortcuts like "Control+a"), `computer.scroll`, or `computer.hover` when selector targeting is not enough.
 6. Read the page again to verify the result.
