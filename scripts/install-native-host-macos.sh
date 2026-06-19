@@ -24,7 +24,21 @@ HOST_PY="$ROOT_DIR/native/host.py"
 PYTHON_BIN="$(command -v python3 || command -v python)"
 HOST_WRAPPER="$ROOT_DIR/native/host-wrapper.macos.sh"
 MANIFEST_SRC="$ROOT_DIR/native/com.local.browser_agent_bridge.json"
-MANIFEST_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+
+OS="$(uname -s)"
+if [[ "$OS" == "Darwin" ]]; then
+  MANIFEST_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+elif [[ "$OS" == "Linux" ]]; then
+  if [[ -d "$HOME/.config/google-chrome" ]]; then
+    MANIFEST_DIR="$HOME/.config/google-chrome/NativeMessagingHosts"
+  else
+    MANIFEST_DIR="$HOME/.config/chromium/NativeMessagingHosts"
+  fi
+else
+  echo "Unsupported OS: $OS" >&2
+  exit 1
+fi
+
 MANIFEST_DST="$MANIFEST_DIR/com.local.browser_agent_bridge.json"
 
 if [[ -z "$PYTHON_BIN" ]]; then
