@@ -64,10 +64,18 @@ graph TD
 2. **Install Native Messaging Host / 安装原生消息宿主**
    Run the installation script with your Extension ID as the argument:
    
-   使用复制的插件 ID 作为参数运行以下安装脚本：
-   ```bash
-   ./scripts/install-native-host-macos.sh <extension-id>
-   ```
+   使用复制的插件 ID 作为参数运行对应平台的安装脚本：
+   
+   - **macOS / Linux**:
+     ```bash
+     ./scripts/install-native-host-macos.sh <extension-id>
+     ```
+   - **Windows**:
+     Open PowerShell as Administrator and run (以管理员权限打开 PowerShell 运行)：
+     ```powershell
+     powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 <extension-id>
+     ```
+
 
 3. **Verify Connection / 验证连接**
    - Reload the extension in `chrome://extensions`.
