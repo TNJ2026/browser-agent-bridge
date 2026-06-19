@@ -104,35 +104,110 @@ Authorization: Bearer <your-token-here>
 
 ## 🚀 Quick Start & Examples / 快速上手与示例
 
-### Shell RPC Commands / 终端命令行调用
-You can use the built-in helper scripts to quickly execute actions.
+This bridge exposes a local JSON-RPC server. You can control it using Python, curl, or the built-in scripts.
 
-你可以使用内置的助手脚本来快速执行命令：
+该桥接器在本地启动了 JSON-RPC 服务。您可以通过 Python、curl 或是项目内置脚本来控制浏览器。
 
-#### 1. List active tabs / 获取当前活跃标签页
-```bash
-scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{"query":{"active":true}}}'
-```
+---
 
-#### 2. Create a new tab / 新建标签页
-```bash
-scripts/rpc.sh '{"jsonrpc":"2.0","id":"2","method":"tabs.create","params":{"url":"https://example.com"}}'
-```
+### 1. Python SDK Client / Python 客户端调用 (推荐)
+The easiest way is to use the built-in `BrowserBridgeClient` in `scripts/browser_bridge_client.py`. It automatically loads your security token from `~/.browser-agent-bridge.env`.
 
-#### 3. Read visible page text / 读取当前页面文本
-```bash
-scripts/rpc.sh '{"jsonrpc":"2.0","id":"3","method":"page.readText","params":{"tabId":123}}'
-```
+推荐使用 `scripts/browser_bridge_client.py` 中内置的 `BrowserBridgeClient` 客户端，它会自动加载 `~/.browser-agent-bridge.env` 里的安全 Token：
 
-#### 4. Run Doctor Diagnostics / 运行系统诊断
-Verify if your local environment is correctly configured:
+```python
+import sys
+# Add scripts directory to path / 将 scripts 路径加入系统路径
+sys.path.append("./scripts")
+from browser_bridge_client import BrowserBridgeClient
 
-验证您的本地环境配置是否正确：
-```bash
-python3 scripts/doctor.py
+# 1. Initialize client (Token loaded automatically) / 初始化客户端（自动读取 Token）
+client = BrowserBridgeClient()
+
+# 2. Start an isolated session workspace (creates a Tab Group) / 启动独立隔离会话（创建浏览器标签组）
+print("Starting session...")
+res = client.rpc("session.start", {"name": "Test Session", "url": "https://example.com"})
+session_id = res["session"]["id"]
+tab_id = res["tab"]["id"]
+
+# 3. Wait for the page load / 等待网页加载完成
+client.rpc("page.waitForLoad", {"tabId": tab_id})
+
+# 4. Extract visible text from the page / 提取网页可视文本
+text = client.rpc("page.readText", {"tabId": tab_id})
+print("Page text content:", text[:200])
+
+# 5. Extract structured clean accessibility tree / 获取网页无障碍树
+tree = client.rpc("page.accessibilityTree", {"tabId": tab_id})
+print("Accessibility tree structures loaded.")
+
+# 6. Click an element using a CSS Selector / 通过 CSS 选择器点击元素
+# client.rpc("dom.click", {"tabId": tab_id, "selector": "a"})
+
+# 7. Take a screenshot for visual feedback / 对视口进行截图
+# client.rpc("page.screenshot", {"tabId": tab_id})
+
+# 8. Clean up and close the session workspace / 销毁并关闭会话工作区
+print("Closing session...")
+client.rpc("session.stop", {"sessionId": session_id})
 ```
 
 ---
+
+### 2. Direct HTTP curl Command / 通过 curl 接口直接调用
+You can perform raw HTTP POST requests to send JSON-RPC commands. Make sure to attach the bearer token.
+
+您也可以直接通过 `curl` 命令行工具进行 JSON-RPC 接口请求。请确保在请求头中附带正确的 Bearer Token。
+
+```bash
+# Load token / 载入环境变量
+source ~/.browser-agent-bridge.env
+
+# Send a tabs.list request / 获取标签页列表
+curl -X POST http://127.0.0.1:8765/rpc \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $BROWSER_AGENT_BRIDGE_TOKEN" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "get-tabs",
+    "method": "tabs.list",
+    "params": {}
+  }'
+```
+
+---
+
+### 3. Built-in Helper Scripts / 项目内置工具脚本
+
+We provide multiple helper command-line utilities in the `scripts/` folder:
+
+我们提供了一系列实用的终端助手工具：
+
+- **Doctor Diagnostic Utility (运行系统健康诊断)**:
+  ```bash
+  python3 scripts/doctor.py
+  ```
+- **Quick HTTP RPC Client (快速 HTTP 接口调用)**:
+  ```bash
+  source ~/.browser-agent-bridge.env
+  scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{}}'
+  ```
+- **Interactive Python Client (Python 命令行客户端)**:
+  ```bash
+  # Check health / 获取健康状态
+  python3 scripts/browser_bridge_client.py health
+  
+  # Call arbitrary RPC / 运行任意 RPC
+  python3 scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true}}'
+  ```
+- **WebSocket Event Listener & Client (Node.js 实时事件流监听)**:
+  ```bash
+  # Listen and stream events like console logs or page network events / 持续监听控制台与网络流事件
+  node scripts/ws-rpc.js --listen
+  ```
+
+---
+
 
 ## 📡 JSON-RPC API Reference / 接口参考
 
