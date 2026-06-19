@@ -25,7 +25,7 @@ mkdir -p \
 
 cp "$ZIP_PATH" "$RELEASE_DIR/extension/"
 cp "$ROOT_DIR/native/host.py" "$RELEASE_DIR/native/"
-cp "$ROOT_DIR/native/host-wrapper.macos.sh" "$RELEASE_DIR/native/"
+cp "$ROOT_DIR/native/host-wrapper.sh" "$RELEASE_DIR/native/"
 cp "$ROOT_DIR/native/host-wrapper.win.bat" "$RELEASE_DIR/native/"
 cp "$ROOT_DIR/native/com.local.browser_agent_bridge.json" "$RELEASE_DIR/native/"
 cp "$ROOT_DIR/scripts/install-native-host-unix.sh" "$RELEASE_DIR/scripts/"

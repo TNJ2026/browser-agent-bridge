@@ -23,7 +23,7 @@ def run_smoke_test():
 
 
     local_page = Path(__file__).resolve().parent / "smoke_test.html"
-    file_url = f"file://{local_page.resolve()}"
+    file_url = local_page.resolve().as_uri()
     print(f"Loading local test page: {file_url}")
 
     # 1. Create a new tab and wait for it to load

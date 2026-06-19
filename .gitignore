@@ -1,10 +1,7 @@
-*.log
-.DS_Store
-node_modules/
-dist/
-build/
 __pycache__/
 *.pyc
-key.pem
-extension/_metadata/
-
+node_modules/
+.DS_Store
+.env
+dist/
+*.zip

@@ -138,7 +138,7 @@ def check_repo_files(checks):
         "extension/manifest.json",
         "extension/service-worker.js",
         "native/host.py",
-        "native/host-wrapper.macos.sh",
+        "native/host-wrapper.sh",
         "native/host-wrapper.win.bat",
         "native/com.local.browser_agent_bridge.json",
         "scripts/install-native-host-unix.sh",
@@ -210,7 +210,7 @@ def check_native_manifest(checks):
 
 def check_wrapper(checks):
     platform_name = current_platform()
-    wrapper = ROOT / "native" / ("host-wrapper.win.bat" if platform_name == "windows" else "host-wrapper.macos.sh")
+    wrapper = ROOT / "native" / ("host-wrapper.win.bat" if platform_name == "windows" else "host-wrapper.sh")
     if not wrapper.exists():
         add(checks, "native.wrapper", "fail", "missing wrapper")
         return

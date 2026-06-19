@@ -55,7 +55,7 @@ fi
 
 HOST_PY="$ROOT_DIR/native/host.py"
 PYTHON_BIN="$(command -v python3 || command -v python || true)"
-HOST_WRAPPER="$ROOT_DIR/native/host-wrapper.macos.sh"
+HOST_WRAPPER="$ROOT_DIR/native/host-wrapper.sh"
 MANIFEST_SRC="$ROOT_DIR/native/com.local.browser_agent_bridge.json"
 
 if [[ -z "$PYTHON_BIN" ]]; then
@@ -128,7 +128,7 @@ fi
 
 export BROWSER_AGENT_BRIDGE_EXTENSION_ID="$EXTENSION_ID"
 
-exec "$PYTHON_BIN" "$HOST_PY"
+exec "$PYTHON_BIN" "$HOST_PY" "$@"
 EOF
 chmod +x "$HOST_WRAPPER"
 

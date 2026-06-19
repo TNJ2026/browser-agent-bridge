@@ -24,7 +24,7 @@ class TestDoctor(unittest.TestCase):
                 "extension/manifest.json",
                 "extension/service-worker.js",
                 "native/host.py",
-                "native/host-wrapper.macos.sh",
+                "native/host-wrapper.sh",
                 "native/host-wrapper.win.bat",
                 "native/com.local.browser_agent_bridge.json",
                 "scripts/install-native-host-unix.sh",
@@ -65,7 +65,7 @@ class TestDoctor(unittest.TestCase):
         checks = []
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_root = Path(tmpdir)
-            host_wrapper = tmp_root / "native" / "host-wrapper.macos.sh"
+            host_wrapper = tmp_root / "native" / "host-wrapper.sh"
             host_wrapper.parent.mkdir(parents=True)
             host_wrapper.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
             host_wrapper.chmod(0o755)
