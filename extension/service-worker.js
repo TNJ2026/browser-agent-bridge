@@ -757,6 +757,7 @@ async function domQuery(params) {
           tagName: element.tagName.toLowerCase(),
           id: element.id || '',
           name: element.getAttribute('name') || '',
+          placeholder: element.getAttribute('placeholder') || '',
           role: element.getAttribute('role') || '',
           type: element.getAttribute('type') || '',
           text: (element.innerText || element.textContent || '').trim().slice(0, 500),

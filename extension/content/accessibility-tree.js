@@ -212,6 +212,11 @@
       const text = labelledBy.split(/\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ').trim();
       if (text) return text.slice(0, 500);
     }
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea') {
+      const placeholder = el.getAttribute('placeholder');
+      if (placeholder) return placeholder.trim().slice(0, 500);
+    }
     return (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 500);
   }
 
