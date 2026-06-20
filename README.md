@@ -46,6 +46,20 @@ Prerequisites:
 - Google Chrome 116 or newer.
 - Python 3 installed locally.
 
+### Install via CRX (Release)
+
+Each release includes a pre-built `extension.crx` file. Depending on your browser, you might be able to install it directly:
+
+1. Download `extension.crx` from the latest release.
+2. Open your browser's extension management page (`chrome://extensions`, `edge://extensions`, etc.).
+3. Enable **Developer mode**.
+4. Drag and drop the `extension.crx` file into the page.
+
+> [!NOTE]
+> **Google Chrome and Microsoft Edge** usually block the installation of `.crx` files that are not downloaded from their official web stores. If the installation is blocked or the extension is disabled immediately, please use the **Manual installation** (Load unpacked) method below. Other Chromium-based browsers may allow it.
+
+After installing the extension, you still need to install the Native Messaging host. Make sure to copy the extension ID after installation and proceed to step 2 in the **Manual installation** section.
+
 ### Manual installation
 
 Use this path when you are setting up the bridge yourself.

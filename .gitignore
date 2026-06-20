@@ -7,3 +7,4 @@ dist/
 *.zip
 key.pem
 .browser-agent-bridge.env
+*.crx

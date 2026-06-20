@@ -46,6 +46,20 @@ graph TD
 - Google Chrome 116 或更高版本。
 - 本地已安装 Python 3。
 
+### 通过 CRX 安装 (Release)
+
+每个 Release 版本中都会包含一个预构建的 `extension.crx` 文件。根据您使用的浏览器不同，您也许可以直接安装它：
+
+1. 从最新的 Release 中下载 `extension.crx` 文件。
+2. 打开浏览器的扩展管理页面（如 `chrome://extensions`、`edge://extensions` 等）。
+3. 开启 **Developer mode** (开发者模式)。
+4. 将 `extension.crx` 文件拖拽到该页面中。
+
+> [!NOTE]
+> **Google Chrome 和 Microsoft Edge** 通常会拦截并非从官方商店下载的 `.crx` 文件安装。如果安装被阻止，或安装后扩展被立即禁用，请直接放弃此方法，并使用下方的 **手动安装**（加载未打包扩展）方法。部分其他基于 Chromium 的浏览器可能会允许这种拖拽安装。
+
+安装完扩展后，您仍然需要安装 Native Messaging host。请在安装后复制生成的扩展 ID，并继续执行 **手动安装** 部分的第 2 步。
+
 ### 手动安装
 
 用户自己配置时使用这条路径。
