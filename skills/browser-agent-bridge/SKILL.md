@@ -13,13 +13,15 @@ Agent -> 127.0.0.1:8765 /rpc or /ws -> native/host.py -> Chrome extension -> Chr
 
 ## Quick Start
 
-1. Check bridge health:
+1. Ask the user to open the extension side panel and click Start Bridge. The local HTTP/WebSocket bridge is unavailable while the side panel shows Stopped.
+
+2. Check bridge health:
 
 ```bash
 curl -sS http://127.0.0.1:8765/health
 ```
 
-2. If healthy and `extensionReady` is true, call JSON-RPC:
+3. If healthy and `extensionReady` is true, call JSON-RPC:
 
 ```bash
 curl -sS -H 'content-type: application/json' \
@@ -27,9 +29,9 @@ curl -sS -H 'content-type: application/json' \
   --data '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{}}'
 ```
 
-3. If `/health` reports `authRequired: true`, include `Authorization: Bearer $BROWSER_AGENT_BRIDGE_TOKEN`. The bundled `scripts/rpc.sh` and `scripts/ws-rpc.js` helpers do this automatically when the environment variable is set.
+4. If `/health` reports `authRequired: true`, include `Authorization: Bearer $BROWSER_AGENT_BRIDGE_TOKEN`. The bundled `scripts/rpc.sh` and `scripts/ws-rpc.js` helpers do this automatically when the environment variable is set.
 
-4. Use `POST /rpc` for one-shot calls. Use `ws://127.0.0.1:8765/ws` for a long-lived agent session or when you need streamed extension notifications.
+5. Use `POST /rpc` for one-shot calls. Use `ws://127.0.0.1:8765/ws` for a long-lived agent session or when you need streamed extension notifications.
 
 WebSocket helper:
 
@@ -49,13 +51,13 @@ Python client:
 scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
 ```
 
-5. Prefer `tabs.list` first to discover `tabId`. Use active/current-window query when the user's task concerns the current tab:
+6. Prefer `tabs.list` first to discover `tabId`. Use active/current-window query when the user's task concerns the current tab:
 
 ```json
 {"query":{"active":true,"currentWindow":true}}
 ```
 
-6. For detailed method parameters, read `references/protocol.md`.
+7. For detailed method parameters, read `references/protocol.md`.
 
 ## Platform Setup
 
@@ -67,6 +69,113 @@ First, you can diagnose the current state using:
 ```bash
 python3 scripts/doctor.py --skip-live
 ```
+
+### First-Time Agent Installation Checklist
+
+When this skill is used in a fresh workspace, the Agent SHOULD perform this checklist before trying browser automation:
+
+1. Confirm the repository layout from the repository root:
+   - `extension/manifest.json`
+   - `extension/service-worker.js`
+   - `extension/approval.html`
+   - `extension/approval.js`
+   - `native/host.py`
+   - `native/com.local.browser_agent_bridge.json`
+   - `scripts/doctor.py`
+   - `scripts/sync-skill-scripts.sh`
+   - the platform installer under `scripts/`
+   - this skill at `skills/browser-agent-bridge/SKILL.md`
+   - the skill script snapshot under `skills/browser-agent-bridge/scripts/`
+
+2. Derive the stable extension ID from `extension/manifest.json`. The manifest contains a fixed `key`; compute the ID from that key instead of asking the user to copy it from `chrome://extensions`.
+
+   ```bash
+   python3 - <<'PY'
+import base64
+import hashlib
+import json
+from pathlib import Path
+manifest = json.loads(Path("extension/manifest.json").read_text())
+pub_key_der = base64.b64decode(manifest["key"])
+sha = hashlib.sha256(pub_key_der).hexdigest()
+extension_id = "".join(chr(int(char, 16) + 97) for char in sha[:32])
+print(extension_id)
+PY
+   ```
+
+   Expected stable ID: `aodcpicfepmdmpfaflncbndcicoemdje`.
+
+3. Ask the user to load the unpacked extension manually if it is not already loaded:
+   - Open `chrome://extensions`.
+   - Enable Developer mode.
+   - Load this repository's `extension/` directory.
+   - Reload the extension after any local extension source change.
+
+4. Run the offline setup doctor:
+
+   ```bash
+   python3 scripts/doctor.py --skip-live
+   ```
+
+   Inspect these checks:
+   - `repo.files`: required project files exist, including approval popup files.
+   - `repo.install_layout`: agent-run installers are in `scripts/`; generated launchers are in `native/`.
+   - `skill.scripts.snapshot`: copied script snapshots under `skills/browser-agent-bridge/scripts/` match top-level `scripts/`.
+   - `extension.manifest`: MV3 manifest is valid.
+   - `extension.permissions`: unwanted permissions such as `history` are absent.
+   - `native.manifest.installed`: browser Native Messaging manifest exists.
+   - `native.manifest.path`: manifest path points to a runnable wrapper.
+   - `native.manifest.origins`: includes `chrome-extension://aodcpicfepmdmpfaflncbndcicoemdje/`.
+   - `native.wrapper`: wrapper loads token env file, pins extension ID, and launches `native/host.py`.
+   - `auth.env_file`: token file exists and is private on macOS/Linux.
+   - `auth.env_token`: token is available to the Agent or client.
+   - `package.freshness`: release zip is up to date when preparing distribution.
+
+5. If `skill.scripts.snapshot` warns, synchronize the skill script snapshot and reinstall or re-link the skill if it has already been copied to the agent's skill directory:
+
+   ```bash
+   scripts/sync-skill-scripts.sh
+   ```
+
+   The snapshot is for offline reference and freshness checking. When this repository is available, execute top-level `scripts/` from the repository root, not the snapshot under `skills/browser-agent-bridge/scripts/`.
+
+6. If native manifest, wrapper, or token checks fail, run the platform installer with the stable extension ID. These commands write outside the repository, so a sandboxed Agent MUST request elevated permission before running them.
+
+   macOS / Linux:
+
+   ```bash
+   ./scripts/install-native-host-unix.sh aodcpicfepmdmpfaflncbndcicoemdje
+   ```
+
+   Use `--browser chromium|brave|edge|all` when the user is not using Google Chrome.
+
+   Windows:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 aodcpicfepmdmpfaflncbndcicoemdje
+   ```
+
+7. Ask the user to reload the unpacked extension, open the side panel, accept the initial disclaimer/Chrome permission prompts, click Start Bridge, and keep runtime approval enabled unless the user explicitly disables it.
+
+8. Verify the local bridge:
+
+   ```bash
+   scripts/browser_bridge_client.py health
+   scripts/browser_bridge_client.py rpc native.status
+   scripts/browser_bridge_client.py rpc extension.info
+   ```
+
+   Check that `/health` is reachable, `authRequired` is handled with the generated token, and `extensionReady` is true. If health is unreachable and the side panel shows Stopped, ask the user to click Start Bridge.
+
+9. Trigger one sensitive RPC to verify runtime approval behavior:
+
+   ```bash
+   scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+   ```
+
+   If the side panel is open, approval should appear there. If it is closed, Chrome should show a notification and open the extension approval popup.
+
+10. If any check fails, do not proceed with page automation until the specific failing item is fixed. Prefer re-running `python3 scripts/doctor.py --skip-live` after each repair.
 
 ### Install or Repair the Native Host
 
@@ -121,11 +230,11 @@ When initialized in a new user workspace, the Agent SHOULD proactively check the
    - For macOS/Linux: run `./scripts/install-native-host-unix.sh aodcpicfepmdmpfaflncbndcicoemdje` to register the native messaging host. Use `--browser chromium|brave|edge|all` when the user is not using Google Chrome.
    - For Windows: run `powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 aodcpicfepmdmpfaflncbndcicoemdje`.
 3. Automatically load the generated token from `~/.browser-agent-bridge.env` on macOS/Linux or `%USERPROFILE%\.browser-agent-bridge.env` on Windows into the environment or credentials and proceed with client operations.
-4. Reload the unpacked extension in `chrome://extensions`, then open the extension side panel so Chrome starts the native host.
+4. Reload the unpacked extension in `chrome://extensions`, then open the extension side panel and ask the user to click Start Bridge so Chrome starts the native host.
 
 ## Troubleshooting
 
-If `/health` fails, the native host is not running. Native Messaging starts it only after Chrome loads the extension and connects.
+If `/health` fails, the native host is not running. Native Messaging starts only after Chrome loads the extension and the user clicks Start Bridge in the side panel. If the user clicked Stop Bridge, auto-reconnect is paused until Start Bridge is clicked again.
 
 If `/health` works and `authRequired` is true, make sure the agent process has the same `BROWSER_AGENT_BRIDGE_TOKEN` as the native host.
 
@@ -134,7 +243,8 @@ On macOS/Linux, the native wrapper loads `~/.browser-agent-bridge.env`. On Windo
 If `/health` works but `extensionReady` is false:
 
 - Tell the user to load or reload the unpacked extension from the repo's `extension/` directory.
-- Tell the user to run the platform installer after copying the Chrome extension ID: `scripts/install-native-host-unix.sh <extension-id>` on macOS/Linux or `scripts/install-native-host-win.ps1 <extension-id>` on Windows.
+- Tell the user that the extension ID is stabilized by `extension/manifest.json`; use `aodcpicfepmdmpfaflncbndcicoemdje` unless the manifest key changed.
+- Tell the user to run the platform installer with the stable extension ID: `scripts/install-native-host-unix.sh aodcpicfepmdmpfaflncbndcicoemdje` on macOS/Linux or `scripts/install-native-host-win.ps1 aodcpicfepmdmpfaflncbndcicoemdje` on Windows.
 - Tell the user to reload the extension again after installing the native manifest.
 
 For a full setup check, run:

@@ -22,6 +22,8 @@ EXTENSION_ID = os.environ.get('BROWSER_AGENT_BRIDGE_EXTENSION_ID', '').strip()
 SAVE_DIR = Path(os.environ.get('BROWSER_AGENT_BRIDGE_SAVE_DIR', str(Path.home() / 'Downloads' / 'browser-agent-bridge')))
 ALLOW_CUSTOM_SAVE_DIR = os.environ.get('BROWSER_AGENT_BRIDGE_ALLOW_CUSTOM_SAVE_DIR', '').lower() in ('1', 'true', 'yes')
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
+ROOT = Path(__file__).resolve().parent.parent
+SITE_PATTERNS_DIR = ROOT / "skills" / "browser-agent-bridge" / "references" / "site-patterns"
 DATA_URL_RE = re.compile(r'^data:([^;,]+)?(;base64)?,(.*)$', re.DOTALL)
 
 extension_ready = False
@@ -114,6 +116,12 @@ def handle_native_message(message):
             waiter["event"].set()
         return
 
+    # Check local native RPCs sent by the extension service worker.
+    if "id" in message and "method" in message:
+        if message.get("method") in ("native.saveDataUrl", "native.sitePatterns"):
+            write_native_message(call_extension(message))
+        return
+
     # Check ping
     if message.get("type") == "ping":
         write_native_message({"type": "pong"})
@@ -156,6 +164,8 @@ def call_extension(request):
 
     if request.get("method") == "native.saveDataUrl":
         return handle_save_data_url(request)
+    if request.get("method") == "native.sitePatterns":
+        return handle_site_patterns(request)
 
     if not extension_ready:
         return {
@@ -221,6 +231,57 @@ def handle_save_data_url(request):
             "id": request.get("id"),
             "error": {"code": -32000, "message": str(e)}
         }
+
+def handle_site_patterns(request):
+    try:
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "result": {
+                "directory": str(SITE_PATTERNS_DIR),
+                "patterns": list_site_patterns()
+            }
+        }
+    except Exception as e:
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "error": {"code": -32000, "message": str(e)}
+        }
+
+def list_site_patterns():
+    if not SITE_PATTERNS_DIR.exists():
+        return []
+
+    patterns = []
+    for path in sorted(SITE_PATTERNS_DIR.glob("*.md")):
+        if path.name.startswith("."):
+            continue
+        stat = path.stat()
+        content = path.read_text(encoding="utf-8", errors="replace")
+        patterns.append({
+            "domain": path.stem,
+            "filename": path.name,
+            "path": str(path),
+            "updatedAt": int(stat.st_mtime * 1000),
+            "bytes": stat.st_size,
+            "summary": extract_site_pattern_summary(content),
+            "content": content
+        })
+    return patterns
+
+def extract_site_pattern_summary(content):
+    lines = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            if lines:
+                break
+            continue
+        lines.append(line)
+        if len(" ".join(lines)) >= 180:
+            break
+    return " ".join(lines)[:240]
 
 def save_data_url(params):
     data_url = params.get("dataUrl")

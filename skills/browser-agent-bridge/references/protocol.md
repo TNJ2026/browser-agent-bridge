@@ -113,6 +113,17 @@ The `directory` parameter requires the native host to start with `BROWSER_AGENT_
 {"jsonrpc":"2.0","id":"save","method":"native.saveDataUrl","params":{"dataUrl":"data:image/png;base64,...","filename":"page.png"}}
 ```
 
+### `native.sitePatterns`
+
+Native-host local method. Lists Agent-maintained site summaries from
+`skills/browser-agent-bridge/references/site-patterns/*.md`. The side panel uses
+this method to show reusable site knowledge below Settings after Bridge is
+started.
+
+```json
+{"jsonrpc":"2.0","id":"patterns","method":"native.sitePatterns","params":{}}
+```
+
 ### `tabs.list`
 
 Parameters:

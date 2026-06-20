@@ -34,6 +34,7 @@ cp "$ROOT_DIR/scripts/install-native-host-unix.sh" "$RELEASE_DIR/scripts/"
 cp "$ROOT_DIR/scripts/install-native-host-macos.sh" "$RELEASE_DIR/scripts/"
 cp "$ROOT_DIR/scripts/install-native-host-win.ps1" "$RELEASE_DIR/scripts/"
 cp "$ROOT_DIR/scripts/rpc.sh" "$RELEASE_DIR/scripts/"
+cp "$ROOT_DIR/scripts/sync-skill-scripts.sh" "$RELEASE_DIR/scripts/"
 cp "$ROOT_DIR/scripts/ws-rpc.js" "$RELEASE_DIR/scripts/"
 cp "$ROOT_DIR/scripts/browser_bridge_client.py" "$RELEASE_DIR/scripts/"
 cp "$ROOT_DIR/scripts/doctor.py" "$RELEASE_DIR/scripts/"
@@ -42,6 +43,7 @@ cp "$ROOT_DIR/README.zh-CN.md" "$RELEASE_DIR/"
 cp "$ROOT_DIR/docs/protocol.md" "$RELEASE_DIR/docs/"
 cp -R "$ROOT_DIR/skills/browser-agent-bridge" "$RELEASE_DIR/skills/"
 find "$RELEASE_DIR" -name '.DS_Store' -type f -delete
+find "$RELEASE_DIR" -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 cat > "$RELEASE_DIR/release.json" <<EOF
 {

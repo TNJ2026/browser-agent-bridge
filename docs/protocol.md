@@ -2,6 +2,8 @@
 
 Requests sent to `POST http://127.0.0.1:8765/rpc` are forwarded to the Chrome extension. Agents can also connect to `ws://127.0.0.1:8765/ws` for the same JSON-RPC request/response protocol plus streamed extension notifications.
 
+The local HTTP/WebSocket bridge is available only while the user has clicked Start Bridge in the extension side panel. Stop Bridge disconnects the Native Messaging host and pauses automatic reconnects.
+
 ## Endpoints
 
 ```text
@@ -127,6 +129,17 @@ The `directory` parameter is accepted only when the native host is started with 
   "dataUrl": "data:image/png;base64,...",
   "filename": "page.png"
 }
+```
+
+### `native.sitePatterns`
+
+Native-host local method. Lists Agent-maintained site summaries from
+`skills/browser-agent-bridge/references/site-patterns/*.md`. The side panel uses
+this method to show reusable site knowledge below Settings after Bridge is
+started.
+
+```json
+{}
 ```
 
 ### `tabs.list`

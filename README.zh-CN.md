@@ -46,9 +46,11 @@ graph TD
 - Google Chrome 116 或更高版本。
 - 本地已安装 Python 3。
 
-安装步骤：
+### 手动安装
 
-1. 加载未打包扩展。
+用户自己配置时使用这条路径。
+
+1. 在 Chrome 中加载未打包扩展。
    - 打开 `chrome://extensions`。
    - 开启 Developer mode。
    - 点击 Load unpacked，选择本仓库的 `extension/` 目录。
@@ -76,8 +78,97 @@ graph TD
 
 3. 验证连接。
    - 在 `chrome://extensions` 中重新加载扩展。
-   - 打开扩展侧边栏，状态应显示 Connected。
+   - 打开扩展侧边栏，同意初始提示，然后点击 Start Bridge。
+   - 侧边栏状态应显示 Connected。
    - 运行 `python3 scripts/doctor.py --skip-live` 检查平台相关的 Native Messaging 注册状态。
+
+### 使用 Agent 执行安装
+
+本地 coding agent 从本仓库配置 bridge 时使用这条路径。
+
+1. 用户仍然需要在 Chrome 中手动加载未打包扩展：
+   - 打开 `chrome://extensions`。
+   - 开启 Developer mode。
+   - 加载本仓库的 `extension/` 目录。
+   - `extension/manifest.json` 内置固定 `key`，因此扩展 ID 是稳定的。
+
+2. 让 Agent 安装 Browser Agent Bridge skill，便于后续会话自动使用。
+
+   可以把本仓库的 skill 目录复制或软链到 Agent 的 skills 目录：
+
+   ```bash
+   mkdir -p ~/.codex/skills
+   ln -s "$(pwd)/skills/browser-agent-bridge" ~/.codex/skills/browser-agent-bridge
+   ```
+
+   skill 目录内包含一份从仓库顶层 `scripts/` 复制过去的 `scripts/` 快照。这份快照用于离线参考和新鲜度检查；当本仓库可用时，Agent 应优先从仓库根目录执行顶层 `scripts/` 下的脚本。
+
+   如果目标路径已存在，只有在现有版本是最新时才保留；否则替换为本仓库的 `skills/browser-agent-bridge/` 目录。这一步会写入仓库外路径，受沙箱限制的 Agent 应在执行前申请提升权限。
+
+   安装 skill 后，重启 Agent 会话，让它发现新的 `browser-agent-bridge` 指令。
+
+3. 仓库脚本更新后，让 Agent 同步 skill 内的脚本快照：
+
+   ```bash
+   scripts/sync-skill-scripts.sh
+   ```
+
+   `python3 scripts/doctor.py --skip-live` 如果发现快照缺失或过期，会用 `skill.scripts.snapshot` 给出 warning。如果 skill 已经安装到 `~/.codex/skills`，同步后需要重新复制或重新软链 `skills/browser-agent-bridge/`。
+
+4. 让 Agent 在仓库根目录先执行诊断：
+
+   ```bash
+   python3 scripts/doctor.py --skip-live
+   ```
+
+5. 让 Agent 在安装 native host 前读取 `extension/manifest.json`，确认稳定扩展 ID。
+
+   当前稳定 ID 是：
+
+   ```text
+   aodcpicfepmdmpfaflncbndcicoemdje
+   ```
+
+   Agent 可以用下面的命令在本地确认：
+
+   ```bash
+   python3 - <<'PY'
+import base64
+import hashlib
+import json
+from pathlib import Path
+manifest = json.loads(Path("extension/manifest.json").read_text())
+pub_key_der = base64.b64decode(manifest["key"])
+sha = hashlib.sha256(pub_key_der).hexdigest()
+extension_id = "".join(chr(int(char, 16) + 97) for char in sha[:32])
+print(extension_id)
+PY
+   ```
+
+6. 如果 native manifest、wrapper 或 token 文件需要安装或修复，Agent 应使用稳定扩展 ID 执行 `scripts/` 下的平台安装脚本。
+
+   macOS / Linux：
+
+   ```bash
+   ./scripts/install-native-host-unix.sh aodcpicfepmdmpfaflncbndcicoemdje
+   ```
+
+   Windows：
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 aodcpicfepmdmpfaflncbndcicoemdje
+   ```
+
+   这些安装脚本会写入仓库外的位置，例如 `~/.browser-agent-bridge.env`、浏览器 Native Messaging manifest 目录，或 Windows `HKCU` 注册表项。在受沙箱限制的 Agent 环境中，Agent 应在执行前申请提升权限。
+
+7. 用户在 `chrome://extensions` 中重新加载扩展，打开侧边栏，同意初始扩展权限申请，并点击 Start Bridge。
+
+8. 让 Agent 验证连接：
+
+   ```bash
+   python3 scripts/doctor.py --skip-live
+   scripts/browser_bridge_client.py health
+   ```
 
 平台诊断：
 
@@ -117,6 +208,8 @@ Authorization: Bearer <your-token>
 ## 快速开始
 
 推荐使用 `scripts/browser_bridge_client.py` 中的 `BrowserBridgeClient`。它会在 macOS、Linux、Windows 上自动读取默认 token 文件。
+
+### 手动使用
 
 ```python
 import sys
@@ -162,6 +255,26 @@ python3 scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true}
 node scripts/ws-rpc.js --listen
 ```
 
+### Agent 使用
+
+安装完成并启用 `browser-agent-bridge` skill 后，Agent 可以结合 skill 指令和内置辅助脚本使用 bridge，而不需要手写 HTTP 请求：
+
+```bash
+scripts/browser_bridge_client.py health
+scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
+```
+
+执行站点级浏览或抓取任务时，Agent 应该：
+
+1. 先调用 `tabs.list` 找到当前活动页的 `tabId`。
+2. 优先使用只读方法，例如 `page.readText`、`page.accessibilityTree` 和 `dom.query`。
+3. 仅在必要时使用 `page.executeJavaScript`、`dom.*` 或 `computer.*`。
+4. 尊重运行时审批。侧边栏未打开时，扩展会打开审批弹窗。
+5. 将可复用的站点 selector、等待条件、提取逻辑、CSP 需求和坑点记录到 `skills/browser-agent-bridge/references/site-patterns/{domain}.md`。
+
+只有侧边栏里的 bridge 控制处于 Start 状态时，本地 HTTP/WebSocket bridge 才可用。如果用户点击 Stop Bridge，`scripts/browser_bridge_client.py health` 等辅助脚本会失败，直到用户再次点击 Start Bridge。
+
 ## JSON-RPC 接口摘要
 
 | 分类 | 方法 | 说明 |
@@ -206,5 +319,6 @@ node scripts/ws-rpc.js --listen
 
 - 标签页列表、截图、下载记录、网络日志等敏感操作需要运行时确认授权。
 - 如果侧边栏未打开，敏感调用会触发 Chrome 通知，并打开扩展审批弹窗。
+- Native Messaging host 默认不会自动启动。用户需要在侧边栏点击 Start Bridge 来运行它，点击 Stop Bridge 会断开连接并暂停自动重连。
 - 工作流录制默认会对输入文本脱敏，除非显式使用 `includeText: true`。
 - 默认策略禁止自动化 `chrome://*`、`chrome-extension://*` 和 Chrome Web Store 页面。

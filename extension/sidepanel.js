@@ -5,6 +5,11 @@ const errorEl = document.querySelector('#error');
 const bypassCspEl = document.querySelector('#bypass-csp');
 const bridgePortEl = document.querySelector('#bridge-port');
 const savePortBtn = document.querySelector('#save-port-btn');
+const startBridgeBtn = document.querySelector('#start-bridge-btn');
+const stopBridgeBtn = document.querySelector('#stop-bridge-btn');
+const reloadSitePatternsBtn = document.querySelector('#reload-site-patterns');
+const sitePatternsStatusEl = document.querySelector('#site-patterns-status');
+const sitePatternsListEl = document.querySelector('#site-patterns-list');
 // Unused settings checkboxes removed from UI
 const enableRuntimeApprovalEl = document.querySelector('#enable-runtime-approval');
 
@@ -22,6 +27,15 @@ const declineWarning = document.querySelector('#decline-warning');
 const REQUIRED_OPTIONAL_PERMISSIONS = ['tabs', 'tabGroups', 'downloads'];
 
 document.querySelector('#refresh').addEventListener('click', refresh);
+startBridgeBtn.addEventListener('click', async () => {
+  const response = await chrome.runtime.sendMessage({ type: 'START_BRIDGE' });
+  renderStatus(response.status);
+});
+stopBridgeBtn.addEventListener('click', async () => {
+  const response = await chrome.runtime.sendMessage({ type: 'STOP_BRIDGE' });
+  renderStatus(response.status);
+});
+reloadSitePatternsBtn.addEventListener('click', () => loadSitePatterns({ force: true }));
 
 // Check user agreement status on load
 chrome.storage.local.get('agreedToDisclaimer').then(result => {
@@ -147,6 +161,9 @@ function getCategoryLabel(category) {
 }
 
 let initialized = false;
+let latestNativeConnected = false;
+let sitePatternsLoaded = false;
+
 function initializePanel() {
   if (initialized) return;
   initialized = true;
@@ -231,10 +248,103 @@ async function refresh() {
 
 function renderStatus(status) {
   const connected = status?.state === 'connected';
-  statusEl.textContent = connected ? 'Connected' : 'Disconnected';
+  const stopped = status?.state === 'stopped';
+  const wasConnected = latestNativeConnected;
+  latestNativeConnected = connected;
+  statusEl.textContent = connected ? 'Connected' : stopped ? 'Stopped' : 'Disconnected';
   statusEl.classList.toggle('connected', connected);
   statusEl.classList.toggle('disconnected', !connected);
   hostNameEl.textContent = status?.hostName || '-';
   lastCheckedEl.textContent = status?.lastChecked ? new Date(status.lastChecked).toLocaleString() : '-';
   errorEl.textContent = status?.error || '-';
+  startBridgeBtn.disabled = connected;
+  stopBridgeBtn.disabled = stopped || !status?.bridgeEnabled;
+  reloadSitePatternsBtn.disabled = !connected;
+  if (!connected) {
+    sitePatternsLoaded = false;
+    sitePatternsStatusEl.textContent = stopped
+      ? 'Start Bridge to load site summaries.'
+      : 'Bridge is disconnected. Site summaries are unavailable.';
+    sitePatternsListEl.textContent = '';
+    return;
+  }
+  if (!wasConnected || !sitePatternsLoaded) {
+    loadSitePatterns();
+  }
+}
+
+async function loadSitePatterns({ force = false } = {}) {
+  if (!latestNativeConnected) return;
+  if (sitePatternsLoaded && !force) return;
+  reloadSitePatternsBtn.disabled = true;
+  sitePatternsStatusEl.textContent = 'Loading site summaries...';
+  sitePatternsListEl.textContent = '';
+
+  try {
+    const result = await sendRpc('native.sitePatterns');
+    const patterns = Array.isArray(result?.patterns) ? result.patterns : [];
+    sitePatternsLoaded = true;
+    renderSitePatterns(patterns);
+  } catch (error) {
+    sitePatternsLoaded = false;
+    sitePatternsStatusEl.textContent = error?.message || 'Failed to load site summaries.';
+  } finally {
+    reloadSitePatternsBtn.disabled = !latestNativeConnected;
+  }
+}
+
+async function sendRpc(method, params = {}) {
+  const response = await chrome.runtime.sendMessage({
+    type: 'RPC',
+    request: {
+      jsonrpc: '2.0',
+      id: `sidepanel-${method}-${Date.now()}`,
+      method,
+      params
+    }
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || `RPC failed: ${method}`);
+  }
+  return response.result;
+}
+
+function renderSitePatterns(patterns) {
+  sitePatternsListEl.textContent = '';
+  if (patterns.length === 0) {
+    sitePatternsStatusEl.textContent = 'No site summaries yet.';
+    return;
+  }
+
+  sitePatternsStatusEl.textContent = `${patterns.length} site summar${patterns.length === 1 ? 'y' : 'ies'}`;
+  for (const pattern of patterns) {
+    const details = document.createElement('details');
+    details.className = 'site-pattern';
+
+    const summary = document.createElement('summary');
+    const title = document.createElement('span');
+    title.className = 'site-pattern-title';
+    title.textContent = pattern.domain || pattern.filename || 'unknown';
+    summary.appendChild(title);
+
+    if (pattern.updatedAt) {
+      const updated = document.createElement('span');
+      updated.className = 'site-pattern-updated';
+      updated.textContent = new Date(pattern.updatedAt).toLocaleString();
+      summary.appendChild(updated);
+    }
+
+    const excerpt = document.createElement('p');
+    excerpt.className = 'site-pattern-excerpt';
+    excerpt.textContent = pattern.summary || 'No summary excerpt.';
+
+    const content = document.createElement('pre');
+    content.className = 'site-pattern-content';
+    content.textContent = pattern.content || '';
+
+    details.appendChild(summary);
+    details.appendChild(excerpt);
+    details.appendChild(content);
+    sitePatternsListEl.appendChild(details);
+  }
 }

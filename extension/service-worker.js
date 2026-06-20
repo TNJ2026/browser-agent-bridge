@@ -18,9 +18,11 @@ const RECORDINGS_STORAGE_KEY = 'browserAgentBridgeRecordings';
 let nativePort = null;
 let nextRequestId = 1;
 let reconnectTimer = null;
+let bridgeEnabledCache = false;
 let nativeStatus = {
-  state: 'disconnected',
+  state: 'stopped',
   hostName: NATIVE_HOST,
+  bridgeEnabled: false,
   lastChecked: Date.now()
 };
 const pendingNativeRequests = new Map();
@@ -50,13 +52,15 @@ const DEFAULT_POLICY = {
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.remove('sessionPermissions').catch(() => {});
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
-  connectNative();
+  await initializeBridgeEnabled().catch(err => console.error(err));
+  await connectNative();
   await initCspBypass().catch(err => console.error(err));
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await chrome.storage.local.remove('sessionPermissions').catch(() => {});
-  connectNative();
+  await initializeBridgeEnabled().catch(err => console.error(err));
+  await connectNative();
   await initCspBypass().catch(err => console.error(err));
 });
 
@@ -146,14 +150,33 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     if (changes.agreedToDisclaimer?.newValue === true) {
       connectNative();
     }
+    if (changes.bridgeEnabled !== undefined) {
+      bridgeEnabledCache = changes.bridgeEnabled.newValue === true;
+    }
     if (changes.enableRuntimeApproval !== undefined) {
       pushSettingsToNative();
     }
   }
 });
 
-connectNative();
+initializeBridgeEnabled().then(connectNative).catch(err => console.error(err));
 initCspBypass().catch(err => console.error(err));
+
+async function initializeBridgeEnabled() {
+  const result = await chrome.storage.local.get('bridgeEnabled');
+  if (result.bridgeEnabled === undefined) {
+    bridgeEnabledCache = false;
+    await chrome.storage.local.set({ bridgeEnabled: false });
+  } else {
+    bridgeEnabledCache = result.bridgeEnabled === true;
+  }
+}
+
+async function getBridgeEnabled() {
+  const result = await chrome.storage.local.get('bridgeEnabled');
+  bridgeEnabledCache = result.bridgeEnabled === true;
+  return bridgeEnabledCache;
+}
 
 async function connectNative() {
   if (nativePort) return;
@@ -162,6 +185,10 @@ async function connectNative() {
   const result = await chrome.storage.local.get('agreedToDisclaimer');
   if (result.agreedToDisclaimer !== true) {
     setNativeStatus('disconnected', 'Pending disclaimer agreement');
+    return;
+  }
+  if (!await getBridgeEnabled()) {
+    setNativeStatus('stopped', 'Bridge stopped');
     return;
   }
 
@@ -195,8 +222,16 @@ async function connectNative() {
     const error = chrome.runtime.lastError?.message;
     nativePort = null;
     rejectPendingNativeRequests(error || 'Native host disconnected');
-    setNativeStatus('disconnected', error);
-    scheduleReconnect();
+    getBridgeEnabled().then(enabled => {
+      if (enabled) {
+        setNativeStatus('disconnected', error);
+        scheduleReconnect();
+      } else {
+        setNativeStatus('stopped', 'Bridge stopped');
+      }
+    }).catch(() => {
+      setNativeStatus('disconnected', error);
+    });
   });
 
   const portResult = await chrome.storage.local.get('bridgePort');
@@ -220,13 +255,20 @@ async function pushSettingsToNative() {
 
 function scheduleReconnect() {
   clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(connectNative, 3000);
+  reconnectTimer = setTimeout(async () => {
+    if (await getBridgeEnabled()) {
+      await connectNative();
+    } else {
+      setNativeStatus('stopped', 'Bridge stopped');
+    }
+  }, 3000);
 }
 
 function setNativeStatus(state, error) {
   nativeStatus = {
     state,
     hostName: NATIVE_HOST,
+    bridgeEnabled: bridgeEnabledCache,
     lastChecked: Date.now(),
     ...(error ? { error } : {})
   };
@@ -237,8 +279,12 @@ function setNativeStatus(state, error) {
 async function handleRuntimeMessage(message, sender) {
   switch (message?.type) {
     case 'GET_NATIVE_STATUS':
-      connectNative();
+      if (await getBridgeEnabled()) await connectNative();
       return { ok: nativeStatus.state === 'connected', status: nativeStatus };
+    case 'START_BRIDGE':
+      return { ok: true, status: await startBridge() };
+    case 'STOP_BRIDGE':
+      return { ok: true, status: await stopBridge() };
     case 'GET_CSP_BYPASS':
       return { ok: true, ...(await extensionGetCspBypass()) };
     case 'SET_CSP_BYPASS': {
@@ -276,6 +322,27 @@ async function handleRuntimeMessage(message, sender) {
   }
 }
 
+async function startBridge() {
+  await chrome.storage.local.set({ bridgeEnabled: true });
+  bridgeEnabledCache = true;
+  await connectNative();
+  return nativeStatus;
+}
+
+async function stopBridge() {
+  clearTimeout(reconnectTimer);
+  await chrome.storage.local.set({ bridgeEnabled: false });
+  bridgeEnabledCache = false;
+  if (nativePort) {
+    const port = nativePort;
+    nativePort = null;
+    port.disconnect();
+  }
+  rejectPendingNativeRequests('Bridge stopped by user');
+  setNativeStatus('stopped', 'Bridge stopped');
+  return nativeStatus;
+}
+
 async function handleRpc(request) {
   if (!request || request.jsonrpc !== '2.0' || typeof request.method !== 'string') {
     throw new Error('Invalid JSON-RPC request');
@@ -295,6 +362,8 @@ async function handleRpc(request) {
       return extensionGetCspBypass();
     case 'native.status':
       return nativeStatus;
+    case 'native.sitePatterns':
+      return nativeRequest('native.sitePatterns', params);
     case 'tabs.list':
       return tabsList(params);
     case 'tabs.create':
@@ -401,6 +470,7 @@ async function extensionInfo() {
       'extension.reload',
       'extension.getCspBypass',
       'native.status',
+      'native.sitePatterns',
       'tabs.list',
       'tabs.create',
       'tabs.activate',
@@ -1741,7 +1811,20 @@ function nativeRequest(method, params) {
   const id = String(nextRequestId++);
   nativePort.postMessage({ jsonrpc: '2.0', id, method, params });
   return new Promise((resolve, reject) => {
-    pendingNativeRequests.set(id, { resolve, reject });
+    const timeoutId = setTimeout(() => {
+      pendingNativeRequests.delete(id);
+      reject(new Error(`Native request timed out: ${method}`));
+    }, 30000);
+    pendingNativeRequests.set(id, {
+      resolve: value => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      reject: error => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    });
   });
 }
 

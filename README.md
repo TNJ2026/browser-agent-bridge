@@ -46,9 +46,11 @@ Prerequisites:
 - Google Chrome 116 or newer.
 - Python 3 installed locally.
 
-Setup:
+### Manual installation
 
-1. Load the unpacked extension.
+Use this path when you are setting up the bridge yourself.
+
+1. Load the unpacked extension in Chrome.
    - Open `chrome://extensions`.
    - Enable Developer mode.
    - Click Load unpacked and select this repository's `extension/` directory.
@@ -76,8 +78,97 @@ Setup:
 
 3. Verify the connection.
    - Reload the extension in `chrome://extensions`.
-   - Open the extension side panel. It should show Connected.
+   - Open the extension side panel, accept the initial prompts, and click Start Bridge.
+   - The side panel should show Connected.
    - Run `python3 scripts/doctor.py --skip-live` to verify platform-specific Native Messaging registration.
+
+### Agent-assisted installation
+
+Use this path when a local coding agent is setting up the bridge from this repository.
+
+1. You still load the unpacked extension manually in Chrome:
+   - Open `chrome://extensions`.
+   - Enable Developer mode.
+   - Load this repository's `extension/` directory.
+   - The extension ID is stable because `extension/manifest.json` contains a fixed `key`.
+
+2. Ask the agent to install the Browser Agent Bridge skill for future runs.
+
+   For Codex-style agents, install by copying or symlinking this repository's skill directory into the agent skills directory:
+
+   ```bash
+   mkdir -p ~/.codex/skills
+   ln -s "$(pwd)/skills/browser-agent-bridge" ~/.codex/skills/browser-agent-bridge
+   ```
+
+   The skill directory includes a `scripts/` snapshot copied from the repository's top-level `scripts/` directory. This snapshot is for offline reference and freshness checks; when this repository is available, the agent should execute the top-level `scripts/` files from the repository root.
+
+   If the destination already exists, keep the existing copy only if it is current; otherwise replace it with this repository's `skills/browser-agent-bridge/` directory. This step writes outside the repository, so sandboxed agents should request elevated permission before doing it.
+
+   Restart the agent session after installing the skill so it can discover the new `browser-agent-bridge` instructions.
+
+3. Ask the agent to synchronize the skill script snapshot when repository scripts change:
+
+   ```bash
+   scripts/sync-skill-scripts.sh
+   ```
+
+   `python3 scripts/doctor.py --skip-live` warns with `skill.scripts.snapshot` when the skill snapshot is stale or missing. If the skill is already installed in `~/.codex/skills`, re-copy or re-link `skills/browser-agent-bridge/` after syncing.
+
+4. Ask the agent to diagnose setup from the repository root:
+
+   ```bash
+   python3 scripts/doctor.py --skip-live
+   ```
+
+5. Ask the agent to read the stable extension ID from `extension/manifest.json` before installing the native host.
+
+   The current stable ID is:
+
+   ```text
+   aodcpicfepmdmpfaflncbndcicoemdje
+   ```
+
+   The agent can confirm it locally with:
+
+   ```bash
+   python3 - <<'PY'
+import base64
+import hashlib
+import json
+from pathlib import Path
+manifest = json.loads(Path("extension/manifest.json").read_text())
+pub_key_der = base64.b64decode(manifest["key"])
+sha = hashlib.sha256(pub_key_der).hexdigest()
+extension_id = "".join(chr(int(char, 16) + 97) for char in sha[:32])
+print(extension_id)
+PY
+   ```
+
+6. If the native manifest, wrapper, or token file needs repair, the agent should run the platform installer from `scripts/` with the stable extension ID.
+
+   macOS / Linux:
+
+   ```bash
+   ./scripts/install-native-host-unix.sh aodcpicfepmdmpfaflncbndcicoemdje
+   ```
+
+   Windows:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 aodcpicfepmdmpfaflncbndcicoemdje
+   ```
+
+   These installer scripts write outside the repository, such as `~/.browser-agent-bridge.env`, browser Native Messaging manifest directories, or the Windows `HKCU` registry key. In sandboxed agent environments, the agent should request elevated permission before running them.
+
+7. Reload the extension in `chrome://extensions`, open the side panel, allow the initial extension permission prompts, and click Start Bridge.
+
+8. Ask the agent to verify:
+
+   ```bash
+   python3 scripts/doctor.py --skip-live
+   scripts/browser_bridge_client.py health
+   ```
 
 Platform diagnostics:
 
@@ -117,6 +208,8 @@ Authorization: Bearer <your-token>
 ## Quick Start
 
 The easiest client is `BrowserBridgeClient` in `scripts/browser_bridge_client.py`. It auto-loads the default token file on macOS, Linux, and Windows.
+
+### Manual use
 
 ```python
 import sys
@@ -162,6 +255,26 @@ python3 scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true}
 node scripts/ws-rpc.js --listen
 ```
 
+### Agent use
+
+After installation, an agent with the `browser-agent-bridge` skill installed can use the skill instructions plus the helper scripts instead of writing raw HTTP calls:
+
+```bash
+scripts/browser_bridge_client.py health
+scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
+```
+
+For site-specific browsing work, the agent should:
+
+1. Run `tabs.list` first to discover the active `tabId`.
+2. Prefer read-only calls such as `page.readText`, `page.accessibilityTree`, and `dom.query`.
+3. Use `page.executeJavaScript`, `dom.*`, or `computer.*` only when needed.
+4. Respect runtime approval prompts. If the side panel is closed, the extension opens an approval popup.
+5. Record reusable site selectors, waits, extraction logic, CSP needs, and pitfalls in `skills/browser-agent-bridge/references/site-patterns/{domain}.md`.
+
+The local HTTP/WebSocket bridge is available only while the side panel bridge control is started. If the user clicks Stop Bridge, helper scripts such as `scripts/browser_bridge_client.py health` fail until the user clicks Start Bridge again.
+
 ## JSON-RPC API Summary
 
 | Category | Method | Description |
@@ -206,5 +319,6 @@ node scripts/ws-rpc.js --listen
 
 - Sensitive operations such as tab listing, screenshots, downloads, and network logs require runtime approval.
 - If the side panel is closed, sensitive calls trigger a Chrome notification and open an extension approval popup.
+- The Native Messaging host is not started by default. Use Start Bridge in the side panel to run it, and Stop Bridge to disconnect it and pause automatic reconnects.
 - Workflow recordings redact typed text by default unless `includeText: true` is explicitly used.
 - The default policy blocks automation on `chrome://*`, `chrome-extension://*`, and Chrome Web Store pages.

@@ -124,7 +124,11 @@
             <dd id="error">-</dd>
           </div>
         </dl>
-        <button id="refresh">Refresh</button>
+        <div class="native-actions">
+          <button id="start-bridge-btn" class="primary-btn">Start Bridge</button>
+          <button id="stop-bridge-btn" class="danger-btn">Stop Bridge</button>
+          <button id="refresh">Refresh</button>
+        </div>
       </section>
       <section>
         <h2>Settings</h2>
@@ -153,6 +157,14 @@
           </label>
         </div>
 
+      </section>
+      <section>
+        <div class="section-heading">
+          <h2>Site Patterns</h2>
+          <button id="reload-site-patterns" class="secondary-btn">Reload</button>
+        </div>
+        <p id="site-patterns-status" class="muted">Start Bridge to load site summaries.</p>
+        <div id="site-patterns-list" class="site-patterns-list"></div>
       </section>
     </main>
     <script type="module" src="sidepanel.js"></script>
