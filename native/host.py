@@ -104,7 +104,18 @@ def get_site_patterns():
     return list_site_patterns(current_site_patterns_dir())
 
 def handle_native_request(message):
-    write_native_message(call_extension(message))
+    if message.get("method") in ("native.saveDataUrl", "native.sitePatterns"):
+        write_native_message(call_extension(message))
+        return
+
+    write_native_message({
+        "jsonrpc": "2.0",
+        "id": message.get("id"),
+        "error": {
+            "code": -32601,
+            "message": f"Method not found: {message.get('method')}"
+        }
+    })
 
 def handle_native_message(message):
     if not isinstance(message, dict):

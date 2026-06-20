@@ -124,5 +124,22 @@ class TestHostUtilities(unittest.TestCase):
             self.assertEqual(patterns[0]["summary"], "This is a summary of example.com. More details here.")
             self.assertIn("Example Site", patterns[0]["content"])
 
+    def test_handle_native_request_rejects_unknown_methods(self):
+        from unittest.mock import patch
+        request = {
+            "jsonrpc": "2.0",
+            "id": "bad-method",
+            "method": "tabs.list",
+            "params": {}
+        }
+        with patch("host.call_extension") as call_extension, patch("host.write_native_message") as write_native_message:
+            host.handle_native_request(request)
+
+        call_extension.assert_not_called()
+        write_native_message.assert_called_once()
+        response = write_native_message.call_args.args[0]
+        self.assertEqual(response["id"], "bad-method")
+        self.assertEqual(response["error"]["code"], -32601)
+
 if __name__ == "__main__":
     unittest.main()
