@@ -5,8 +5,7 @@ const errorEl = document.querySelector('#error');
 const bypassCspEl = document.querySelector('#bypass-csp');
 const bridgePortEl = document.querySelector('#bridge-port');
 const savePortBtn = document.querySelector('#save-port-btn');
-const startBridgeBtn = document.querySelector('#start-bridge-btn');
-const stopBridgeBtn = document.querySelector('#stop-bridge-btn');
+const bridgeToggleBtn = document.querySelector('#bridge-toggle-btn');
 const reloadSitePatternsBtn = document.querySelector('#reload-site-patterns');
 const sitePatternsStatusEl = document.querySelector('#site-patterns-status');
 const sitePatternsListEl = document.querySelector('#site-patterns-list');
@@ -27,13 +26,16 @@ const declineWarning = document.querySelector('#decline-warning');
 const REQUIRED_OPTIONAL_PERMISSIONS = ['tabs', 'tabGroups', 'downloads'];
 
 document.querySelector('#refresh').addEventListener('click', refresh);
-startBridgeBtn.addEventListener('click', async () => {
-  const response = await chrome.runtime.sendMessage({ type: 'START_BRIDGE' });
-  renderStatus(response.status);
-});
-stopBridgeBtn.addEventListener('click', async () => {
-  const response = await chrome.runtime.sendMessage({ type: 'STOP_BRIDGE' });
-  renderStatus(response.status);
+bridgeToggleBtn.addEventListener('click', async () => {
+  bridgeToggleBtn.disabled = true;
+  const messageType = latestBridgeEnabled ? 'STOP_BRIDGE' : 'START_BRIDGE';
+  try {
+    const response = await chrome.runtime.sendMessage({ type: messageType });
+    renderStatus(response.status);
+  } catch (error) {
+    errorEl.textContent = error?.message || 'Failed to update bridge state';
+    bridgeToggleBtn.disabled = false;
+  }
 });
 reloadSitePatternsBtn.addEventListener('click', () => loadSitePatterns({ force: true }));
 
@@ -162,6 +164,7 @@ function getCategoryLabel(category) {
 
 let initialized = false;
 let latestNativeConnected = false;
+let latestBridgeEnabled = false;
 let sitePatternsLoaded = false;
 
 function initializePanel() {
@@ -251,14 +254,17 @@ function renderStatus(status) {
   const stopped = status?.state === 'stopped';
   const wasConnected = latestNativeConnected;
   latestNativeConnected = connected;
+  latestBridgeEnabled = status?.bridgeEnabled === true;
   statusEl.textContent = connected ? 'Connected' : stopped ? 'Stopped' : 'Disconnected';
   statusEl.classList.toggle('connected', connected);
   statusEl.classList.toggle('disconnected', !connected);
   hostNameEl.textContent = status?.hostName || '-';
   lastCheckedEl.textContent = status?.lastChecked ? new Date(status.lastChecked).toLocaleString() : '-';
   errorEl.textContent = status?.error || '-';
-  startBridgeBtn.disabled = connected;
-  stopBridgeBtn.disabled = stopped || !status?.bridgeEnabled;
+  bridgeToggleBtn.disabled = false;
+  bridgeToggleBtn.textContent = latestBridgeEnabled ? 'Stop Bridge' : 'Start Bridge';
+  bridgeToggleBtn.classList.toggle('primary-btn', !latestBridgeEnabled);
+  bridgeToggleBtn.classList.toggle('danger-btn', latestBridgeEnabled);
   reloadSitePatternsBtn.disabled = !connected;
   if (!connected) {
     sitePatternsLoaded = false;

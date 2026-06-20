@@ -97,6 +97,15 @@ def handle_native_notification(message):
         "params": params
     })
 
+def current_site_patterns_dir():
+    return Path(__file__).resolve().parent.parent / "skills" / "browser-agent-bridge" / "references" / "site-patterns"
+
+def get_site_patterns():
+    return list_site_patterns(current_site_patterns_dir())
+
+def handle_native_request(message):
+    write_native_message(call_extension(message))
+
 def handle_native_message(message):
     if not isinstance(message, dict):
         return
@@ -106,6 +115,11 @@ def handle_native_message(message):
         handle_native_notification(message)
         return
         
+    # Check if request (has id and method)
+    if "method" in message and "id" in message:
+        handle_native_request(message)
+        return
+
     # Check if response (has id, no method)
     if "id" in message and "method" not in message:
         msg_id = str(message["id"])
@@ -114,12 +128,6 @@ def handle_native_message(message):
         if waiter:
             waiter["response"] = message
             waiter["event"].set()
-        return
-
-    # Check local native RPCs sent by the extension service worker.
-    if "id" in message and "method" in message:
-        if message.get("method") in ("native.saveDataUrl", "native.sitePatterns"):
-            write_native_message(call_extension(message))
         return
 
     # Check ping
@@ -234,12 +242,13 @@ def handle_save_data_url(request):
 
 def handle_site_patterns(request):
     try:
+        patterns_dir = current_site_patterns_dir()
         return {
             "jsonrpc": "2.0",
             "id": request.get("id"),
             "result": {
-                "directory": str(SITE_PATTERNS_DIR),
-                "patterns": list_site_patterns()
+                "directory": str(patterns_dir),
+                "patterns": list_site_patterns(patterns_dir)
             }
         }
     except Exception as e:
@@ -249,12 +258,12 @@ def handle_site_patterns(request):
             "error": {"code": -32000, "message": str(e)}
         }
 
-def list_site_patterns():
-    if not SITE_PATTERNS_DIR.exists():
+def list_site_patterns(patterns_dir=SITE_PATTERNS_DIR):
+    if not patterns_dir.exists():
         return []
 
     patterns = []
-    for path in sorted(SITE_PATTERNS_DIR.glob("*.md")):
+    for path in sorted(patterns_dir.glob("*.md")):
         if path.name.startswith("."):
             continue
         stat = path.stat()

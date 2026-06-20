@@ -104,5 +104,25 @@ class TestHostUtilities(unittest.TestCase):
         self.assertFalse(dummy.is_origin_allowed("https://example.com"))
         self.assertFalse(dummy.is_origin_allowed("http://malicious.com:8765"))
 
+    def test_get_site_patterns(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            patterns_dir = tmp_root / "skills" / "browser-agent-bridge" / "references" / "site-patterns"
+            patterns_dir.mkdir(parents=True)
+
+            test_md = patterns_dir / "example.com.md"
+            test_md.write_text("# Example Site\n\nThis is a summary of example.com.\nMore details here.", encoding="utf-8")
+
+            with patch("host.Path.resolve") as mock_resolve:
+                mock_resolve.return_value = tmp_root / "native" / "host.py"
+                patterns = host.get_site_patterns()
+
+            self.assertEqual(len(patterns), 1)
+            self.assertEqual(patterns[0]["domain"], "example.com")
+            self.assertEqual(patterns[0]["filename"], "example.com.md")
+            self.assertEqual(patterns[0]["summary"], "This is a summary of example.com. More details here.")
+            self.assertIn("Example Site", patterns[0]["content"])
+
 if __name__ == "__main__":
     unittest.main()
