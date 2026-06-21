@@ -22,13 +22,29 @@ function getCategoryLabel(category) {
       zh: '读取标签页列表 (获取您当前打开的所有标签页标题和网址)',
       en: 'Read tab list (access titles and URLs of all your open tabs)'
     },
+    tab_control: {
+      zh: '关闭或停止 Agent 管理的标签页/会话',
+      en: 'Close tabs or stop browser sessions managed by the Agent'
+    },
     read_downloads: {
       zh: '读取浏览器下载记录 (获取您已下载的文件列表和路径)',
       en: 'Read downloads history (access list of downloaded files and local paths)'
     },
+    page_script: {
+      zh: '在当前网页中执行自定义 JavaScript',
+      en: 'Run custom JavaScript in the current page'
+    },
     page_screenshot: {
       zh: '截取网页视觉截图或 DOM 结构树快照',
       en: 'Capture visual screenshot or DOM tree snapshots of the page'
+    },
+    page_input: {
+      zh: '向当前网页输入文本或发送键盘快捷键',
+      en: 'Type text or send keyboard shortcuts to the current page'
+    },
+    page_action: {
+      zh: '在当前网页中点击、拖拽或选择控件',
+      en: 'Click, drag, or select controls in the current page'
     },
     page_logs: {
       zh: '读取当前网页的控制台报错与网络请求日志',

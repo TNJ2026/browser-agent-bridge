@@ -2201,15 +2201,32 @@ async function assertOptionalPermissions(method, params = {}) {
   }
 }
 
-function getMethodCategory(method) {
+function getMethodCategory(method, params = {}) {
   if (method === 'tabs.list' || method === 'session.list' || method === 'session.get') {
     return 'read_tabs';
+  }
+  if (method === 'tabs.close' || method === 'session.closeTab' || method === 'session.stop') {
+    return 'tab_control';
   }
   if (method === 'downloads.list' || method === 'downloads.download') {
     return 'read_downloads';
   }
+  if (method === 'page.executeJavaScript') {
+    return 'page_script';
+  }
   if (method === 'page.screenshot' || method === 'page.domSnapshot') {
     return 'page_screenshot';
+  }
+  if (method === 'dom.type' || method === 'computer.type' || method === 'computer.key') {
+    return 'page_input';
+  }
+  if (
+    method === 'dom.click' ||
+    method === 'dom.select' ||
+    method === 'computer.click' ||
+    method === 'computer.drag'
+  ) {
+    return 'page_action';
   }
   if (method === 'console.read' || method === 'network.read') {
     return 'page_logs';
@@ -2276,7 +2293,7 @@ async function broadcastPermissionPrompt(promptId, category, method, params) {
 async function checkPermission(method, params) {
   if (method === 'permission.check') return;
 
-  const category = getMethodCategory(method);
+  const category = getMethodCategory(method, params);
   if (!category) return; // not a sensitive method requiring approval
 
   const result = await chrome.storage.local.get([

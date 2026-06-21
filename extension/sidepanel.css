@@ -78,18 +78,6 @@ h2 {
   font-weight: 650;
 }
 
-.section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.section-heading h2 {
-  margin: 0;
-}
-
 section {
   border-top: 1px solid var(--border-color);
   padding: 14px 0;
@@ -288,63 +276,6 @@ pre {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.muted {
-  margin: 0 0 10px;
-  color: var(--dt-color);
-}
-
-.secondary-btn {
-  min-height: 26px;
-  padding: 2px 8px;
-  font-size: 12px;
-}
-
-.site-patterns-list {
-  display: grid;
-  gap: 8px;
-}
-
-.site-pattern {
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--button-bg);
-  overflow: hidden;
-}
-
-.site-pattern summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  cursor: pointer;
-}
-
-.site-pattern-title {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-weight: 650;
-}
-
-.site-pattern-updated {
-  flex: 0 0 auto;
-  color: var(--dt-color);
-  font-size: 11px;
-}
-
-.site-pattern-excerpt {
-  margin: 0;
-  padding: 0 10px 8px;
-  color: var(--dt-color);
-  overflow-wrap: anywhere;
-}
-
-.site-pattern-content {
-  max-height: 220px;
-  margin: 0 10px 10px;
-  font-size: 11px;
 }
 
 .port-input-group input[type="number"] {

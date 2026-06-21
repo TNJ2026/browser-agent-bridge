@@ -268,13 +268,14 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 ## Operating Rules
 
 - Do not use this skill for public web research; this bridge controls the user's local Chrome.
+- **Mandatory site-pattern preflight**: Before operating on any website or domain with this bridge, first check `skills/browser-agent-bridge/references/site-patterns/` for prior experience. Experience filenames MUST match the site domain exactly, using lowercase ASCII/Punycode hostnames without protocol, path, query, port, or trailing dot, for example `example.com.md`, `sub.example.com.md`, or `xn--fsqu00a.xn--0zwm56d.md`. This keeps filenames portable across macOS, Windows, and Linux; avoid Unicode hostnames and mixed-case variants. Look for the most specific `{domain}.md` and then parent-domain files that match the target URL. If a matching file exists, read it and apply its selectors, waits, navigation notes, CSP guidance, and pitfalls before taking browser actions. If no matching file exists, explicitly proceed with fresh inspection and create/update the domain file later if reusable knowledge is learned.
 - Page CSP (Content Security Policy) response headers are not stripped globally. Temporary CSP bypass defaults to enabled for new installs, but only adds a short-lived dynamic rule for the target origin when `tabs.create`, `session.start`, `page.navigate`, or `page.executeJavaScript` needs it. Check the current state with `extension.getCspBypass`; the toggle can only be changed by the user in the sidepanel UI. Pass `bypassCSP:false` to opt out for a call.
 - When CSP bypass is enabled, prefer the bypass-capable path for analyzing and extracting web page content: navigate/create the target tab with the default bypass behavior, then use `page.readText`, `page.accessibilityTree`, or `page.executeJavaScript` as needed. This is the preferred path for pages whose scripts or injected analysis helpers may be blocked by CSP.
 - Browser history and bookmark search are intentionally not supported; ask the user for a URL or use currently open tabs instead.
 - **Runtime Permission Approval**: By default, sensitive operations (tab list/session state, downloads records, screenshots/DOM snapshots, console/network logs, and `policy.set`) are intercepted by the extension and prompt the user in the sidepanel UI for approval (Allow once, Always for session, or Deny).
   - If the sidepanel is closed when making a sensitive call, the extension sends a Chrome notification and opens an extension approval popup window. The user can approve or deny from that popup.
   - If the user denies the request, the call will fail. Respect this choice and do not retry repeatedly; instead, explain the limitation to the user or ask for the information directly.
-- **Domain Experience Accumulation**: Before automating a website, check the `skills/browser-agent-bridge/references/site-patterns/` folder. If a `{domain}.md` exists, read it for selector tricks, known traps, or navigation flows. At the end of every site-specific analysis, extraction, or automation task, actively decide whether the run revealed reusable site knowledge. If yes, update `skills/browser-agent-bridge/references/site-patterns/{domain}.md` even when recording was not enabled.
+- **Domain Experience Accumulation**: At the end of every site-specific analysis, extraction, or automation task, actively decide whether the run revealed reusable site knowledge. Before writing a summary, check `skills/browser-agent-bridge/references/site-patterns/` for existing experience for the same site domain. If it exists, merge the new knowledge into that file instead of creating a duplicate. If it does not exist, create `skills/browser-agent-bridge/references/site-patterns/{domain}.md`, where `{domain}` exactly matches the lowercase ASCII/Punycode site hostname without protocol, path, query, port, or trailing dot.
   - Save only reusable operational knowledge: stable selectors, reliable wait conditions, iframe/shadow DOM notes, CSP-bypass needs, login walls, pop-up handling, pagination/list/detail patterns, extraction scripts, known failure modes, and preferred bridge methods.
   - Do not save private user data, page contents copied from a session, credentials, personal account details, or one-off observations that are unlikely to help future runs.
   - Use concise sections such as `Selectors`, `Wait Conditions`, `Extraction`, `Navigation`, `CSP`, and `Pitfalls`; include the date when behavior may be time-sensitive.
@@ -294,22 +295,24 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 ### Inspect Current Page
 
 1. `tabs.list` with `{ "query": { "active": true, "currentWindow": true } }`
-2. Call `extension.getCspBypass`; if enabled, prefer the default CSP-bypass path while analyzing or extracting page content.
-3. `page.readText` for visible text
-4. `page.accessibilityTree` for interactable elements
-5. Use `page.executeJavaScript` for structured extraction when read-only text/tree methods are insufficient.
-6. `page.screenshot` when visual confirmation matters
-7. After finishing site-specific work, update `references/site-patterns/{domain}.md` if you learned reusable selectors, waits, extraction logic, navigation patterns, CSP needs, or pitfalls.
+2. Determine the page domain and check `references/site-patterns/` for a matching prior-experience file. Read and follow it before inspecting further.
+3. Call `extension.getCspBypass`; if enabled, prefer the default CSP-bypass path while analyzing or extracting page content.
+4. `page.readText` for visible text
+5. `page.accessibilityTree` for interactable elements
+6. Use `page.executeJavaScript` for structured extraction when read-only text/tree methods are insufficient.
+7. `page.screenshot` when visual confirmation matters
+8. After finishing site-specific work, update `references/site-patterns/{domain}.md` if you learned reusable selectors, waits, extraction logic, navigation patterns, CSP needs, or pitfalls.
 
 ### Interact (Click, Type, Hover)
 
 
-1. Read the accessibility tree or screenshot first.
-2. Try `dom.query` to find stable selectors for the target control.
-3. Call `dom.click`, `dom.type`, `dom.select`, `dom.hover`, or `dom.scroll` when selector targeting is reliable.
-4. Call `page.waitForSelector` or `page.waitForText` when the action should change page state.
-5. Fall back to `computer.click`, `computer.type`, `computer.key` (supporting combination shortcuts like "Control+a"), `computer.scroll`, or `computer.hover` when selector targeting is not enough.
-6. Read the page again to verify the result.
+1. Determine the site domain and check `references/site-patterns/` for a matching prior-experience file. Read and use it before interacting.
+2. Read the accessibility tree or screenshot first.
+3. Try `dom.query` to find stable selectors for the target control.
+4. Call `dom.click`, `dom.type`, `dom.select`, `dom.hover`, or `dom.scroll` when selector targeting is reliable.
+5. Call `page.waitForSelector` or `page.waitForText` when the action should change page state.
+6. Fall back to `computer.click`, `computer.type`, `computer.key` (supporting combination shortcuts like "Control+a"), `computer.scroll`, or `computer.hover` when selector targeting is not enough.
+7. Read the page again to verify the result.
 
 ### Debug A Page
 

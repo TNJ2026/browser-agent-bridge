@@ -21,16 +21,24 @@ class TestDoctor(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_root = Path(tmpdir)
             required = [
+                "extension/approval.html",
+                "extension/approval.js",
                 "extension/manifest.json",
                 "extension/service-worker.js",
+                "extension/sidepanel.html",
+                "extension/sidepanel.js",
                 "native/host.py",
                 "native/host-wrapper.sh",
                 "native/host-wrapper.win.bat",
                 "native/com.local.browser_agent_bridge.json",
+                "scripts/install-native-host-macos.sh",
                 "scripts/install-native-host-unix.sh",
+                "scripts/install-native-host-win.ps1",
                 "scripts/rpc.sh",
+                "scripts/sync-skill-scripts.sh",
                 "scripts/ws-rpc.js",
                 "scripts/browser_bridge_client.py",
+                "skills/browser-agent-bridge/scripts/SYNC_MANIFEST.sha256",
             ]
             for path in required:
                 full_path = tmp_root / path
@@ -40,9 +48,10 @@ class TestDoctor(unittest.TestCase):
             with patch("doctor.ROOT", tmp_root):
                 doctor.check_repo_files(checks)
 
-            self.assertEqual(len(checks), 1)
-            self.assertEqual(checks[0]["status"], "pass")
-            self.assertIn("required project files exist", checks[0]["message"])
+            statuses = {check["name"]: check["status"] for check in checks}
+            self.assertEqual(statuses["repo.files"], "pass")
+            self.assertEqual(statuses["repo.install_layout"], "pass")
+            self.assertEqual(statuses["skill.scripts.snapshot"], "warn")
 
     def test_check_repo_files_missing(self):
         checks = []
@@ -51,9 +60,10 @@ class TestDoctor(unittest.TestCase):
             with patch("doctor.ROOT", tmp_root):
                 doctor.check_repo_files(checks)
 
-            self.assertEqual(len(checks), 1)
-            self.assertEqual(checks[0]["status"], "fail")
-            self.assertIn("missing", checks[0]["message"])
+            statuses = {check["name"]: check["status"] for check in checks}
+            self.assertEqual(statuses["repo.files"], "fail")
+            self.assertEqual(statuses["repo.install_layout"], "fail")
+            self.assertEqual(statuses["skill.scripts.snapshot"], "warn")
 
     def test_native_manifest_candidates_linux(self):
         with patch("doctor.Path.home", return_value=Path("/home/alice")):

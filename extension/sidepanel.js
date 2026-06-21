@@ -6,9 +6,6 @@ const bypassCspEl = document.querySelector('#bypass-csp');
 const bridgePortEl = document.querySelector('#bridge-port');
 const savePortBtn = document.querySelector('#save-port-btn');
 const bridgeToggleBtn = document.querySelector('#bridge-toggle-btn');
-const reloadSitePatternsBtn = document.querySelector('#reload-site-patterns');
-const sitePatternsStatusEl = document.querySelector('#site-patterns-status');
-const sitePatternsListEl = document.querySelector('#site-patterns-list');
 // Unused settings checkboxes removed from UI
 const enableRuntimeApprovalEl = document.querySelector('#enable-runtime-approval');
 
@@ -37,7 +34,6 @@ bridgeToggleBtn.addEventListener('click', async () => {
     bridgeToggleBtn.disabled = false;
   }
 });
-reloadSitePatternsBtn.addEventListener('click', () => loadSitePatterns({ force: true }));
 
 // Check user agreement status on load
 chrome.storage.local.get('agreedToDisclaimer').then(result => {
@@ -143,13 +139,29 @@ function getCategoryLabel(category) {
       zh: '读取标签页列表 (获取您当前打开的所有标签页标题和网址)',
       en: 'Read tab list (access titles and URLs of all your open tabs)'
     },
+    'tab_control': {
+      zh: '关闭或停止 Agent 管理的标签页/会话',
+      en: 'Close tabs or stop browser sessions managed by the Agent'
+    },
     'read_downloads': {
       zh: '读取浏览器下载记录 (获取您已下载的文件列表和路径)',
       en: 'Read downloads history (access list of downloaded files and local paths)'
     },
+    'page_script': {
+      zh: '在当前网页中执行自定义 JavaScript',
+      en: 'Run custom JavaScript in the current page'
+    },
     'page_screenshot': {
       zh: '截取网页视觉截图或 DOM 结构树快照',
       en: 'Capture visual screenshot or DOM tree snapshots of the page'
+    },
+    'page_input': {
+      zh: '向当前网页输入文本或发送键盘快捷键',
+      en: 'Type text or send keyboard shortcuts to the current page'
+    },
+    'page_action': {
+      zh: '在当前网页中点击、拖拽或选择控件',
+      en: 'Click, drag, or select controls in the current page'
     },
     'page_logs': {
       zh: '读取当前网页的控制台报错与网络请求日志',
@@ -163,9 +175,7 @@ function getCategoryLabel(category) {
 }
 
 let initialized = false;
-let latestNativeConnected = false;
 let latestBridgeEnabled = false;
-let sitePatternsLoaded = false;
 
 function initializePanel() {
   if (initialized) return;
@@ -252,8 +262,6 @@ async function refresh() {
 function renderStatus(status) {
   const connected = status?.state === 'connected';
   const stopped = status?.state === 'stopped';
-  const wasConnected = latestNativeConnected;
-  latestNativeConnected = connected;
   latestBridgeEnabled = status?.bridgeEnabled === true;
   statusEl.textContent = connected ? 'Connected' : stopped ? 'Stopped' : 'Disconnected';
   statusEl.classList.toggle('connected', connected);
@@ -265,92 +273,4 @@ function renderStatus(status) {
   bridgeToggleBtn.textContent = latestBridgeEnabled ? 'Stop Bridge' : 'Start Bridge';
   bridgeToggleBtn.classList.toggle('primary-btn', !latestBridgeEnabled);
   bridgeToggleBtn.classList.toggle('danger-btn', latestBridgeEnabled);
-  reloadSitePatternsBtn.disabled = !connected;
-  if (!connected) {
-    sitePatternsLoaded = false;
-    sitePatternsStatusEl.textContent = stopped
-      ? 'Start Bridge to load site summaries.'
-      : 'Bridge is disconnected. Site summaries are unavailable.';
-    sitePatternsListEl.textContent = '';
-    return;
-  }
-  if (!wasConnected || !sitePatternsLoaded) {
-    loadSitePatterns();
-  }
-}
-
-async function loadSitePatterns({ force = false } = {}) {
-  if (!latestNativeConnected) return;
-  if (sitePatternsLoaded && !force) return;
-  reloadSitePatternsBtn.disabled = true;
-  sitePatternsStatusEl.textContent = 'Loading site summaries...';
-  sitePatternsListEl.textContent = '';
-
-  try {
-    const result = await sendRpc('native.sitePatterns');
-    const patterns = Array.isArray(result?.patterns) ? result.patterns : [];
-    sitePatternsLoaded = true;
-    renderSitePatterns(patterns);
-  } catch (error) {
-    sitePatternsLoaded = false;
-    sitePatternsStatusEl.textContent = error?.message || 'Failed to load site summaries.';
-  } finally {
-    reloadSitePatternsBtn.disabled = !latestNativeConnected;
-  }
-}
-
-async function sendRpc(method, params = {}) {
-  const response = await chrome.runtime.sendMessage({
-    type: 'RPC',
-    request: {
-      jsonrpc: '2.0',
-      id: `sidepanel-${method}-${Date.now()}`,
-      method,
-      params
-    }
-  });
-  if (!response?.ok) {
-    throw new Error(response?.error || `RPC failed: ${method}`);
-  }
-  return response.result;
-}
-
-function renderSitePatterns(patterns) {
-  sitePatternsListEl.textContent = '';
-  if (patterns.length === 0) {
-    sitePatternsStatusEl.textContent = 'No site summaries yet.';
-    return;
-  }
-
-  sitePatternsStatusEl.textContent = `${patterns.length} site summar${patterns.length === 1 ? 'y' : 'ies'}`;
-  for (const pattern of patterns) {
-    const details = document.createElement('details');
-    details.className = 'site-pattern';
-
-    const summary = document.createElement('summary');
-    const title = document.createElement('span');
-    title.className = 'site-pattern-title';
-    title.textContent = pattern.domain || pattern.filename || 'unknown';
-    summary.appendChild(title);
-
-    if (pattern.updatedAt) {
-      const updated = document.createElement('span');
-      updated.className = 'site-pattern-updated';
-      updated.textContent = new Date(pattern.updatedAt).toLocaleString();
-      summary.appendChild(updated);
-    }
-
-    const excerpt = document.createElement('p');
-    excerpt.className = 'site-pattern-excerpt';
-    excerpt.textContent = pattern.summary || 'No summary excerpt.';
-
-    const content = document.createElement('pre');
-    content.className = 'site-pattern-content';
-    content.textContent = pattern.content || '';
-
-    details.appendChild(summary);
-    details.appendChild(excerpt);
-    details.appendChild(content);
-    sitePatternsListEl.appendChild(details);
-  }
 }

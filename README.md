@@ -331,7 +331,7 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 
 ## Security and Privacy
 
-- Sensitive operations such as tab listing, screenshots, downloads, and network logs require runtime approval.
+- Sensitive operations such as tab listing, tab closing, screenshots, script execution, synthetic page input/actions, downloads, and network logs require runtime approval.
 - If the side panel is closed, sensitive calls trigger a Chrome notification and open an extension approval popup.
 - The Native Messaging host is not started by default. Use Start Bridge in the side panel to run it, and Stop Bridge to disconnect it and pause automatic reconnects.
 - Workflow recordings redact typed text by default unless `includeText: true` is explicitly used.
