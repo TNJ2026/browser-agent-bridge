@@ -5,6 +5,7 @@ const permDenyBtn = document.querySelector('#perm-deny-btn');
 
 let activePrompts = [];
 let currentPrompt = null;
+let initialPromptsLoaded = false;
 
 function appendLabeledValue(parent, label, value, valueTag = 'span') {
   const strong = document.createElement('strong');
@@ -85,6 +86,7 @@ function showNextPrompt() {
   currentPrompt = activePrompts.shift() || null;
   if (!currentPrompt) {
     permissionDetails.textContent = 'No pending approval requests.';
+    if (initialPromptsLoaded) window.close();
     return;
   }
   renderPrompt(currentPrompt);
@@ -97,14 +99,15 @@ function enqueuePrompt(prompt) {
   showNextPrompt();
 }
 
-function resolveCurrentPrompt(responseValue) {
+async function resolveCurrentPrompt(responseValue) {
   if (!currentPrompt) return;
-  chrome.runtime.sendMessage({
+  const prompt = currentPrompt;
+  currentPrompt = null;
+  await chrome.runtime.sendMessage({
     type: 'PERMISSION_RESPONSE',
-    promptId: currentPrompt.promptId,
+    promptId: prompt.promptId,
     response: responseValue
   }).catch(() => {});
-  currentPrompt = null;
   showNextPrompt();
 }
 
@@ -127,4 +130,6 @@ chrome.runtime.sendMessage({ type: 'GET_PENDING_PERMISSION_PROMPTS' }).then(resp
   for (const prompt of response?.prompts || []) {
     enqueuePrompt(prompt);
   }
+  initialPromptsLoaded = true;
+  showNextPrompt();
 }).catch(() => {});

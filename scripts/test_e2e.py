@@ -16,8 +16,8 @@ def run_test():
         print("Error: Chrome extension is not connected to the native host yet. Open side panel or reload extension!")
         return 1
 
-    print("\nStep 1: Creating a new tab on wikipedia.org...")
-    tab_info = client.rpc("tabs.create", {"url": "https://www.wikipedia.org/", "active": True})
+    print("\nStep 1: Creating a new tab on en.wikipedia.org...")
+    tab_info = client.rpc("tabs.create", {"url": "https://en.wikipedia.org/", "active": True})
     tab_id = tab_info["tab"]["id"]
     print(f"Created Tab ID: {tab_id}")
 
@@ -36,7 +36,7 @@ def run_test():
     client.rpc("dom.type", {"tabId": tab_id, "selector": "input#searchInput", "text": "Python (programming language)", "replace": True})
 
     print("\nStep 4: Clicking the search button...")
-    client.rpc("dom.click", {"tabId": tab_id, "selector": "button[type='submit']"})
+    client.rpc("dom.click", {"tabId": tab_id, "selector": "#searchform button"})
 
     print("\nStep 5: Waiting for the target text on the results page...")
     client.rpc("page.waitForText", {"tabId": tab_id, "text": "Python is a high-level", "timeoutMs": 15000})

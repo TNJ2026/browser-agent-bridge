@@ -2328,6 +2328,14 @@ async function openApprovalPopup() {
   approvalPopupWindowId = win.id ?? null;
 }
 
+async function closeApprovalPopupIfIdle() {
+  if (pendingPrompts.size > 0 || approvalPopupWindowId === null) return;
+  const windowId = approvalPopupWindowId;
+  approvalPopupWindowId = null;
+  await chrome.windows.remove(windowId).catch(() => {});
+  await chrome.notifications.clear(APPROVAL_NOTIFICATION_ID).catch(() => {});
+}
+
 async function notifyApprovalPrompt(category, method) {
   await chrome.notifications.create(APPROVAL_NOTIFICATION_ID, {
     type: 'basic',
@@ -2386,6 +2394,7 @@ async function checkPermission(method, params) {
       clearTimeout(timer);
       pendingPrompts.delete(promptId);
       resolve(value);
+      closeApprovalPopupIfIdle().catch(() => {});
     };
     const timer = setTimeout(() => {
       finish('timeout');
