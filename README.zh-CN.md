@@ -190,7 +190,7 @@ PY
 - Linux：检查 `~/.config/.../NativeMessagingHosts/` 下 Chrome、Chromium、Brave、Edge 的用户级 manifest 路径。
 - Windows：检查 `HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.local.browser_agent_bridge`，以及该注册表项默认值指向的 manifest 路径。
 
-如果 doctor 报告 `package.freshness` warning，表示发布 zip 比扩展源码旧。这不影响本地加载未打包扩展开发；发布前重新构建 release 包即可。
+如果 doctor 报告 `package.freshness` warning，表示发布包里的扩展目录比扩展源码旧。这不影响本地加载未打包扩展开发；发布前重新构建 release 包即可。
 
 ## 本地认证
 

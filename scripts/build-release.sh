@@ -6,17 +6,12 @@ VERSION="$(jq -r '.version' "$ROOT_DIR/extension/manifest.json")"
 RELEASE_NAME="browser-agent-bridge-$VERSION"
 DIST_DIR="$ROOT_DIR/dist"
 RELEASE_DIR="$DIST_DIR/$RELEASE_NAME"
-ZIP_PATH="$DIST_DIR/browser-agent-bridge-$VERSION.zip"
+LEGACY_ZIP_PATH="$DIST_DIR/browser-agent-bridge-$VERSION.zip"
 
 mkdir -p "$DIST_DIR"
-rm -f "$ZIP_PATH"
+rm -f "$LEGACY_ZIP_PATH"
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
-
-(
-  cd "$ROOT_DIR/extension"
-  zip -r "$ZIP_PATH" . -x '*.DS_Store' '_metadata/*'
-)
 
 mkdir -p \
   "$RELEASE_DIR/extension" \
@@ -25,7 +20,7 @@ mkdir -p \
   "$RELEASE_DIR/docs" \
   "$RELEASE_DIR/skills"
 
-cp "$ZIP_PATH" "$RELEASE_DIR/extension/"
+cp -R "$ROOT_DIR/extension/." "$RELEASE_DIR/extension/"
 cp "$ROOT_DIR/native/host.py" "$RELEASE_DIR/native/"
 cp "$ROOT_DIR/native/host-wrapper.sh" "$RELEASE_DIR/native/"
 cp "$ROOT_DIR/native/host-wrapper.win.bat" "$RELEASE_DIR/native/"
@@ -43,13 +38,14 @@ cp "$ROOT_DIR/README.zh-CN.md" "$RELEASE_DIR/"
 cp "$ROOT_DIR/docs/protocol.md" "$RELEASE_DIR/docs/"
 cp -R "$ROOT_DIR/skills/browser-agent-bridge" "$RELEASE_DIR/skills/"
 find "$RELEASE_DIR" -name '.DS_Store' -type f -delete
+find "$RELEASE_DIR/extension" -name '_metadata' -type d -prune -exec rm -rf {} +
 find "$RELEASE_DIR" -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 cat > "$RELEASE_DIR/release.json" <<EOF
 {
   "name": "browser-agent-bridge",
   "version": "$VERSION",
-  "extensionZip": "extension/$(basename "$ZIP_PATH")",
+  "extensionDir": "extension",
   "nativeHost": "native/host.py",
   "installers": {
     "macos": "scripts/install-native-host-unix.sh",

@@ -129,7 +129,7 @@ PY
    - `native.wrapper`: wrapper loads token env file, pins extension ID, and launches `native/host.py`.
    - `auth.env_file`: token file exists and is private on macOS/Linux.
    - `auth.env_token`: token is available to the Agent or client.
-   - `package.freshness`: release zip is up to date when preparing distribution.
+   - `package.freshness`: release extension directory is up to date when preparing distribution.
 
 5. If `skill.scripts.snapshot` warns, synchronize the skill script snapshot and reinstall or re-link the skill if it has already been copied to the agent's skill directory:
 
@@ -253,7 +253,7 @@ For a full setup check, run:
 scripts/doctor.py
 ```
 
-Doctor `package.freshness` warnings mean the release zip is older than the extension source files. This does not block local unpacked-extension development, but rebuild the release package before distributing.
+Doctor `package.freshness` warnings mean the release extension directory is older than the extension source files. This does not block local unpacked-extension development, but rebuild the release package before distributing.
 
 If doctor reports new tools as "not exposed", reload the unpacked extension in `chrome://extensions`.
 

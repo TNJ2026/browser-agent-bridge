@@ -190,7 +190,7 @@ Platform diagnostics:
 - Linux: user-level Chrome, Chromium, Brave, and Edge manifest paths under `~/.config/.../NativeMessagingHosts/`.
 - Windows: `HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.local.browser_agent_bridge` and the manifest path referenced by that key's default value.
 
-If doctor reports `package.freshness` as a warning, the release zip is older than the extension source files. This does not block local unpacked-extension development; rebuild the release package before distributing.
+If doctor reports `package.freshness` as a warning, the release extension directory is older than the extension source files. This does not block local unpacked-extension development; rebuild the release package before distributing.
 
 ## Authentication
 

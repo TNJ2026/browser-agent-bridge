@@ -7,15 +7,28 @@ import shutil
 import subprocess
 import sys
 import time
-import zipfile
 from pathlib import Path
 
 from browser_bridge_client import BrowserBridgeClient, BrowserBridgeError
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
+def get_extension_version():
+    manifest_path = ROOT / "extension" / "manifest.json"
+    if manifest_path.exists():
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            return manifest.get("version", "0.1.0")
+        except Exception:
+            pass
+    return "0.1.0"
+
+VERSION = get_extension_version()
 HOST_NAME = "com.local.browser_agent_bridge"
-DEFAULT_ZIP = ROOT / "dist" / "browser-agent-bridge-0.1.0.zip"
+RELEASE_DIR = ROOT / "dist" / f"browser-agent-bridge-{VERSION}"
+RELEASE_EXTENSION_DIR = RELEASE_DIR / "extension"
 NATIVE_MANIFEST_FILENAME = f"{HOST_NAME}.json"
 WINDOWS_REGISTRY_KEY = rf"Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}"
 
@@ -48,7 +61,8 @@ def main(argv=None):
         "platform": platform_name,
         "nativeManifest": str(native_manifest) if native_manifest else None,
         "nativeManifestCandidates": [str(path) for path in native_manifest_candidates(platform_name)],
-        "zip": str(DEFAULT_ZIP),
+        "releaseDir": str(RELEASE_DIR),
+        "releaseExtensionDir": str(RELEASE_EXTENSION_DIR),
     }
 
     check_repo_files(checks)
@@ -56,7 +70,7 @@ def main(argv=None):
     check_native_manifest(checks)
     check_wrapper(checks)
     check_env(checks)
-    check_zip(checks)
+    check_release_package(checks)
     if not args.skip_live:
         check_live(checks, args)
 
@@ -71,7 +85,7 @@ def main(argv=None):
         print(f"\nroot: {ROOT}")
         print(f"platform: {platform_name}")
         print(f"native manifest: {context['nativeManifest'] or 'not found'}")
-        print(f"zip: {DEFAULT_ZIP}")
+        print(f"release extension: {RELEASE_EXTENSION_DIR}")
     return 0 if status != "fail" else 1
 
 
@@ -338,28 +352,22 @@ def check_env(checks):
         add(checks, "auth.env_token", "fail", "BROWSER_AGENT_BRIDGE_TOKEN is required")
 
 
-def check_zip(checks):
-    if not DEFAULT_ZIP.exists():
-        add(checks, "package.zip", "warn", "zip package does not exist")
+def check_release_package(checks):
+    if not RELEASE_EXTENSION_DIR.exists():
+        add(checks, "package.extension", "warn", "release extension directory does not exist")
         return
-    try:
-        with zipfile.ZipFile(DEFAULT_ZIP) as archive:
-            bad = archive.testzip()
-            names = set(archive.namelist())
-    except Exception as error:
-        add(checks, "package.zip", "fail", str(error))
+    manifest = RELEASE_EXTENSION_DIR / "manifest.json"
+    if not manifest.exists():
+        add(checks, "package.extension", "fail", "manifest.json is not at release extension root")
         return
-    if bad:
-        add(checks, "package.zip", "fail", f"corrupt member: {bad}")
-    elif "manifest.json" not in names:
-        add(checks, "package.zip", "fail", "manifest.json is not at zip root")
-    else:
-        add(checks, "package.zip", "pass", f"{DEFAULT_ZIP.stat().st_size} bytes")
+    file_count = sum(1 for path in RELEASE_EXTENSION_DIR.rglob("*") if path.is_file())
+    add(checks, "package.extension", "pass", f"{file_count} files in {RELEASE_EXTENSION_DIR}")
     newest_extension = max((path.stat().st_mtime for path in (ROOT / "extension").rglob("*") if path.is_file()), default=0)
-    if DEFAULT_ZIP.stat().st_mtime + 1 < newest_extension:
-        add(checks, "package.freshness", "warn", "extension files are newer than the zip")
+    newest_release_extension = max((path.stat().st_mtime for path in RELEASE_EXTENSION_DIR.rglob("*") if path.is_file()), default=0)
+    if newest_release_extension + 1 < newest_extension:
+        add(checks, "package.freshness", "warn", "extension files are newer than the release extension directory")
     else:
-        add(checks, "package.freshness", "pass", "zip is up to date with extension files")
+        add(checks, "package.freshness", "pass", "release extension directory is up to date with extension files")
 
 
 def is_host_path_runnable(path, platform_name):
