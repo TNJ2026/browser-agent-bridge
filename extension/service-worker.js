@@ -683,15 +683,17 @@ async function tabsCreate(params) {
   
   if (typeof tab.id === 'number') {
     try {
-      const groups = await chrome.tabGroups.query({ title: '🤖 Agent', windowId: tab.windowId });
-      const managedGroups = await loadAgentTabGroups();
-      const group = groups.find(item => managedGroups.has(item.id));
-      if (group) {
-        await chrome.tabs.group({ tabIds: [tab.id], groupId: group.id });
-      } else {
-        const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-        await chrome.tabGroups.update(groupId, { title: '🤖 Agent', color: 'green' });
-        await rememberAgentTabGroup(groupId);
+      if (chrome.tabGroups && chrome.tabs.group) {
+        const groups = await chrome.tabGroups.query({ title: '🤖 Agent', windowId: tab.windowId });
+        const managedGroups = await loadAgentTabGroups();
+        const group = groups.find(item => managedGroups.has(item.id));
+        if (group) {
+          await chrome.tabs.group({ tabIds: [tab.id], groupId: group.id });
+        } else {
+          const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+          await chrome.tabGroups.update(groupId, { title: '🤖 Agent', color: 'green' });
+          await rememberAgentTabGroup(groupId);
+        }
       }
     } catch (e) {
       console.warn('Failed to auto-group agent tab:', e);
@@ -727,6 +729,7 @@ async function tabsGroup(params) {
       ...(params.color ? { color: params.color } : {})
     });
   }
+  await rememberAgentTabGroup(groupId).catch(() => {});
   return { groupId };
 }
 
