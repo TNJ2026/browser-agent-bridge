@@ -53,9 +53,7 @@ EOF
   echo "Security token generated and saved in $ENV_FILE"
 fi
 
-HOST_PY="$ROOT_DIR/native/host.py"
 PYTHON_BIN="$(command -v python3 || command -v python || true)"
-HOST_WRAPPER="$ROOT_DIR/native/host-wrapper.sh"
 MANIFEST_SRC="$ROOT_DIR/native/com.local.browser_agent_bridge.json"
 
 if [[ -z "$PYTHON_BIN" ]]; then
@@ -100,6 +98,24 @@ manifest_dirs_for_browser() {
 }
 
 OS="$(uname -s)"
+if [[ "$OS" == "Darwin" ]]; then
+  SUPPORT_DIR="$HOME/Library/Application Support/Browser Agent Bridge"
+  SUPPORT_NATIVE_DIR="$SUPPORT_DIR/native"
+  SUPPORT_RUNTIME_DIR="$SUPPORT_DIR/runtime"
+  mkdir -p "$SUPPORT_NATIVE_DIR" "$SUPPORT_RUNTIME_DIR"
+  cp "$ROOT_DIR/native/host.py" "$SUPPORT_NATIVE_DIR/host.py"
+  cp "$ROOT_DIR/native/com.local.browser_agent_bridge.json" "$SUPPORT_NATIVE_DIR/com.local.browser_agent_bridge.json"
+  rm -rf "$SUPPORT_DIR/skills"
+  rm -rf "$SUPPORT_RUNTIME_DIR/site-patterns"
+  cp -R "$ROOT_DIR/runtime/site-patterns" "$SUPPORT_RUNTIME_DIR/"
+  find "$SUPPORT_DIR" -name '.DS_Store' -type f -delete
+  HOST_PY="$SUPPORT_NATIVE_DIR/host.py"
+  HOST_WRAPPER="$SUPPORT_DIR/host-wrapper.sh"
+else
+  HOST_PY="$ROOT_DIR/native/host.py"
+  HOST_WRAPPER="$ROOT_DIR/native/host-wrapper.sh"
+fi
+
 MANIFEST_DIRS=()
 while IFS= read -r manifest_dir; do
   MANIFEST_DIRS+=("$manifest_dir")

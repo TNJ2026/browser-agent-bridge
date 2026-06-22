@@ -68,7 +68,7 @@ Use this path when you are setting up the bridge yourself.
    - Open `chrome://extensions`.
    - Enable Developer mode.
    - Click Load unpacked and select this repository's `extension/` directory.
-   - Copy the generated extension ID, for example `aodcpicfepmdmpfaflncbndcicoemdje`.
+   - Copy the generated extension ID, for example `lpemchcojepfkbgjgoehfknibdjjppig`.
 
 2. Install the Native Messaging host with that extension ID.
 
@@ -89,6 +89,8 @@ Use this path when you are setting up the bridge yourself.
    ```
 
    This installs for the current user through `HKCU`; administrator privileges are not required.
+
+   On macOS, the installer copies the native host runtime into `~/Library/Application Support/Browser Agent Bridge/` and points the Native Messaging manifest there. This avoids Chrome being blocked by macOS privacy controls when a release was downloaded and extracted under `~/Downloads`.
 
 3. Verify the connection.
    - Reload the extension in `chrome://extensions`.
@@ -140,7 +142,7 @@ Use this path when a local coding agent is setting up the bridge from this repos
    The current stable ID is:
 
    ```text
-   aodcpicfepmdmpfaflncbndcicoemdje
+   lpemchcojepfkbgjgoehfknibdjjppig
    ```
 
    The agent can confirm it locally with:
@@ -164,13 +166,13 @@ PY
    macOS / Linux:
 
    ```bash
-   ./scripts/install-native-host-unix.sh aodcpicfepmdmpfaflncbndcicoemdje
+   ./scripts/install-native-host-unix.sh lpemchcojepfkbgjgoehfknibdjjppig
    ```
 
    Windows:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 aodcpicfepmdmpfaflncbndcicoemdje
+   powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 lpemchcojepfkbgjgoehfknibdjjppig
    ```
 
    These installer scripts write outside the repository, such as `~/.browser-agent-bridge.env`, browser Native Messaging manifest directories, or the Windows `HKCU` registry key. In sandboxed agent environments, the agent should request elevated permission before running them.
@@ -285,7 +287,7 @@ For site-specific browsing work, the agent should:
 2. Prefer read-only calls such as `page.readText`, `page.accessibilityTree`, and `dom.query`.
 3. Use `page.executeJavaScript`, `dom.*`, or `computer.*` only when needed.
 4. Respect runtime approval prompts. If the side panel is closed, the extension opens an approval popup.
-5. Record reusable site selectors, waits, extraction logic, CSP needs, and pitfalls in `skills/browser-agent-bridge/references/site-patterns/{domain}.md`.
+5. Record reusable site selectors, waits, extraction logic, CSP needs, and pitfalls in `runtime/site-patterns/{domain}.md`.
 
 The local HTTP/WebSocket bridge is available only while the side panel bridge control is started. If the user clicks Stop Bridge, helper scripts such as `scripts/browser_bridge_client.py health` fail until the user clicks Start Bridge again.
 

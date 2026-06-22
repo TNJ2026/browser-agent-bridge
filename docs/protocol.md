@@ -134,7 +134,7 @@ The `directory` parameter is accepted only when the native host is started with 
 ### `native.sitePatterns`
 
 Native-host local method. Lists Agent-maintained site summaries from
-`skills/browser-agent-bridge/references/site-patterns/*.md`. The side panel uses
+`runtime/site-patterns/*.md`. The side panel uses
 this method to show reusable site knowledge below Settings after Bridge is
 started.
 

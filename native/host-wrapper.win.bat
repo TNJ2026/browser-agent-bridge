@@ -9,7 +9,7 @@ if exist "%ENV_FILE%" (
     )
 )
 
-set "BROWSER_AGENT_BRIDGE_EXTENSION_ID=aodcpicfepmdmpfaflncbndcicoemdje"
+set "BROWSER_AGENT_BRIDGE_EXTENSION_ID=lpemchcojepfkbgjgoehfknibdjjppig"
 
 python "%~dp0host.py" %*
 

@@ -16,6 +16,7 @@ mkdir -p "$RELEASE_DIR"
 mkdir -p \
   "$RELEASE_DIR/extension" \
   "$RELEASE_DIR/native" \
+  "$RELEASE_DIR/runtime" \
   "$RELEASE_DIR/scripts" \
   "$RELEASE_DIR/docs" \
   "$RELEASE_DIR/skills"
@@ -25,6 +26,7 @@ cp "$ROOT_DIR/native/host.py" "$RELEASE_DIR/native/"
 cp "$ROOT_DIR/native/host-wrapper.sh" "$RELEASE_DIR/native/"
 cp "$ROOT_DIR/native/host-wrapper.win.bat" "$RELEASE_DIR/native/"
 cp "$ROOT_DIR/native/com.local.browser_agent_bridge.json" "$RELEASE_DIR/native/"
+cp -R "$ROOT_DIR/runtime/site-patterns" "$RELEASE_DIR/runtime/"
 cp "$ROOT_DIR/scripts/install-native-host-unix.sh" "$RELEASE_DIR/scripts/"
 cp "$ROOT_DIR/scripts/install-native-host-macos.sh" "$RELEASE_DIR/scripts/"
 cp "$ROOT_DIR/scripts/install-native-host-win.ps1" "$RELEASE_DIR/scripts/"

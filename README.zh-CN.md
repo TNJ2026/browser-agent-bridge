@@ -68,7 +68,7 @@ graph TD
    - 打开 `chrome://extensions`。
    - 开启 Developer mode。
    - 点击 Load unpacked，选择本仓库的 `extension/` 目录。
-   - 复制生成的扩展 ID，例如 `aodcpicfepmdmpfaflncbndcicoemdje`。
+   - 复制生成的扩展 ID，例如 `lpemchcojepfkbgjgoehfknibdjjppig`。
 
 2. 用该扩展 ID 安装 Native Messaging host。
 
@@ -89,6 +89,8 @@ graph TD
    ```
 
    该脚本通过 `HKCU` 安装到当前用户，不需要管理员权限。
+
+   在 macOS 上，安装器会把 native host 运行文件复制到 `~/Library/Application Support/Browser Agent Bridge/`，并让 Native Messaging manifest 指向这个位置。这样可以避免 release 包解压在 `~/Downloads` 时，Chrome 被 macOS 隐私控制阻止读取 native host。
 
 3. 验证连接。
    - 在 `chrome://extensions` 中重新加载扩展。
@@ -140,7 +142,7 @@ graph TD
    当前稳定 ID 是：
 
    ```text
-   aodcpicfepmdmpfaflncbndcicoemdje
+   lpemchcojepfkbgjgoehfknibdjjppig
    ```
 
    Agent 可以用下面的命令在本地确认：
@@ -164,13 +166,13 @@ PY
    macOS / Linux：
 
    ```bash
-   ./scripts/install-native-host-unix.sh aodcpicfepmdmpfaflncbndcicoemdje
+   ./scripts/install-native-host-unix.sh lpemchcojepfkbgjgoehfknibdjjppig
    ```
 
    Windows：
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 aodcpicfepmdmpfaflncbndcicoemdje
+   powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 lpemchcojepfkbgjgoehfknibdjjppig
    ```
 
    这些安装脚本会写入仓库外的位置，例如 `~/.browser-agent-bridge.env`、浏览器 Native Messaging manifest 目录，或 Windows `HKCU` 注册表项。在受沙箱限制的 Agent 环境中，Agent 应在执行前申请提升权限。
@@ -285,7 +287,7 @@ scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
 2. 优先使用只读方法，例如 `page.readText`、`page.accessibilityTree` 和 `dom.query`。
 3. 仅在必要时使用 `page.executeJavaScript`、`dom.*` 或 `computer.*`。
 4. 尊重运行时审批。侧边栏未打开时，扩展会打开审批弹窗。
-5. 将可复用的站点 selector、等待条件、提取逻辑、CSP 需求和坑点记录到 `skills/browser-agent-bridge/references/site-patterns/{domain}.md`。
+5. 将可复用的站点 selector、等待条件、提取逻辑、CSP 需求和坑点记录到 `runtime/site-patterns/{domain}.md`。
 
 只有侧边栏里的 bridge 控制处于 Start 状态时，本地 HTTP/WebSocket bridge 才可用。如果用户点击 Stop Bridge，`scripts/browser_bridge_client.py health` 等辅助脚本会失败，直到用户再次点击 Start Bridge。
 

@@ -23,7 +23,9 @@ SAVE_DIR = Path(os.environ.get('BROWSER_AGENT_BRIDGE_SAVE_DIR', str(Path.home() 
 ALLOW_CUSTOM_SAVE_DIR = os.environ.get('BROWSER_AGENT_BRIDGE_ALLOW_CUSTOM_SAVE_DIR', '').lower() in ('1', 'true', 'yes')
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 ROOT = Path(__file__).resolve().parent.parent
-SITE_PATTERNS_DIR = ROOT / "skills" / "browser-agent-bridge" / "references" / "site-patterns"
+RUNTIME_SITE_PATTERNS_DIR = ROOT / "runtime" / "site-patterns"
+SKILL_SITE_PATTERNS_DIR = ROOT / "skills" / "browser-agent-bridge" / "references" / "site-patterns"
+SITE_PATTERNS_DIR = RUNTIME_SITE_PATTERNS_DIR if RUNTIME_SITE_PATTERNS_DIR.exists() else SKILL_SITE_PATTERNS_DIR
 DATA_URL_RE = re.compile(r'^data:([^;,]+)?(;base64)?,(.*)$', re.DOTALL)
 
 extension_ready = False
@@ -98,7 +100,11 @@ def handle_native_notification(message):
     })
 
 def current_site_patterns_dir():
-    return Path(__file__).resolve().parent.parent / "skills" / "browser-agent-bridge" / "references" / "site-patterns"
+    root = Path(__file__).resolve().parent.parent
+    runtime_dir = root / "runtime" / "site-patterns"
+    if runtime_dir.exists():
+        return runtime_dir
+    return root / "skills" / "browser-agent-bridge" / "references" / "site-patterns"
 
 def get_site_patterns():
     return list_site_patterns(current_site_patterns_dir())
