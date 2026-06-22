@@ -90,7 +90,7 @@ graph TD
 
    该脚本通过 `HKCU` 安装到当前用户，不需要管理员权限。
 
-   在 macOS 上，安装器会把 native host 运行文件复制到 `~/Library/Application Support/Browser Agent Bridge/`，并让 Native Messaging manifest 指向这个位置。这样可以避免 release 包解压在 `~/Downloads` 时，Chrome 被 macOS 隐私控制阻止读取 native host。
+   在 macOS 上，安装器会把 native host 运行文件复制到 `~/Library/Application Support/Browser Agent Bridge/`，并让 Native Messaging manifest 指向这个位置。在 Windows 上，安装器会把运行文件复制到 `%LOCALAPPDATA%\Browser Agent Bridge\`，并让注册表/manifest 指向这个位置。这样 Native Messaging 不再依赖 release 下载或解压目录。
 
 3. 验证连接。
    - 在 `chrome://extensions` 中重新加载扩展。

@@ -90,7 +90,7 @@ Use this path when you are setting up the bridge yourself.
 
    This installs for the current user through `HKCU`; administrator privileges are not required.
 
-   On macOS, the installer copies the native host runtime into `~/Library/Application Support/Browser Agent Bridge/` and points the Native Messaging manifest there. This avoids Chrome being blocked by macOS privacy controls when a release was downloaded and extracted under `~/Downloads`.
+   On macOS, the installer copies the native host runtime into `~/Library/Application Support/Browser Agent Bridge/` and points the Native Messaging manifest there. On Windows, it copies the runtime into `%LOCALAPPDATA%\Browser Agent Bridge\` and points the registry/manifest there. This keeps Native Messaging independent from the release download or extraction directory.
 
 3. Verify the connection.
    - Reload the extension in `chrome://extensions`.

@@ -213,9 +213,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-native-host-win.ps1 <
 
 **What this script does under the hood:**
 * **Locates Python**: Searches the system PATH for the `python` or `py` executable.
-* **Generates Windows Launcher**: Creates a Batch file `native/host-wrapper.win.bat` that reads `%USERPROFILE%\.browser-agent-bridge.env`, sets the target extension ID, and runs Python with argument forwarding (`%*`).
+* **Generates Windows Launcher**: Copies the native host runtime to `%LOCALAPPDATA%\Browser Agent Bridge\` and creates `host-wrapper.win.bat` there. The launcher reads `%USERPROFILE%\.browser-agent-bridge.env`, sets the target extension ID, and runs Python with argument forwarding (`%*`).
 * **Secures Auth Token**: Generates a 16-byte random token and saves it in `%USERPROFILE%\.browser-agent-bridge.env`.
-* **Installs Manifest JSON**: Writes the manifest JSON to `%LOCALAPPDATA%\Google\Chrome\NativeMessagingHosts\com.local.browser_agent_bridge.json`.
+* **Installs Manifest JSON**: Writes the manifest JSON to `%LOCALAPPDATA%\Google\Chrome\NativeMessagingHosts\com.local.browser_agent_bridge.json`, with `"path"` pointing to `%LOCALAPPDATA%\Browser Agent Bridge\host-wrapper.win.bat`.
 * **Registers via Registry**: Adds a registry value under `HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.local.browser_agent_bridge` pointing to the manifest file path. Installing in `HKCU` ensures that administrator privileges are not required.
 
 ### Generated Token Files

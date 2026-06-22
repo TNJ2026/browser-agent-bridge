@@ -16,9 +16,13 @@ if (-not (Test-Path $EnvFile)) {
     Write-Host "Security token generated and saved in $EnvFile"
 }
 
-$HostPy = Join-Path $RootDir "native\host.py"
-$HostWrapper = Join-Path $RootDir "native\host-wrapper.win.bat"
 $ManifestSrc = Join-Path $RootDir "native\com.local.browser_agent_bridge.json"
+$SupportDir = Join-Path $env:LOCALAPPDATA "Browser Agent Bridge"
+$SupportNativeDir = Join-Path $SupportDir "native"
+$SupportRuntimeDir = Join-Path $SupportDir "runtime"
+$SupportSitePatternsDir = Join-Path $SupportRuntimeDir "site-patterns"
+$HostPy = Join-Path $SupportNativeDir "host.py"
+$HostWrapper = Join-Path $SupportDir "host-wrapper.win.bat"
 $ManifestDstDir = Join-Path $env:LOCALAPPDATA "Google\Chrome\NativeMessagingHosts"
 $ManifestDst = Join-Path $ManifestDstDir "com.local.browser_agent_bridge.json"
 
@@ -31,6 +35,20 @@ if (-not $PythonCommand) {
 }
 
 $PythonExe = $PythonCommand.Source
+
+New-Item -ItemType Directory -Path $SupportNativeDir -Force | Out-Null
+New-Item -ItemType Directory -Path $SupportRuntimeDir -Force | Out-Null
+Copy-Item -Path (Join-Path $RootDir "native\host.py") -Destination $HostPy -Force
+Copy-Item -Path $ManifestSrc -Destination (Join-Path $SupportNativeDir "com.local.browser_agent_bridge.json") -Force
+$OldSupportSkills = Join-Path $SupportDir "skills"
+if (Test-Path $OldSupportSkills) {
+    Remove-Item -Path $OldSupportSkills -Recurse -Force
+}
+if (Test-Path $SupportSitePatternsDir) {
+    Remove-Item -Path $SupportSitePatternsDir -Recurse -Force
+}
+Copy-Item -Path (Join-Path $RootDir "runtime\site-patterns") -Destination $SupportRuntimeDir -Recurse -Force
+
 $wrapperContent = @"
 @echo off
 setlocal
