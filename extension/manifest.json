@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Browser Agent Bridge",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Expose Chrome browser-control tools to a local agent through Native Messaging.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -68,5 +68,5 @@
       "description": "Open the browser agent side panel"
     }
   },
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsVnlPxTnS5Iph50mixrZDE37kgr9v/SNbvrL4cSec556vfM99IR+UozP1k6w2opHVrMBui+YvQkYM/eEksLA8OM38C/9LbhrgLeQIsG8Eb3M0OUhLp3/mkA65wA72XDn0IiXXkJq6LkWmAV0NjGLqpFgB4Zn/tu4lO33kI1q9Ok9BTmuB1UqhsmnFcw5bk3frQVXHk3K1ligXop/LrRBzsqNoetRx0ND+oGfxFT264IU0vV1VLNPfqLNMehbG7N0XkT7Z1HwaY2jW9RgC4uE/zTV+FdXfDHwyuJ3L7cWl+jbxxx4koZG9GZ6z9mJuavPs6uoHRi+cGjGU0+c8vqf4wIDAQAB"
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAugH5AJuJLhfl9tLvqm2fOBm6e+nQogxBH7npi3ARcXjy+ds/prBFC2SVJp2NAVoye6s/C9//xpdbxaH5z7GGxM2AETJavBIEF1Kof0RBrOFuvac21KcyEigQVlUN9bp5gUxw54Qrh4ykb/1gADOWr8sh0FG0tcy+8MtLFGmddahNDvTsTpPIyhja20PKviTY4j2sB0u6GRe2pUVMlUmZRpjs1r4Tii5TRCICrsLPF3SzHWmIs5D//hGAR721xJigo2TgXm2zeyb+KEREnoYJZiHsWxlRRLuWhU8pzp99gGyMAbLOl4ILQnEFmqGKwpFe+yle90NPnTe7tI9YlhYiLwIDAQAB"
 }

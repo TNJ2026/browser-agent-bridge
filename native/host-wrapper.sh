@@ -9,6 +9,6 @@ if [[ -f "$env_file" ]]; then
   set +a
 fi
 
-export BROWSER_AGENT_BRIDGE_EXTENSION_ID="testextensionid"
+export BROWSER_AGENT_BRIDGE_EXTENSION_ID="lpemchcojepfkbgjgoehfknibdjjppig"
 
-exec "/Users/cxd/.pyenv/shims/python3" "/Users/cxd/Developer/browser-agent-bridge/native/host.py" "testextensionid"
+exec "/Users/cxd/.pyenv/versions/3.11.15/bin/python3" "/Users/cxd/developer/browser-agent-bridge/native/host.py" "lpemchcojepfkbgjgoehfknibdjjppig"
