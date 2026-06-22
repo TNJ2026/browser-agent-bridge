@@ -687,7 +687,7 @@ async function tabsCreate(params) {
         await chrome.tabs.group({ tabIds: [tab.id], groupId: groups[0].id });
       } else {
         const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-        await chrome.tabGroups.update(groupId, { title: '🤖 Agent', color: 'cyan' });
+        await chrome.tabGroups.update(groupId, { title: '🤖 Agent', color: 'green' });
       }
     } catch (e) {
       console.warn('Failed to auto-group agent tab:', e);
@@ -748,7 +748,7 @@ async function sessionStart(params) {
       if (chrome.tabGroups && typeof groupId === 'number') {
         await chrome.tabGroups.update(groupId, {
           title: name,
-          color: params.color || 'cyan'
+          color: params.color || 'green'
         }).catch(() => {});
       }
     } catch (e) {
