@@ -1857,6 +1857,43 @@ async function requireSession(sessionId) {
   return session;
 }
 
+function isAgentGroupTitle(title) {
+  return typeof title === 'string' && title.trim().startsWith('🤖');
+}
+
+function sessionGroupIds(sessions) {
+  return new Set(
+    Object.values(sessions)
+      .map(session => session && session.groupId)
+      .filter(groupId => typeof groupId === 'number')
+  );
+}
+
+async function isAgentManagedGroupId(groupId, sessions = null) {
+  if (typeof groupId !== 'number' || groupId < 0) return false;
+  const knownGroupIds = sessionGroupIds(sessions || await loadSessions());
+  if (knownGroupIds.has(groupId)) return true;
+  if (!chrome.tabGroups) return false;
+  try {
+    const group = await chrome.tabGroups.get(groupId);
+    return isAgentGroupTitle(group?.title);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function areAgentManagedTabs(tabIds) {
+  if (!Array.isArray(tabIds) || tabIds.length === 0) return false;
+  const sessions = await loadSessions();
+  for (const tabId of tabIds) {
+    if (typeof tabId !== 'number') return false;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const isManaged = tab ? await isAgentManagedGroupId(tab.groupId, sessions) : false;
+    if (!isManaged) return false;
+  }
+  return true;
+}
+
 async function loadPolicy() {
   const result = await chrome.storage.local.get(POLICY_STORAGE_KEY);
   const stored = result[POLICY_STORAGE_KEY];
@@ -2237,6 +2274,21 @@ function getMethodCategory(method, params = {}) {
   return null;
 }
 
+async function isAgentTabGroupOperation(method, params = {}) {
+  if (method === 'session.list') return true;
+  if (method === 'session.get' || method === 'session.closeTab' || method === 'session.stop') {
+    return typeof params.sessionId === 'string' && params.sessionId.length > 0;
+  }
+  if (method === 'tabs.list' && typeof params.query?.groupId === 'number') {
+    return isAgentManagedGroupId(params.query.groupId);
+  }
+  if (method === 'tabs.close') {
+    const tabIds = Array.isArray(params.tabIds) ? params.tabIds : [params.tabId];
+    return areAgentManagedTabs(tabIds);
+  }
+  return false;
+}
+
 async function isSidepanelOpen() {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'PING_SIDEPANEL' });
@@ -2295,6 +2347,7 @@ async function checkPermission(method, params) {
 
   const category = getMethodCategory(method, params);
   if (!category) return; // not a sensitive method requiring approval
+  if (await isAgentTabGroupOperation(method, params)) return;
 
   const result = await chrome.storage.local.get([
     'enableRuntimeApproval',
