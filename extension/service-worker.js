@@ -12,6 +12,7 @@ const MAX_RECORDING_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_RECORDING_MAX_ACTIONS = 500;
 const MAX_RECORDING_MAX_ACTIONS = 5000;
 const SESSION_STORAGE_KEY = 'browserAgentBridgeSessions';
+const AGENT_TAB_GROUPS_STORAGE_KEY = 'browserAgentBridgeAgentTabGroups';
 const POLICY_STORAGE_KEY = 'browserAgentBridgePolicy';
 const RECORDINGS_STORAGE_KEY = 'browserAgentBridgeRecordings';
 
@@ -50,7 +51,7 @@ const DEFAULT_POLICY = {
 };
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await chrome.storage.local.remove('sessionPermissions').catch(() => {});
+  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY]).catch(() => {});
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   await initializeBridgeEnabled().catch(err => console.error(err));
   await connectNative();
@@ -58,7 +59,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await chrome.storage.local.remove('sessionPermissions').catch(() => {});
+  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY]).catch(() => {});
   await initializeBridgeEnabled().catch(err => console.error(err));
   await connectNative();
   await initCspBypass().catch(err => console.error(err));
@@ -683,11 +684,14 @@ async function tabsCreate(params) {
   if (typeof tab.id === 'number') {
     try {
       const groups = await chrome.tabGroups.query({ title: '🤖 Agent', windowId: tab.windowId });
-      if (groups.length > 0) {
-        await chrome.tabs.group({ tabIds: [tab.id], groupId: groups[0].id });
+      const managedGroups = await loadAgentTabGroups();
+      const group = groups.find(item => managedGroups.has(item.id));
+      if (group) {
+        await chrome.tabs.group({ tabIds: [tab.id], groupId: group.id });
       } else {
         const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
         await chrome.tabGroups.update(groupId, { title: '🤖 Agent', color: 'green' });
+        await rememberAgentTabGroup(groupId);
       }
     } catch (e) {
       console.warn('Failed to auto-group agent tab:', e);
@@ -1857,10 +1861,6 @@ async function requireSession(sessionId) {
   return session;
 }
 
-function isAgentGroupTitle(title) {
-  return typeof title === 'string' && title.trim().startsWith('🤖');
-}
-
 function sessionGroupIds(sessions) {
   return new Set(
     Object.values(sessions)
@@ -1869,17 +1869,24 @@ function sessionGroupIds(sessions) {
   );
 }
 
+async function loadAgentTabGroups() {
+  const result = await chrome.storage.local.get(AGENT_TAB_GROUPS_STORAGE_KEY);
+  const groupIds = result[AGENT_TAB_GROUPS_STORAGE_KEY];
+  return new Set(Array.isArray(groupIds) ? groupIds.filter(groupId => typeof groupId === 'number') : []);
+}
+
+async function rememberAgentTabGroup(groupId) {
+  if (typeof groupId !== 'number' || groupId < 0) return;
+  const groupIds = await loadAgentTabGroups();
+  groupIds.add(groupId);
+  await chrome.storage.local.set({ [AGENT_TAB_GROUPS_STORAGE_KEY]: Array.from(groupIds) });
+}
+
 async function isAgentManagedGroupId(groupId, sessions = null) {
   if (typeof groupId !== 'number' || groupId < 0) return false;
   const knownGroupIds = sessionGroupIds(sessions || await loadSessions());
   if (knownGroupIds.has(groupId)) return true;
-  if (!chrome.tabGroups) return false;
-  try {
-    const group = await chrome.tabGroups.get(groupId);
-    return isAgentGroupTitle(group?.title);
-  } catch (e) {
-    return false;
-  }
+  return (await loadAgentTabGroups()).has(groupId);
 }
 
 async function areAgentManagedTabs(tabIds) {
