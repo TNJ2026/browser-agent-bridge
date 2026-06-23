@@ -2391,6 +2391,14 @@ function getMethodCategory(method, params = {}) {
   if (method === 'console.read' || method === 'network.read') {
     return 'page_logs';
   }
+  if (
+    method === 'recording.status' ||
+    method === 'recording.stop' ||
+    method === 'recording.export' ||
+    method === 'recording.clear'
+  ) {
+    return 'recording_data';
+  }
   if (method === 'policy.set') {
     return 'policy_admin';
   }

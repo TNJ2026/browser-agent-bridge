@@ -334,7 +334,7 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 ## Security and Privacy
 
 - Browser tab reads and controls are isolated to Agent-managed tab groups. Calls targeting tabs or groups outside that boundary are rejected immediately.
-- Sensitive operations inside the Agent boundary, plus downloads and policy changes, require runtime approval unless the operation is already scoped to an Agent-managed tab group.
+- Sensitive operations inside the Agent boundary, plus recording data access, downloads, and policy changes, require runtime approval unless the operation is already scoped to an Agent-managed tab group.
 - If the side panel is closed, sensitive calls trigger a Chrome notification and open an extension approval popup.
 - The Native Messaging host is not started by default. Use Start Bridge in the side panel to run it, and Stop Bridge to disconnect it and pause automatic reconnects.
 - Workflow recordings redact typed text by default unless `includeText: true` is explicitly used.

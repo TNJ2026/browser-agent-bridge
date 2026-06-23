@@ -334,7 +334,7 @@ scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
 ## 安全与隐私
 
 - 浏览器标签页读取和控制被隔离在 Agent 托管的标签组内。目标在 Agent 标签组外的调用会被直接拒绝。
-- Agent 边界内的敏感操作，以及下载记录和策略修改等操作，仍按运行时授权机制处理；已限定在 Agent 托管标签组内的操作可免额外授权。
+- Agent 边界内的敏感操作，以及录制数据访问、下载记录和策略修改等操作，仍按运行时授权机制处理；已限定在 Agent 托管标签组内的操作可免额外授权。
 - 如果侧边栏未打开，敏感调用会触发 Chrome 通知，并打开扩展审批弹窗。
 - Native Messaging host 默认不会自动启动。用户需要在侧边栏点击 Start Bridge 来运行它，点击 Stop Bridge 会断开连接并暂停自动重连。
 - 工作流录制默认会对输入文本脱敏，除非显式使用 `includeText: true`。
