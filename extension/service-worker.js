@@ -51,7 +51,7 @@ const DEFAULT_POLICY = {
 };
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY]).catch(() => {});
+  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY, RECORDINGS_STORAGE_KEY]).catch(() => {});
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   await initializeBridgeEnabled().catch(err => console.error(err));
   await connectNative();
@@ -59,7 +59,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY]).catch(() => {});
+  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY, RECORDINGS_STORAGE_KEY]).catch(() => {});
   await initializeBridgeEnabled().catch(err => console.error(err));
   await connectNative();
   await initCspBypass().catch(err => console.error(err));
