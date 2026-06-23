@@ -51,7 +51,7 @@ const DEFAULT_POLICY = {
 };
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY, RECORDINGS_STORAGE_KEY]).catch(() => {});
+  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY]).catch(() => {});
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   await initializeBridgeEnabled().catch(err => console.error(err));
   await connectNative();
@@ -59,7 +59,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY, RECORDINGS_STORAGE_KEY]).catch(() => {});
+  await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY]).catch(() => {});
   await initializeBridgeEnabled().catch(err => console.error(err));
   await connectNative();
   await initCspBypass().catch(err => console.error(err));
@@ -1988,19 +1988,7 @@ async function assertRpcTabIsolation(method, params = {}) {
     return;
   }
 
-  if (method === 'recording.status') {
-    if (params.recordingId) await assertRecordingManaged(params.recordingId, method);
-    return;
-  }
 
-  if (method === 'recording.stop' || method === 'recording.export' || method === 'recording.clear') {
-    if (params.recordingId) {
-      await assertRecordingManaged(params.recordingId, method);
-      return;
-    }
-    if (method === 'recording.clear') await assertAllRecordingsManaged(method);
-    return;
-  }
 
   if (method === 'indicator.set') {
     await assertAgentManagedTabs([assertTabId(params.tabId)], method);
@@ -2034,20 +2022,7 @@ async function assertAgentManagedGroup(groupId, action) {
   }
 }
 
-async function assertRecordingManaged(recordingId, action) {
-  await ensureRecordingsLoaded();
-  await pruneExpiredRecordings();
-  const recording = requireRecording(recordingId);
-  await assertRecordingScopeManaged(recording, action);
-}
 
-async function assertAllRecordingsManaged(action) {
-  await ensureRecordingsLoaded();
-  await pruneExpiredRecordings();
-  for (const recording of recordings.values()) {
-    await assertRecordingScopeManaged(recording, action);
-  }
-}
 
 async function assertSessionManaged(sessionId, action) {
   const session = await requireSession(sessionId);
@@ -2061,17 +2036,7 @@ async function isSessionManaged(session) {
   return Array.isArray(session.tabIds) && session.tabIds.length > 0 && await areAgentManagedTabs(session.tabIds);
 }
 
-async function assertRecordingScopeManaged(recording, action) {
-  if (recording.scope === 'group' || typeof recording.groupId === 'number') {
-    await assertAgentManagedGroup(recording.groupId, action);
-    return;
-  }
-  if (typeof recording.tabId === 'number') {
-    await assertAgentManagedTabs([recording.tabId], action);
-    return;
-  }
-  throw new Error(`Access denied: ${action} recording is not scoped to an Agent-managed tab group`);
-}
+
 
 async function assertTabAllowed(tabId, action) {
   const tab = await chrome.tabs.get(tabId);
