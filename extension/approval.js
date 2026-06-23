@@ -56,8 +56,8 @@ function getCategoryLabel(category) {
       en: 'Modify local security policy (allow/block URLs or RPC methods)'
     },
     recording_data: {
-      zh: '读取或导出已录制的网页操作历史 (包含步骤截图)',
-      en: 'Access or export recorded page action history (includes step screenshots)'
+      zh: '读取、停止、导出或删除已录制的网页操作历史 (可能包含步骤截图)',
+      en: 'Read, stop, export, or delete recorded page action history (may include step screenshots)'
     }
   }[category] || { zh: category, en: category };
 }
