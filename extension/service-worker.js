@@ -351,6 +351,7 @@ async function handleRpc(request) {
   await assertMethodAllowed(request.method);
   const params = request.params || {};
   await assertOptionalPermissions(request.method, params);
+  await assertRpcTabIsolation(request.method, params);
   await checkPermission(request.method, params);
   switch (request.method) {
     case 'permission.check':
@@ -680,27 +681,28 @@ async function tabsCreate(params) {
     active: params.active !== false,
     ...(typeof params.windowId === 'number' ? { windowId: params.windowId } : {})
   });
+  if (typeof tab.id !== 'number') throw new Error('Created tab has no id');
   
-  if (typeof tab.id === 'number') {
-    try {
-      if (chrome.tabGroups && chrome.tabs.group) {
-        const groups = await chrome.tabGroups.query({ title: '🤖 Agent', windowId: tab.windowId });
-        const managedGroups = await loadAgentTabGroups();
-        const group = groups.find(item => managedGroups.has(item.id));
-        if (group) {
-          await chrome.tabs.group({ tabIds: [tab.id], groupId: group.id });
-        } else {
-          const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-          await chrome.tabGroups.update(groupId, { title: '🤖 Agent', color: 'green' });
-          await rememberAgentTabGroup(groupId);
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to auto-group agent tab:', e);
+  try {
+    if (!chrome.tabGroups || !chrome.tabs.group) {
+      throw new Error('Chrome tab groups API is unavailable');
     }
+    const groups = await chrome.tabGroups.query({ title: '🤖 Agent', windowId: tab.windowId });
+    const managedGroups = await loadAgentTabGroups();
+    const group = groups.find(item => managedGroups.has(item.id));
+    if (group) {
+      await chrome.tabs.group({ tabIds: [tab.id], groupId: group.id });
+    } else {
+      const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+      await chrome.tabGroups.update(groupId, { title: '🤖 Agent', color: 'green' });
+      await rememberAgentTabGroup(groupId);
+    }
+  } catch (e) {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    throw new Error(`Failed to create Agent-managed tab: ${errorMessage(e)}`);
   }
 
-  return { tab: normalizeTab(tab) };
+  return { tab: normalizeTab(await chrome.tabs.get(tab.id)) };
 }
 
 async function tabsActivate(params) {
@@ -749,18 +751,19 @@ async function sessionStart(params) {
   if (typeof tab.id !== 'number') throw new Error('Created tab has no id');
   
   let groupId = null;
-  if (chrome.tabs.group) {
-    try {
-      groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-      if (chrome.tabGroups && typeof groupId === 'number') {
-        await chrome.tabGroups.update(groupId, {
-          title: name,
-          color: params.color || 'green'
-        }).catch(() => {});
-      }
-    } catch (e) {
-      console.warn('Failed to group session tab:', e);
+  try {
+    if (!chrome.tabGroups || !chrome.tabs.group) {
+      throw new Error('Chrome tab groups API is unavailable');
     }
+    groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+    await chrome.tabGroups.update(groupId, {
+      title: name,
+      color: params.color || 'green'
+    }).catch(() => {});
+    await rememberAgentTabGroup(groupId);
+  } catch (e) {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    throw new Error(`Failed to create Agent session tab group: ${errorMessage(e)}`);
   }
 
   const session = {
@@ -775,11 +778,15 @@ async function sessionStart(params) {
   const sessions = await loadSessions();
   sessions[session.id] = session;
   await saveSessions(sessions);
-  return { session, tab: normalizeTab(tab) };
+  return { session, tab: normalizeTab(await chrome.tabs.get(tab.id)) };
 }
 
 async function sessionList() {
-  return { sessions: Object.values(await loadSessions()) };
+  const sessions = [];
+  for (const session of Object.values(await loadSessions())) {
+    if (await isSessionManaged(session)) sessions.push(session);
+  }
+  return { sessions };
 }
 
 async function sessionGet(params) {
@@ -817,10 +824,14 @@ async function sessionCreateTab(params) {
     ...(windowId !== undefined ? { windowId } : {})
   });
   if (typeof tab.id !== 'number') throw new Error('Created tab has no id');
-  if (typeof session.groupId === 'number' && chrome.tabs.group) {
-    await chrome.tabs.group({ tabIds: [tab.id], groupId: session.groupId }).catch(e => {
-      console.warn('Failed to add created tab to session group:', e);
-    });
+  try {
+    if (typeof session.groupId !== 'number' || !chrome.tabs.group) {
+      throw new Error('Session has no Agent-managed tab group');
+    }
+    await chrome.tabs.group({ tabIds: [tab.id], groupId: session.groupId });
+  } catch (e) {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    throw new Error(`Failed to add created tab to session group: ${errorMessage(e)}`);
   }
   const sessions = await loadSessions();
   const storedSession = sessions[session.id];
@@ -1927,8 +1938,144 @@ async function assertMethodAllowed(method) {
   }
 }
 
+async function assertRpcTabIsolation(method, params = {}) {
+  if (method === 'tabs.list') {
+    if (typeof params.query?.groupId !== 'number') {
+      throw new Error('Access denied: tabs.list requires query.groupId for an Agent-managed tab group');
+    }
+    await assertAgentManagedGroup(params.query.groupId, method);
+    return;
+  }
+
+  if (method === 'tabs.activate') {
+    await assertAgentManagedTabs([assertTabId(params.tabId)], method);
+    return;
+  }
+
+  if (method === 'tabs.close') {
+    await assertAgentManagedTabs(tabIdsFromParams(params), method);
+    return;
+  }
+
+  if (method === 'tabs.group') {
+    await assertAgentManagedTabs(tabIdsFromParams(params), method);
+    if (typeof params.groupId === 'number') {
+      await assertAgentManagedGroup(params.groupId, method);
+    }
+    return;
+  }
+
+  if (method === 'session.addTab') {
+    await assertSessionManaged(params.sessionId, method);
+    await assertAgentManagedTabs([assertTabId(params.tabId)], method);
+    return;
+  }
+
+  if (method === 'session.get' || method === 'session.createTab' || method === 'session.closeTab' || method === 'session.stop') {
+    await assertSessionManaged(params.sessionId, method);
+    return;
+  }
+
+  if (method === 'recording.start') {
+    if (typeof params.groupId === 'number') {
+      await assertAgentManagedGroup(params.groupId, method);
+      return;
+    }
+    if (params.tabId != null) {
+      await assertAgentManagedTabs([assertTabId(params.tabId)], method);
+      return;
+    }
+    return;
+  }
+
+  if (method === 'recording.status') {
+    if (params.recordingId) await assertRecordingManaged(params.recordingId, method);
+    return;
+  }
+
+  if (method === 'recording.stop' || method === 'recording.export' || method === 'recording.clear') {
+    if (params.recordingId) {
+      await assertRecordingManaged(params.recordingId, method);
+      return;
+    }
+    if (method === 'recording.clear') await assertAllRecordingsManaged(method);
+    return;
+  }
+
+  if (method === 'indicator.set') {
+    await assertAgentManagedTabs([assertTabId(params.tabId)], method);
+    return;
+  }
+
+  if (
+    method.startsWith('page.') ||
+    method.startsWith('dom.') ||
+    method.startsWith('computer.') ||
+    method === 'console.read' ||
+    method === 'network.read'
+  ) {
+    await assertAgentManagedTabs([assertTabId(params.tabId)], method);
+  }
+}
+
+function tabIdsFromParams(params) {
+  return Array.isArray(params.tabIds) ? params.tabIds.map(assertTabId) : [assertTabId(params.tabId)];
+}
+
+async function assertAgentManagedTabs(tabIds, action) {
+  if (!await areAgentManagedTabs(tabIds)) {
+    throw new Error(`Access denied: ${action} is limited to tabs in Agent-managed tab groups`);
+  }
+}
+
+async function assertAgentManagedGroup(groupId, action) {
+  if (!await isAgentManagedGroupId(groupId)) {
+    throw new Error(`Access denied: ${action} is limited to Agent-managed tab groups`);
+  }
+}
+
+async function assertRecordingManaged(recordingId, action) {
+  await ensureRecordingsLoaded();
+  await pruneExpiredRecordings();
+  const recording = requireRecording(recordingId);
+  await assertRecordingScopeManaged(recording, action);
+}
+
+async function assertAllRecordingsManaged(action) {
+  await ensureRecordingsLoaded();
+  await pruneExpiredRecordings();
+  for (const recording of recordings.values()) {
+    await assertRecordingScopeManaged(recording, action);
+  }
+}
+
+async function assertSessionManaged(sessionId, action) {
+  const session = await requireSession(sessionId);
+  if (await isSessionManaged(session)) return;
+  throw new Error(`Access denied: ${action} session is not scoped to an Agent-managed tab group`);
+}
+
+async function isSessionManaged(session) {
+  if (!session || typeof session !== 'object') return false;
+  if (typeof session.groupId === 'number') return isAgentManagedGroupId(session.groupId);
+  return Array.isArray(session.tabIds) && session.tabIds.length > 0 && await areAgentManagedTabs(session.tabIds);
+}
+
+async function assertRecordingScopeManaged(recording, action) {
+  if (recording.scope === 'group' || typeof recording.groupId === 'number') {
+    await assertAgentManagedGroup(recording.groupId, action);
+    return;
+  }
+  if (typeof recording.tabId === 'number') {
+    await assertAgentManagedTabs([recording.tabId], action);
+    return;
+  }
+  throw new Error(`Access denied: ${action} recording is not scoped to an Agent-managed tab group`);
+}
+
 async function assertTabAllowed(tabId, action) {
   const tab = await chrome.tabs.get(tabId);
+  await assertAgentManagedGroup(tab.groupId, action);
   await assertUrlAllowed(tab.url || '', action);
 }
 
@@ -2218,6 +2365,7 @@ function errorMessage(error) {
 }
 
 function optionalPermissionsForMethod(method, params = {}) {
+  if (method === 'tabs.create') return ['tabs', 'tabGroups'];
   if (method === 'tabs.group') return ['tabs', 'tabGroups'];
   if (method.startsWith('tabs.')) return ['tabs'];
   if (method.startsWith('session.')) return ['tabs', 'tabGroups'];

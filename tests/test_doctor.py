@@ -31,6 +31,7 @@ class TestDoctor(unittest.TestCase):
                 "native/host-wrapper.sh",
                 "native/host-wrapper.win.bat",
                 "native/com.local.browser_agent_bridge.json",
+                "runtime/site-patterns",
                 "scripts/install-native-host-macos.sh",
                 "scripts/install-native-host-unix.sh",
                 "scripts/install-native-host-win.ps1",

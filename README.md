@@ -255,9 +255,9 @@ curl -X POST http://127.0.0.1:8765/rpc \
   -H "Authorization: Bearer $BROWSER_AGENT_BRIDGE_TOKEN" \
   -d '{
     "jsonrpc": "2.0",
-    "id": "get-tabs",
-    "method": "tabs.list",
-    "params": {}
+    "id": "start-session",
+    "method": "session.start",
+    "params": {"url": "https://example.com"}
   }'
 ```
 
@@ -265,9 +265,9 @@ Helper scripts:
 
 ```bash
 python3 scripts/doctor.py
-scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{}}'
+scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"session.start","params":{"url":"https://example.com"}}'
 python3 scripts/browser_bridge_client.py health
-python3 scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true}}'
+python3 scripts/browser_bridge_client.py rpc session.get '{"sessionId":"SESSION_ID"}'
 node scripts/ws-rpc.js --listen
 ```
 
@@ -277,13 +277,13 @@ After installation, an agent with the `browser-agent-bridge` skill installed can
 
 ```bash
 scripts/browser_bridge_client.py health
-scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+scripts/browser_bridge_client.py rpc session.start '{"url":"https://example.com"}'
 scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
 ```
 
 For site-specific browsing work, the agent should:
 
-1. Run `tabs.list` first to discover the active `tabId`.
+1. Run `session.start` first to create an isolated Agent tab group, or `session.get` for an existing Agent session.
 2. Prefer read-only calls such as `page.readText`, `page.accessibilityTree`, and `dom.query`.
 3. Use `page.executeJavaScript`, `dom.*`, or `computer.*` only when needed.
 4. Respect runtime approval prompts. If the side panel is closed, the extension opens an approval popup.
@@ -333,7 +333,8 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 
 ## Security and Privacy
 
-- Sensitive operations such as tab listing, tab closing, screenshots, script execution, synthetic page input/actions, downloads, and network logs require runtime approval. Operations scoped to Agent-managed tab groups are allowed without an extra runtime approval prompt.
+- Browser tab reads and controls are isolated to Agent-managed tab groups. Calls targeting tabs or groups outside that boundary are rejected immediately.
+- Sensitive operations inside the Agent boundary, plus downloads and policy changes, require runtime approval unless the operation is already scoped to an Agent-managed tab group.
 - If the side panel is closed, sensitive calls trigger a Chrome notification and open an extension approval popup.
 - The Native Messaging host is not started by default. Use Start Bridge in the side panel to run it, and Stop Bridge to disconnect it and pause automatic reconnects.
 - Workflow recordings redact typed text by default unless `includeText: true` is explicitly used.

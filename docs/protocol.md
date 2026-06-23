@@ -18,10 +18,10 @@ WS   ws://127.0.0.1:8765/ws
 The repo includes two helper scripts:
 
 ```bash
-scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{}}'
+scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"session.start","params":{"url":"https://example.com"}}'
 scripts/ws-rpc.js '{"jsonrpc":"2.0","id":"2","method":"extension.info","params":{}}'
 scripts/ws-rpc.js --listen
-scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+scripts/browser_bridge_client.py rpc session.get '{"sessionId":"SESSION_ID"}'
 scripts/doctor.py
 ```
 
@@ -145,8 +145,10 @@ started.
 ### `tabs.list`
 
 ```json
-{ "query": { "active": true, "currentWindow": true } }
+{ "query": { "groupId": 1 } }
 ```
+
+Lists tabs only inside an Agent-managed tab group. `query.groupId` is required.
 
 ### `tabs.create`
 
@@ -184,7 +186,9 @@ Creates a new tab inside an existing Agent session group and records it in the s
 
 ### `session.addTab`
 
-Adds an existing tab to an Agent session group and records it in the session. The tab must be in the same Chrome window as the session group.
+Adds an existing Agent-managed tab to an Agent session group and records it in
+the session. The tab must be in the same Chrome window as the session group.
+Tabs outside Agent-managed groups are rejected.
 
 ```json
 { "sessionId": "uuid", "tabId": 123 }

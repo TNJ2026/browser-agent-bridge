@@ -24,10 +24,10 @@ Extension notifications are delivered as JSON-RPC notifications:
 Helpers:
 
 ```bash
-scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{}}'
+scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"session.start","params":{"url":"https://example.com"}}'
 scripts/ws-rpc.js '{"jsonrpc":"2.0","id":"2","method":"extension.info","params":{}}'
 scripts/ws-rpc.js --listen
-scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+scripts/browser_bridge_client.py rpc session.get '{"sessionId":"SESSION_ID"}'
 scripts/doctor.py
 ```
 
@@ -129,10 +129,12 @@ started.
 Parameters:
 
 ```json
-{"query":{"active":true,"currentWindow":true}}
+{"query":{"groupId":1}}
 ```
 
-Chrome `tabs.query` options are passed through.
+Lists tabs only inside an Agent-managed tab group. `query.groupId` is required
+and must refer to an Agent-managed group. Other Chrome `tabs.query` options may
+be included, but unscoped tab listing is rejected.
 
 ### `tabs.create`
 
@@ -146,6 +148,8 @@ Chrome `tabs.query` options are passed through.
 {"tabId":123}
 ```
 
+The tab must already be in an Agent-managed tab group.
+
 ### `tabs.close`
 
 ```json
@@ -158,9 +162,13 @@ or:
 {"tabIds":[123,124]}
 ```
 
+All target tabs must already be in Agent-managed tab groups.
+
 ### `tabs.group`
 
-Adds tab(s) to a tab group. If `groupId` is not provided, a new group is created.
+Groups tabs that are already Agent-managed. If `groupId` is provided, that group
+must also already be Agent-managed. If `groupId` is not provided, a new
+Agent-managed group is created.
 
 ```json
 {"tabIds":[123,124],"groupId":1,"title":"Agent","color":"cyan"}
@@ -196,7 +204,9 @@ Creates a new tab inside an existing Agent session group and records it in the s
 
 ### `session.addTab`
 
-Adds an existing tab to an Agent session group and records it in the session. The tab must be in the same Chrome window as the session group.
+Adds an existing Agent-managed tab to an Agent session group and records it in
+the session. The tab must be in the same Chrome window as the session group.
+Tabs outside Agent-managed groups are rejected.
 
 ```json
 {"sessionId":"uuid","tabId":123}

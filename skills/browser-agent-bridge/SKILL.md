@@ -26,7 +26,7 @@ curl -sS http://127.0.0.1:8765/health
 ```bash
 curl -sS -H 'content-type: application/json' \
   -X POST http://127.0.0.1:8765/rpc \
-  --data '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{}}'
+  --data '{"jsonrpc":"2.0","id":"1","method":"session.start","params":{"url":"https://example.com"}}'
 ```
 
 4. If `/health` reports `authRequired: true`, include `Authorization: Bearer $BROWSER_AGENT_BRIDGE_TOKEN`. The bundled `scripts/rpc.sh` and `scripts/ws-rpc.js` helpers do this automatically when the environment variable is set.
@@ -48,13 +48,13 @@ scripts/ws-rpc.js --listen
 Python client:
 
 ```bash
-scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+scripts/browser_bridge_client.py rpc session.start '{"url":"https://example.com"}'
 ```
 
-6. Prefer `tabs.list` first to discover `tabId`. Use active/current-window query when the user's task concerns the current tab:
+6. Prefer `session.start` first for a new isolated workspace, then use the returned session `groupId` or `session.get` to discover managed `tabId` values. `tabs.list` must be scoped to an Agent-managed group:
 
 ```json
-{"query":{"active":true,"currentWindow":true}}
+{"query":{"groupId":1}}
 ```
 
 7. For detailed method parameters, read `references/protocol.md`.
@@ -169,13 +169,13 @@ PY
 
    Check that `/health` is reachable, `authRequired` is handled with the generated token, and `extensionReady` is true. If health is unreachable and the side panel shows Stopped, ask the user to click Start Bridge.
 
-9. Trigger one sensitive RPC to verify runtime approval behavior:
+9. Trigger one isolated session RPC to verify browser control behavior:
 
    ```bash
-   scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+   scripts/browser_bridge_client.py rpc session.start '{"url":"https://example.com"}'
    ```
 
-   If the side panel is open, approval should appear there. If it is closed, Chrome should show a notification and open the extension approval popup.
+   The created tab should appear in an Agent-managed tab group.
 
 10. If any check fails, do not proceed with page automation until the specific failing item is fixed. Prefer re-running `python3 scripts/doctor.py --skip-live` after each repair.
 
@@ -279,7 +279,8 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 - Page CSP (Content Security Policy) response headers are not stripped globally. Temporary CSP bypass defaults to enabled for new installs, but only adds a short-lived dynamic rule for the target origin when `tabs.create`, `session.start`, `page.navigate`, or `page.executeJavaScript` needs it. Check the current state with `extension.getCspBypass`; the toggle can only be changed by the user in the sidepanel UI. Pass `bypassCSP:false` to opt out for a call.
 - When CSP bypass is enabled, prefer the bypass-capable path for analyzing and extracting web page content: navigate/create the target tab with the default bypass behavior, then use `page.readText`, `page.accessibilityTree`, or `page.executeJavaScript` as needed. This is the preferred path for pages whose scripts or injected analysis helpers may be blocked by CSP.
 - Browser history and bookmark search are intentionally not supported; ask the user for a URL or use currently open tabs instead.
-- **Runtime Permission Approval**: By default, sensitive operations (tab list/session state, downloads records, screenshots/DOM snapshots, console/network logs, and `policy.set`) are intercepted by the extension and prompt the user in the sidepanel UI for approval (Allow once, Always for session, or Deny). Operations scoped to Agent-managed tab groups are allowed without an extra runtime approval prompt.
+- **Agent Tab Isolation**: Browser tab reads and controls are limited to Agent-managed tab groups. Calls that target tabs or groups outside that boundary fail immediately instead of asking for approval. Create isolated work with `tabs.create` or `session.start`; both require `tabs` and `tabGroups` optional permissions and place new tabs in an Agent-managed group.
+- **Runtime Permission Approval**: By default, sensitive non-tab operations (downloads records and `policy.set`) and sensitive tab operations inside the Agent boundary (screenshots/DOM snapshots, console/network logs, and similar methods) are intercepted by the extension and prompt the user in the sidepanel UI for approval (Allow once, Always for session, or Deny). Operations scoped to Agent-managed tab groups are allowed without an extra runtime approval prompt.
   - If the sidepanel is closed when making a sensitive call, the extension sends a Chrome notification and opens an extension approval popup window. The user can approve or deny from that popup.
   - If the user denies the request, the call will fail. Respect this choice and do not retry repeatedly; instead, explain the limitation to the user or ask for the information directly.
 - **Domain Experience Accumulation**: At the end of every site-specific analysis, extraction, or automation task, actively decide whether the run revealed reusable site knowledge. Before writing a summary, check `runtime/site-patterns/` for existing experience for the same site domain. If it exists, merge the new knowledge into that file instead of creating a duplicate. If it does not exist, create `runtime/site-patterns/{domain}.md`, where `{domain}` exactly matches the lowercase ASCII/Punycode site hostname without protocol, path, query, port, or trailing dot.
@@ -288,7 +289,7 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
   - Use concise sections such as `Selectors`, `Wait Conditions`, `Extraction`, `Navigation`, `CSP`, and `Pitfalls`; include the date when behavior may be time-sensitive.
 - Do not execute high-risk actions such as purchases, sending messages, deleting data, changing account settings, or submitting sensitive forms unless the user explicitly asked for that exact action.
 - Prefer read-only methods first: `tabs.list`, `page.readText`, `page.accessibilityTree` (which prunes intermediate layout containers and consolidates element child texts), `page.screenshot`.
-- Prefer `session.start` for multi-step tasks that should stay isolated in a Chrome tab group. Use `session.createTab` for new tabs inside the session, `session.addTab` only when the user wants an existing tab adopted into the session, and `session.closeTab` to close one managed tab while keeping session metadata clean.
+- Prefer `session.start` for multi-step tasks that should stay isolated in a Chrome tab group. Use `session.createTab` for new tabs inside the session and `session.closeTab` to close one managed tab while keeping session metadata clean. `session.addTab` only accepts tabs that are already in an Agent-managed group.
 - Check `policy.get` before operating on sensitive domains or using high-risk methods; use `policy.set` only when the user asks to change local allow/block rules.
 - Use `page.executeJavaScript` only when read-only methods are insufficient or when the user explicitly wants page scripting.
 - Prefer `dom.query`, `dom.click`, `dom.type`, `dom.select`, `dom.hover`, and `dom.scroll` for ordinary page controls before falling back to viewport coordinates.
@@ -301,7 +302,7 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 
 ### Inspect Current Page
 
-1. `tabs.list` with `{ "query": { "active": true, "currentWindow": true } }`
+1. Use `session.start` for a new isolated Agent tab group, or `session.get` for an existing Agent session.
 2. Determine the page domain and check `runtime/site-patterns/` for a matching prior-experience file. Read and follow it before inspecting further.
 3. Call `extension.getCspBypass`; if enabled, prefer the default CSP-bypass path while analyzing or extracting page content.
 4. `page.readText` for visible text

@@ -255,9 +255,9 @@ curl -X POST http://127.0.0.1:8765/rpc \
   -H "Authorization: Bearer $BROWSER_AGENT_BRIDGE_TOKEN" \
   -d '{
     "jsonrpc": "2.0",
-    "id": "get-tabs",
-    "method": "tabs.list",
-    "params": {}
+    "id": "start-session",
+    "method": "session.start",
+    "params": {"url": "https://example.com"}
   }'
 ```
 
@@ -265,9 +265,9 @@ curl -X POST http://127.0.0.1:8765/rpc \
 
 ```bash
 python3 scripts/doctor.py
-scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"tabs.list","params":{}}'
+scripts/rpc.sh '{"jsonrpc":"2.0","id":"1","method":"session.start","params":{"url":"https://example.com"}}'
 python3 scripts/browser_bridge_client.py health
-python3 scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true}}'
+python3 scripts/browser_bridge_client.py rpc session.get '{"sessionId":"SESSION_ID"}'
 node scripts/ws-rpc.js --listen
 ```
 
@@ -277,13 +277,13 @@ node scripts/ws-rpc.js --listen
 
 ```bash
 scripts/browser_bridge_client.py health
-scripts/browser_bridge_client.py rpc tabs.list '{"query":{"active":true,"currentWindow":true}}'
+scripts/browser_bridge_client.py rpc session.start '{"url":"https://example.com"}'
 scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
 ```
 
 执行站点级浏览或抓取任务时，Agent 应该：
 
-1. 先调用 `tabs.list` 找到当前活动页的 `tabId`。
+1. 先调用 `session.start` 创建隔离的 Agent 标签组，或对已有 Agent session 调用 `session.get`。
 2. 优先使用只读方法，例如 `page.readText`、`page.accessibilityTree` 和 `dom.query`。
 3. 仅在必要时使用 `page.executeJavaScript`、`dom.*` 或 `computer.*`。
 4. 尊重运行时审批。侧边栏未打开时，扩展会打开审批弹窗。
@@ -333,7 +333,8 @@ scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
 
 ## 安全与隐私
 
-- 标签页列表、截图、下载记录、网络日志等敏感操作需要运行时确认授权。
+- 浏览器标签页读取和控制被隔离在 Agent 托管的标签组内。目标在 Agent 标签组外的调用会被直接拒绝。
+- Agent 边界内的敏感操作，以及下载记录和策略修改等操作，仍按运行时授权机制处理；已限定在 Agent 托管标签组内的操作可免额外授权。
 - 如果侧边栏未打开，敏感调用会触发 Chrome 通知，并打开扩展审批弹窗。
 - Native Messaging host 默认不会自动启动。用户需要在侧边栏点击 Start Bridge 来运行它，点击 Stop Bridge 会断开连接并暂停自动重连。
 - 工作流录制默认会对输入文本脱敏，除非显式使用 `includeText: true`。
