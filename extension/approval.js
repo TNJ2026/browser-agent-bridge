@@ -54,6 +54,10 @@ function getCategoryLabel(category) {
     policy_admin: {
       zh: '修改本地安全策略 (允许/阻止 URL 或 RPC 方法)',
       en: 'Modify local security policy (allow/block URLs or RPC methods)'
+    },
+    recording_data: {
+      zh: '读取或导出已录制的网页操作历史 (包含步骤截图)',
+      en: 'Access or export recorded page action history (includes step screenshots)'
     }
   }[category] || { zh: category, en: category };
 }
