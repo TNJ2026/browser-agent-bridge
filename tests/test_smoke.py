@@ -49,11 +49,26 @@ def run_smoke_test():
             raise RuntimeError("Locator label count failed")
         wait_res = client.rpc("locator.waitFor", {"tabId": tab_id, "role": "button", "name": "Submit Action", "state": "visible"})
         print(f"Locator wait result: {wait_res}")
+        heading_res = client.rpc("locator.count", {"tabId": tab_id, "role": "heading", "name": "ARIA Controls", "level": 2})
+        if heading_res.get("count", 0) != 1:
+            raise RuntimeError("Locator heading role/name/level failed")
+        pressed_res = client.rpc("locator.count", {"tabId": tab_id, "role": "button", "name": "Pressed Toggle", "pressed": True})
+        if pressed_res.get("count", 0) != 1:
+            raise RuntimeError("Locator pressed role state failed")
+        aria_click_res = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "ARIA Controls Labelled Action"})
+        print(f"ARIA labelled click result: {aria_click_res}")
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "ARIA Done", "timeoutMs": 5000})
         text_res = client.rpc("locator.textContent", {"tabId": tab_id, "text": "Bridge Smoke Test"})
         print(f"Locator text result: {text_res}")
+        covered_res = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "Covered Action", "timeoutMs": 3000})
+        print(f"Covered click result: {covered_res}")
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "Covered Done", "timeoutMs": 5000})
         delayed_res = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "Delayed Action", "timeoutMs": 3000})
         print(f"Locator delayed click result: {delayed_res}")
         client.rpc("page.waitForText", {"tabId": tab_id, "text": "Delayed Done", "timeoutMs": 5000})
+        dom_delayed_res = client.rpc("dom.click", {"tabId": tab_id, "selector": "button#dom-delayed-btn", "timeoutMs": 3000})
+        print(f"DOM delayed click result: {dom_delayed_res}")
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "DOM Delayed Done", "timeoutMs": 5000})
 
         # 2.5 Test Hover, Scroll and Shortcut Key APIs
         print("\n2.5 Testing Hover, Scroll and Shortcut Key APIs...")

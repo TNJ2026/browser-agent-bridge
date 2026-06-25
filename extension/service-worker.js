@@ -62,6 +62,8 @@ const locatorHandlers = createLocatorHandlers({
   assertTabAllowed,
   assertString,
   recordAction: recordingHandlers.recordAction,
+  attachDebugger,
+  cdp,
   sleep,
   defaultTimeoutMs: DEFAULT_TIMEOUT_MS
 });
@@ -70,7 +72,11 @@ const domHandlers = createDomHandlers({
   assertTabId,
   assertTabAllowed,
   assertString,
-  recordAction: recordingHandlers.recordAction
+  recordAction: recordingHandlers.recordAction,
+  attachDebugger,
+  cdp,
+  sleep,
+  defaultTimeoutMs: DEFAULT_TIMEOUT_MS
 });
 
 const computerHandlers = createComputerHandlers({

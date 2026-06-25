@@ -8,6 +8,8 @@
     div { margin-bottom: 1rem; }
     label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
     input, select, button { width: 100%; padding: 0.5rem; font-size: 1rem; margin-bottom: 1rem; }
+    .covered-wrap { position: relative; }
+    .blocking-overlay { position: absolute; inset: 0 0 1rem; z-index: 2; background: rgba(220, 38, 38, 0.18); }
   </style>
 </head>
 <body>
@@ -24,18 +26,42 @@
     </select>
   </div>
   <button id="submit-btn" onclick="document.getElementById('result').innerText = document.getElementById('input-field').value">Submit Action</button>
+  <h2 id="aria-heading">ARIA Controls</h2>
+  <button id="aria-labelled-btn" aria-labelledby="aria-heading labelled-action-text" onclick="document.getElementById('aria-result').innerText = 'ARIA Done'">
+    <span id="labelled-action-text">Labelled Action</span>
+  </button>
+  <button id="pressed-btn" aria-pressed="true">Pressed Toggle</button>
   <button id="delayed-btn" disabled onclick="document.getElementById('delayed-result').innerText = 'Delayed Done'">Delayed Action</button>
+  <button id="dom-delayed-btn" disabled onclick="document.getElementById('dom-delayed-result').innerText = 'DOM Delayed Done'">DOM Delayed Action</button>
+  <div class="covered-wrap">
+    <button id="covered-btn" onclick="document.getElementById('covered-result').innerText = 'Covered Done'">Covered Action</button>
+    <div id="blocking-overlay" class="blocking-overlay"></div>
+  </div>
   <div>
     <strong>Result:</strong>
     <span id="result">Initial Text</span>
   </div>
   <div>
+    <strong>ARIA:</strong>
+    <span id="aria-result">Waiting</span>
+  </div>
+  <div>
     <strong>Delayed:</strong>
     <span id="delayed-result">Waiting</span>
+  </div>
+  <div>
+    <strong>DOM Delayed:</strong>
+    <span id="dom-delayed-result">Waiting</span>
+  </div>
+  <div>
+    <strong>Covered:</strong>
+    <span id="covered-result">Waiting</span>
   </div>
   <script>
     setTimeout(() => {
       document.getElementById('delayed-btn').disabled = false;
+      document.getElementById('dom-delayed-btn').disabled = false;
+      document.getElementById('blocking-overlay').style.display = 'none';
     }, 350);
   </script>
 </body>

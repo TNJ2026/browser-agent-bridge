@@ -274,15 +274,24 @@ Returns a bounded list of matching elements with text, value, visibility, and vi
 
 ### `dom.click`
 
-Clicks one element by CSS selector and optional zero-based `index`.
+Clicks one element by CSS selector and optional zero-based `index` using a
+CDP mouse input path.
+By default this auto-waits for the element to be visible, enabled, and have a
+stable bounding box, and for the clickable point to receive pointer events
+without being covered by another element. Use `timeoutMs` and `intervalMs` to
+tune the wait, `strict:true` to require exactly one selector match,
+`stable:false` to skip the bounding-box stability check, or `force:true` to
+bypass actionability checks.
 
 ```json
-{ "tabId": 123, "selector": "button[type=submit]", "index": 0, "frameSelector": "iframe[name=app]" }
+{ "tabId": 123, "selector": "button[type=submit]", "index": 0, "timeoutMs": 30000, "frameSelector": "iframe[name=app]" }
 ```
 
 ### `dom.type`
 
 Types into an input, textarea, or contenteditable element. `replace` defaults to true.
+By default this auto-waits for the element to be visible, enabled, editable,
+and stable.
 
 ```json
 { "tabId": 123, "selector": "input[name=q]", "text": "browser bridge", "replace": true, "frameSelector": "iframe[name=app]" }
@@ -291,6 +300,8 @@ Types into an input, textarea, or contenteditable element. `replace` defaults to
 ### `dom.select`
 
 Sets a native `<select>` value and dispatches input/change events.
+By default this auto-waits for the element to be visible, enabled, a native
+select, and stable.
 
 ```json
 { "tabId": 123, "selector": "select[name=country]", "value": "US", "frameSelector": "iframe[name=app]" }
@@ -299,6 +310,8 @@ Sets a native `<select>` value and dispatches input/change events.
 ### `dom.hover`
 
 Hovers over an element by CSS selector and optional zero-based `index` (dispatches `mouseover` and `mouseenter` events).
+By default this auto-waits for the element to be visible, receive pointer
+events, and be stable.
 
 ```json
 { "tabId": 123, "selector": "button[type=submit]", "index": 0, "frameSelector": "iframe[name=app]" }
@@ -311,10 +324,17 @@ Hovers over an element by CSS selector and optional zero-based `index` (dispatch
 Finds elements using a Playwright-like locator shape. Locator fields can be
 passed directly or under `locator`. Supported fields are `selector`, `text`,
 `role`, `name`, `label`, `placeholder`, `exact`, `caseSensitive`, `visible`,
-and `frameSelector`.
+`includeHidden`, `checked`, `disabled`, `expanded`, `pressed`, `selected`,
+`level`, and `frameSelector`. Role/name matching uses implicit HTML roles,
+explicit ARIA roles, `aria-label`, `aria-labelledby`, associated labels,
+heading levels, and common ARIA state filters.
 
 ```json
 { "tabId": 123, "role": "button", "name": "Submit", "visible": true }
+```
+
+```json
+{ "tabId": 123, "role": "heading", "name": "Account", "level": 2 }
 ```
 
 ### `locator.textContent`
@@ -336,11 +356,13 @@ Waits for a locator state: `attached`, `visible` (default), `hidden`, or
 
 ### `locator.click`
 
-Clicks the matched element at `index` (default `0`). By default this auto-waits
-for the element to be visible, enabled, and have a stable bounding box. Use
-`timeoutMs` and `intervalMs` to tune the wait, `strict:true` to require exactly
-one match, `stable:false` to skip the bounding-box stability check, or
-`force:true` to bypass actionability checks.
+Clicks the matched element at `index` (default `0`) using a CDP mouse input
+path. By default this auto-waits for the element to be visible, enabled, have a
+stable bounding box, and for the clickable point to receive pointer events
+without being covered by another element. Use `timeoutMs` and `intervalMs` to
+tune the wait, `strict:true` to require exactly one match, `stable:false` to
+skip the bounding-box stability check, or `force:true` to bypass actionability
+checks.
 
 ```json
 { "tabId": 123, "role": "button", "name": "Submit", "timeoutMs": 30000 }
