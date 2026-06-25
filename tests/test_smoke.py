@@ -157,6 +157,11 @@ def run_smoke_test():
         })
         client.rpc("page.waitForText", {"tabId": tab_id, "text": "Dropped: drag-smoke", "timeoutMs": 5000})
 
+        blocked_res = client.rpc("network.setBlockedUrls", {"tabId": tab_id, "urls": ["*google-analytics.com*"]})
+        print(f"Blocked result: {blocked_res}")
+        if not blocked_res.get("ok") or "*google-analytics.com*" not in blocked_res.get("urls", []):
+            raise RuntimeError("network.setBlockedUrls failed")
+
         client.rpc("page.executeJavaScript", {
             "tabId": tab_id,
             "script": "setTimeout(async () => { await fetch('data:application/json,%7B%22ok%22%3Atrue%7D'); document.getElementById('network-result').innerText = 'Network Done'; }, 250)"

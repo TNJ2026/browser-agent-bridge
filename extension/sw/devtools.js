@@ -22,8 +22,19 @@ export function createDevtoolsHandlers({
     return { events: (networkEventsByTab.get(tabId) || []).slice(-(params.limit || 100)) };
   }
 
+  async function networkSetBlockedUrls(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'network.setBlockedUrls');
+    const urls = Array.isArray(params.urls) ? params.urls : [];
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Network.enable').catch(() => {});
+    await cdp(tabId, 'Network.setBlockedURLs', { urls });
+    return { ok: true, urls };
+  }
+
   return {
     consoleRead,
-    networkRead
+    networkRead,
+    networkSetBlockedUrls
   };
 }

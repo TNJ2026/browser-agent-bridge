@@ -831,6 +831,30 @@ or clear all in-memory recordings:
 {}
 ```
 
+### `console.read`
+
+Retrieves collected console events (logs, warnings, errors) for the specified tab.
+
+```json
+{ "tabId": 123, "limit": 100 }
+```
+
+### `network.read`
+
+Retrieves collected network request events for the specified tab.
+
+```json
+{ "tabId": 123, "limit": 100 }
+```
+
+### `network.setBlockedUrls`
+
+Blocks network requests matching specified URL patterns for the target tab. Pass an empty array `[]` to clear all blocked URLs.
+
+```json
+{ "tabId": 123, "urls": ["*.png", "*.jpg", "*google-analytics.com*"] }
+```
+
 ### `policy.get`
 
 Returns URL policy. Defaults block Chrome privileged pages and Chrome Web Store.

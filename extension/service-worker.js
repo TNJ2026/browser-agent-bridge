@@ -607,6 +607,8 @@ async function dispatchRpc(request) {
       return devtoolsHandlers.consoleRead(params);
     case 'network.read':
       return devtoolsHandlers.networkRead(params);
+    case 'network.setBlockedUrls':
+      return devtoolsHandlers.networkSetBlockedUrls(params);
     case 'downloads.list':
       return downloadsHandlers.downloadsList(params);
     case 'downloads.waitFor':
@@ -731,6 +733,7 @@ async function extensionInfo() {
       'keyboard.up',
       'console.read',
       'network.read',
+      'network.setBlockedUrls',
       'downloads.list',
       'downloads.waitFor',
       'recording.start',
@@ -945,7 +948,8 @@ async function assertRpcTabIsolation(method, params = {}) {
     method.startsWith('locator.') ||
     method.startsWith('computer.') ||
     method === 'console.read' ||
-    method === 'network.read'
+    method === 'network.read' ||
+    method === 'network.setBlockedUrls'
   ) {
     await assertAgentManagedTabs([assertTabId(params.tabId)], method);
   }
@@ -1082,6 +1086,7 @@ function optionalPermissionsForMethod(method, params = {}) {
     method.startsWith('computer.') ||
     method === 'console.read' ||
     method === 'network.read' ||
+    method === 'network.setBlockedUrls' ||
     method === 'recording.start'
   ) {
     return ['tabs'];
@@ -1149,7 +1154,7 @@ function getMethodCategory(method, params = {}) {
   ) {
     return 'page_action';
   }
-  if (method === 'console.read' || method === 'network.read') {
+  if (method === 'console.read' || method === 'network.read' || method === 'network.setBlockedUrls') {
     return 'page_logs';
   }
   if (
@@ -1195,6 +1200,7 @@ async function isAgentTabGroupOperation(method, params = {}) {
     method.startsWith('computer.') ||
     method === 'console.read' ||
     method === 'network.read' ||
+    method === 'network.setBlockedUrls' ||
     method === 'indicator.set'
   ) {
     if (params.tabId == null) return false;
