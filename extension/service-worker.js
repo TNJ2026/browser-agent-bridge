@@ -5,6 +5,7 @@ import { createPageHandlers } from './sw/page.js';
 import { createDevtoolsHandlers } from './sw/devtools.js';
 import { createDownloadsHandlers } from './sw/downloads.js';
 import { CSP_BYPASS_ALARM, createCspHandlers } from './sw/csp.js';
+import { createRecordingHandlers } from './sw/recording.js';
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
@@ -12,14 +13,9 @@ const DEFAULT_TIMEOUT_MS = 30000;
 const PERMISSION_PROMPT_TIMEOUT_MS = 60000;
 const APPROVAL_NOTIFICATION_ID = 'browser-agent-bridge-permission-approval';
 const APPROVAL_POPUP_PATH = 'approval.html';
-const DEFAULT_RECORDING_RETENTION_MS = 24 * 60 * 60 * 1000;
-const MAX_RECORDING_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const DEFAULT_RECORDING_MAX_ACTIONS = 500;
-const MAX_RECORDING_MAX_ACTIONS = 5000;
 const SESSION_STORAGE_KEY = 'browserAgentBridgeSessions';
 const AGENT_TAB_GROUPS_STORAGE_KEY = 'browserAgentBridgeAgentTabGroups';
 const POLICY_STORAGE_KEY = 'browserAgentBridgePolicy';
-const RECORDINGS_STORAGE_KEY = 'browserAgentBridgeRecordings';
 
 let nativePort = null;
 let nextRequestId = 1;
@@ -36,12 +32,9 @@ const attachedTabs = new Set();
 const cdpEvents = [];
 const networkEventsByTab = new Map();
 const consoleEventsByTab = new Map();
-const recordings = new Map();
-let recordingsLoaded = false;
 let nextPromptId = 1;
 const pendingPrompts = new Map();
 let approvalPopupWindowId = null;
-let recordingsSaveTimer = null;
 const DEFAULT_POLICY = {
   blockedUrlPatterns: [
     'chrome://*',
@@ -53,11 +46,21 @@ const DEFAULT_POLICY = {
   allowedMethods: []
 };
 
+const recordingHandlers = createRecordingHandlers({
+  assertTabId,
+  assertString,
+  normalizeTab,
+  captureTabScreenshot,
+  loadPolicy,
+  isUrlAllowedByPolicy,
+  errorMessage
+});
+
 const locatorHandlers = createLocatorHandlers({
   assertTabId,
   assertTabAllowed,
   assertString,
-  recordAction,
+  recordAction: recordingHandlers.recordAction,
   sleep,
   defaultTimeoutMs: DEFAULT_TIMEOUT_MS
 });
@@ -66,7 +69,7 @@ const domHandlers = createDomHandlers({
   assertTabId,
   assertTabAllowed,
   assertString,
-  recordAction
+  recordAction: recordingHandlers.recordAction
 });
 
 const computerHandlers = createComputerHandlers({
@@ -77,7 +80,7 @@ const computerHandlers = createComputerHandlers({
   attachDebugger,
   cdp,
   indicatorSet,
-  recordAction
+  recordAction: recordingHandlers.recordAction
 });
 
 const cspHandlers = createCspHandlers({});
@@ -89,7 +92,7 @@ const pageHandlers = createPageHandlers({
   assertUrlAllowed,
   maybeEnableTemporaryCspBypassForUrl: cspHandlers.maybeEnableTemporaryCspBypassForUrl,
   maybeEnableTemporaryCspBypass: cspHandlers.maybeEnableTemporaryCspBypass,
-  recordAction,
+  recordAction: recordingHandlers.recordAction,
   normalizeTab,
   waitForTabComplete,
   sleep,
@@ -194,17 +197,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
     }
     if (changed) await saveSessions(sessions);
   }).catch(() => {});
-  ensureRecordingsLoaded().then(() => {
-    let changed = false;
-    for (const recording of recordings.values()) {
-      if (recording.isRecording && recording.scope === 'tab' && recording.tabId === tabId) {
-        recording.isRecording = false;
-        recording.stoppedAt = new Date().toISOString();
-        changed = true;
-      }
-    }
-    if (changed) scheduleRecordingsSave();
-  }).catch(() => {});
+  recordingHandlers.onTabRemoved(tabId).catch(() => {});
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -510,15 +503,15 @@ async function handleRpc(request) {
     case 'downloads.list':
       return downloadsHandlers.downloadsList(params);
     case 'recording.start':
-      return recordingStart(params);
+      return recordingHandlers.recordingStart(params);
     case 'recording.stop':
-      return recordingStop(params);
+      return recordingHandlers.recordingStop(params);
     case 'recording.status':
-      return recordingStatus(params);
+      return recordingHandlers.recordingStatus(params);
     case 'recording.export':
-      return recordingExport(params);
+      return recordingHandlers.recordingExport(params);
     case 'recording.clear':
-      return recordingClear(params);
+      return recordingHandlers.recordingClear(params);
     case 'indicator.set':
       return indicatorSet(params);
     case 'policy.get':
@@ -847,91 +840,6 @@ async function sessionStop(params) {
   delete sessions[session.id];
   await saveSessions(sessions);
   return { stopped: session.id };
-}
-
-async function recordingStart(params) {
-  await ensureRecordingsLoaded();
-  await pruneExpiredRecordings();
-  const tabId = params.tabId == null ? null : assertTabId(params.tabId);
-  const hasExplicitGroup = typeof params.groupId === 'number';
-  const groupId = hasExplicitGroup ? params.groupId : tabId == null ? null : (await chrome.tabs.get(tabId)).groupId;
-  if (tabId == null && groupId == null) throw new Error('recording.start requires tabId or groupId');
-  const retentionMs = normalizeRecordingRetention(params.retentionMs);
-  const maxActions = normalizeRecordingMaxActions(params.maxActions);
-  const now = Date.now();
-  const recording = {
-    id: crypto.randomUUID(),
-    name: typeof params.name === 'string' && params.name.trim() ? params.name.trim() : 'Recording',
-    scope: hasExplicitGroup ? 'group' : 'tab',
-    tabId,
-    groupId,
-    captureScreenshots: params.captureScreenshots === true,
-    includeText: params.includeText === true,
-    maxActions,
-    retentionMs,
-    expiresAt: new Date(now + retentionMs).toISOString(),
-    isRecording: true,
-    startedAt: new Date(now).toISOString(),
-    stoppedAt: null,
-    actions: []
-  };
-  recordings.set(recording.id, recording);
-  await saveRecordingsNow();
-  if (tabId != null && recording.captureScreenshots) {
-    await recordAction(tabId, 'recording.initial_state', {}, undefined, recording.id);
-  }
-  return { recording: summarizeRecording(recording) };
-}
-
-async function recordingStop(params) {
-  await ensureRecordingsLoaded();
-  await pruneExpiredRecordings();
-  const recording = requireRecording(params.recordingId);
-  recording.isRecording = false;
-  recording.stoppedAt = new Date().toISOString();
-  await saveRecordingsNow();
-  return { recording: summarizeRecording(recording) };
-}
-
-async function recordingStatus(params) {
-  await ensureRecordingsLoaded();
-  await pruneExpiredRecordings();
-  if (params.recordingId) {
-    return { recording: summarizeRecording(requireRecording(params.recordingId)) };
-  }
-  return { recordings: Array.from(recordings.values()).map(summarizeRecording) };
-}
-
-async function recordingExport(params) {
-  await ensureRecordingsLoaded();
-  await pruneExpiredRecordings();
-  const recording = requireRecording(params.recordingId);
-  const payload = {
-    schemaVersion: 1,
-    exportedAt: new Date().toISOString(),
-    recording
-  };
-  if (params.download === true) {
-    const filename = safeFilename(params.filename || `${recording.name}-${recording.id}.json`);
-    const url = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
-    const downloadId = await chrome.downloads.download({ url, filename, saveAs: params.saveAs === true });
-    return { downloadId, recording: summarizeRecording(recording) };
-  }
-  return payload;
-}
-
-async function recordingClear(params) {
-  await ensureRecordingsLoaded();
-  await pruneExpiredRecordings();
-  if (params.recordingId) {
-    recordings.delete(params.recordingId);
-    await saveRecordingsNow();
-    return { cleared: [params.recordingId] };
-  }
-  const ids = Array.from(recordings.keys());
-  recordings.clear();
-  await saveRecordingsNow();
-  return { cleared: ids };
 }
 
 async function indicatorSet(params) {
@@ -1286,46 +1194,6 @@ async function assertUrlAllowed(url, action) {
   }
 }
 
-async function recordAction(tabId, type, input = {}, result, forcedRecordingId) {
-  await ensureRecordingsLoaded();
-  const matching = [];
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab) return;
-  for (const recording of recordings.values()) {
-    if (!recording.isRecording) continue;
-    if (forcedRecordingId && recording.id !== forcedRecordingId) continue;
-    if (!forcedRecordingId && recording.scope === 'tab' && recording.tabId !== tabId) continue;
-    if (!forcedRecordingId && recording.scope === 'group' && recording.groupId !== tab.groupId) continue;
-    matching.push(recording);
-  }
-  for (const recording of matching) {
-    const action = {
-      index: recording.actions.length,
-      type,
-      timestamp: new Date().toISOString(),
-      tab: normalizeTab(tab),
-      input: sanitizeRecordingInput(input, recording),
-      ...(result !== undefined ? { result: compactResult(result) } : {})
-    };
-    if (recording.captureScreenshots && tab.url && isUrlAllowedByPolicy(tab.url, await loadPolicy())) {
-      try {
-        action.screenshot = await captureTabScreenshot(tabId, { format: 'jpeg', quality: 60 });
-      } catch (error) {
-        action.screenshotError = errorMessage(error);
-      }
-    }
-    recording.actions.push(action);
-    if (recording.actions.length > recording.maxActions) {
-      recording.actions.splice(0, recording.actions.length - recording.maxActions);
-      recording.actions.forEach((item, index) => {
-        item.index = index;
-      });
-    }
-    recording.updatedAt = new Date().toISOString();
-  }
-  if (matching.length > 0) scheduleRecordingsSave();
-}
-
 async function captureTabScreenshot(tabId, options = {}) {
   const tab = await chrome.tabs.get(tabId);
   if (typeof tab.windowId !== 'number') throw new Error('Tab has no windowId');
@@ -1335,154 +1203,6 @@ async function captureTabScreenshot(tabId, options = {}) {
     format: options.format === 'jpeg' ? 'jpeg' : 'png',
     ...(typeof options.quality === 'number' ? { quality: options.quality } : {})
   });
-}
-
-function requireRecording(recordingId) {
-  assertString(recordingId, 'recordingId');
-  const recording = recordings.get(recordingId);
-  if (!recording) throw new Error(`Recording not found: ${recordingId}`);
-  return recording;
-}
-
-async function ensureRecordingsLoaded() {
-  if (recordingsLoaded) return;
-  const result = await chrome.storage.local.get(RECORDINGS_STORAGE_KEY);
-  recordings.clear();
-  const stored = result[RECORDINGS_STORAGE_KEY];
-  let pruned = false;
-  if (Array.isArray(stored)) {
-    for (const recording of stored) {
-      if (!recording || typeof recording.id !== 'string') continue;
-      const normalized = normalizeRecording(recording);
-      if (isRecordingExpired(normalized)) {
-        pruned = true;
-        continue;
-      }
-      recordings.set(normalized.id, normalized);
-    }
-  }
-  recordingsLoaded = true;
-  if (pruned) await saveRecordingsNow();
-}
-
-function normalizeRecording(recording) {
-  const startedAtTimestamp = Date.parse(recording.startedAt);
-  const startedAt = Number.isFinite(startedAtTimestamp) ? recording.startedAt : new Date().toISOString();
-  const startedAtMs = Date.parse(startedAt);
-  const retentionMs = normalizeRecordingRetention(recording.retentionMs);
-  const expiresAt = Number.isFinite(Date.parse(recording.expiresAt))
-    ? recording.expiresAt
-    : new Date(startedAtMs + retentionMs).toISOString();
-  return {
-    id: recording.id,
-    name: typeof recording.name === 'string' ? recording.name : 'Recording',
-    scope: recording.scope === 'group' ? 'group' : 'tab',
-    tabId: Number.isInteger(recording.tabId) ? recording.tabId : null,
-    groupId: typeof recording.groupId === 'number' ? recording.groupId : null,
-    captureScreenshots: recording.captureScreenshots === true,
-    includeText: recording.includeText === true,
-    maxActions: normalizeRecordingMaxActions(recording.maxActions),
-    retentionMs,
-    expiresAt,
-    isRecording: recording.isRecording === true,
-    startedAt,
-    stoppedAt: typeof recording.stoppedAt === 'string' ? recording.stoppedAt : null,
-    updatedAt: typeof recording.updatedAt === 'string' ? recording.updatedAt : null,
-    actions: Array.isArray(recording.actions) ? recording.actions : []
-  };
-}
-
-function normalizeRecordingRetention(value) {
-  if (!Number.isFinite(value)) return DEFAULT_RECORDING_RETENTION_MS;
-  return Math.max(60 * 1000, Math.min(Math.trunc(value), MAX_RECORDING_RETENTION_MS));
-}
-
-function normalizeRecordingMaxActions(value) {
-  if (!Number.isInteger(value)) return DEFAULT_RECORDING_MAX_ACTIONS;
-  return Math.max(1, Math.min(value, MAX_RECORDING_MAX_ACTIONS));
-}
-
-function isRecordingExpired(recording) {
-  return typeof recording.expiresAt === 'string' && Date.parse(recording.expiresAt) <= Date.now();
-}
-
-function pruneExpiredRecordingsSync() {
-  for (const [id, recording] of recordings.entries()) {
-    if (isRecordingExpired(recording)) recordings.delete(id);
-  }
-}
-
-async function pruneExpiredRecordings() {
-  const before = recordings.size;
-  pruneExpiredRecordingsSync();
-  if (recordings.size !== before) await saveRecordingsNow();
-}
-
-function scheduleRecordingsSave() {
-  clearTimeout(recordingsSaveTimer);
-  recordingsSaveTimer = setTimeout(() => {
-    saveRecordingsNow().catch(() => {});
-  }, 500);
-}
-
-async function saveRecordingsNow() {
-  clearTimeout(recordingsSaveTimer);
-  recordingsSaveTimer = null;
-  pruneExpiredRecordingsSync();
-  await chrome.storage.local.set({
-    [RECORDINGS_STORAGE_KEY]: Array.from(recordings.values())
-  });
-}
-
-function summarizeRecording(recording) {
-  return {
-    id: recording.id,
-    name: recording.name,
-    scope: recording.scope,
-    tabId: recording.tabId,
-    groupId: recording.groupId,
-    captureScreenshots: recording.captureScreenshots,
-    includeText: recording.includeText,
-    maxActions: recording.maxActions,
-    retentionMs: recording.retentionMs,
-    isRecording: recording.isRecording,
-    startedAt: recording.startedAt,
-    stoppedAt: recording.stoppedAt,
-    expiresAt: recording.expiresAt,
-    updatedAt: recording.updatedAt,
-    actionCount: recording.actions.length
-  };
-}
-
-function sanitizeRecordingInput(input, recording) {
-  if (!input || typeof input !== 'object') return input;
-  const sanitized = {};
-  for (const [key, value] of Object.entries(input)) {
-    if ((key === 'text' || key === 'value' || key === 'key') && typeof value === 'string' && !recording.includeText) {
-      sanitized[key] = {
-        redacted: true,
-        length: value.length,
-        empty: value.length === 0
-      };
-    } else {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized;
-}
-
-function compactResult(result) {
-  try {
-    const json = JSON.stringify(result);
-    if (json.length <= 2000) return result;
-    return { truncated: true, preview: json.slice(0, 2000) };
-  } catch {
-    return { unserializable: true };
-  }
-}
-
-function safeFilename(value) {
-  return String(value).replace(/[\\/:*?"<>|]+/g, '-').replace(/^-+|-+$/g, '') || 'recording.json';
 }
 
 function isUrlAllowedByPolicy(url, policy) {
