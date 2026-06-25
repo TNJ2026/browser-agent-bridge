@@ -855,6 +855,40 @@ Blocks network requests matching specified URL patterns for the target tab. Pass
 { "tabId": 123, "urls": ["*.png", "*.jpg", "*google-analytics.com*"] }
 ```
 
+### `network.setInterceptors`
+
+Registers request interceptors for the specified tab using the CDP `Fetch` domain. Supports block, redirect, mock response, and modify headers actions. Pass an empty array `[]` or omit `rules` to disable request interception.
+
+```json
+{
+  "tabId": 123,
+  "rules": [
+    {
+      "urlPattern": "*google-analytics.com*",
+      "action": "block",
+      "errorReason": "BlockedByClient"
+    },
+    {
+      "urlPattern": "*/old-api/*",
+      "action": "redirect",
+      "targetUrl": "https://example.com/new-api/v2"
+    },
+    {
+      "urlPattern": "*/api/mock-user",
+      "action": "mock",
+      "responseCode": 200,
+      "responseHeaders": { "Content-Type": "application/json" },
+      "responseBody": "{\"id\":123,\"username\":\"mock_user\"}"
+    },
+    {
+      "urlPattern": "*",
+      "action": "modifyHeaders",
+      "requestHeaders": { "Authorization": "Bearer injected-token" }
+    }
+  ]
+}
+```
+
 ### `policy.get`
 
 Returns URL policy. Defaults block Chrome privileged pages and Chrome Web Store.

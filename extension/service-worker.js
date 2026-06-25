@@ -134,13 +134,16 @@ const pageHandlers = createPageHandlers({
   defaultTimeoutMs: DEFAULT_TIMEOUT_MS
 });
 
+const fetchInterceptorsByTab = new Map();
+
 const devtoolsHandlers = createDevtoolsHandlers({
   assertTabId,
   assertTabAllowed,
   attachDebugger,
   cdp,
   consoleEventsByTab,
-  networkEventsByTab
+  networkEventsByTab,
+  fetchInterceptorsByTab
 });
 
 const downloadsHandlers = createDownloadsHandlers({});
@@ -207,6 +210,9 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     if (method === 'Page.javascriptDialogClosed') {
       dialogsByTab.delete(tabId);
     }
+    if (method === 'Fetch.requestPaused') {
+      handleRequestPaused(tabId, params).catch(err => console.error('Error handling paused request:', err));
+    }
   }
   sendNativeNotification('cdp.event', event);
 });
@@ -225,6 +231,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
   networkEventsByTab.delete(tabId);
   consoleEventsByTab.delete(tabId);
   dialogsByTab.delete(tabId);
+  fetchInterceptorsByTab.delete(tabId);
   sessionsHandlers.onTabRemoved(tabId).catch(() => {});
   recordingHandlers.onTabRemoved(tabId).catch(() => {});
 });
@@ -609,6 +616,8 @@ async function dispatchRpc(request) {
       return devtoolsHandlers.networkRead(params);
     case 'network.setBlockedUrls':
       return devtoolsHandlers.networkSetBlockedUrls(params);
+    case 'network.setInterceptors':
+      return devtoolsHandlers.networkSetInterceptors(params);
     case 'downloads.list':
       return downloadsHandlers.downloadsList(params);
     case 'downloads.waitFor':
@@ -734,6 +743,7 @@ async function extensionInfo() {
       'console.read',
       'network.read',
       'network.setBlockedUrls',
+      'network.setInterceptors',
       'downloads.list',
       'downloads.waitFor',
       'recording.start',
@@ -949,7 +959,8 @@ async function assertRpcTabIsolation(method, params = {}) {
     method.startsWith('computer.') ||
     method === 'console.read' ||
     method === 'network.read' ||
-    method === 'network.setBlockedUrls'
+    method === 'network.setBlockedUrls' ||
+    method === 'network.setInterceptors'
   ) {
     await assertAgentManagedTabs([assertTabId(params.tabId)], method);
   }
@@ -1087,6 +1098,7 @@ function optionalPermissionsForMethod(method, params = {}) {
     method === 'console.read' ||
     method === 'network.read' ||
     method === 'network.setBlockedUrls' ||
+    method === 'network.setInterceptors' ||
     method === 'recording.start'
   ) {
     return ['tabs'];
@@ -1154,7 +1166,7 @@ function getMethodCategory(method, params = {}) {
   ) {
     return 'page_action';
   }
-  if (method === 'console.read' || method === 'network.read' || method === 'network.setBlockedUrls') {
+  if (method === 'console.read' || method === 'network.read' || method === 'network.setBlockedUrls' || method === 'network.setInterceptors') {
     return 'page_logs';
   }
   if (
@@ -1201,6 +1213,7 @@ async function isAgentTabGroupOperation(method, params = {}) {
     method === 'console.read' ||
     method === 'network.read' ||
     method === 'network.setBlockedUrls' ||
+    method === 'network.setInterceptors' ||
     method === 'indicator.set'
   ) {
     if (params.tabId == null) return false;
@@ -1335,4 +1348,70 @@ async function checkPermission(method, params) {
     await chrome.storage.local.set({ sessionPermissions });
     throw new Error(`Permission denied by user: ${category}`);
   }
+}
+
+async function handleRequestPaused(tabId, params) {
+  const rules = fetchInterceptorsByTab.get(tabId) || [];
+  const request = params.request;
+  const url = request.url;
+
+  for (const rule of rules) {
+    if (matchUrlPattern(url, rule.urlPattern)) {
+      if (rule.action === 'block') {
+        await cdp(tabId, 'Fetch.failRequest', {
+          requestId: params.requestId,
+          errorReason: rule.errorReason || 'Aborted'
+        });
+        return;
+      }
+      if (rule.action === 'redirect') {
+        await cdp(tabId, 'Fetch.continueRequest', {
+          requestId: params.requestId,
+          url: rule.targetUrl
+        });
+        return;
+      }
+      if (rule.action === 'mock') {
+        const responseHeaders = Object.entries(rule.responseHeaders || {}).map(([name, value]) => ({
+          name,
+          value: String(value)
+        }));
+        let bodyBase64 = '';
+        try {
+          bodyBase64 = btoa(unescape(encodeURIComponent(rule.responseBody || '')));
+        } catch (e) {
+          bodyBase64 = btoa(rule.responseBody || '');
+        }
+        await cdp(tabId, 'Fetch.fulfillRequest', {
+          requestId: params.requestId,
+          responseCode: rule.responseCode || 200,
+          responseHeaders,
+          body: bodyBase64
+        });
+        return;
+      }
+      if (rule.action === 'modifyHeaders') {
+        const mergedHeaders = { ...request.headers, ...(rule.requestHeaders || {}) };
+        const headersArray = Object.entries(mergedHeaders).map(([name, value]) => ({
+          name,
+          value: String(value)
+        }));
+        await cdp(tabId, 'Fetch.continueRequest', {
+          requestId: params.requestId,
+          headers: headersArray
+        });
+        return;
+      }
+    }
+  }
+
+  await cdp(tabId, 'Fetch.continueRequest', { requestId: params.requestId });
+}
+
+function matchUrlPattern(url, pattern) {
+  if (pattern === '*') return true;
+  const regexPattern = '^' + pattern
+    .replace(/[-/\\^$+?.()|[\]{}]/g, '\\$&')
+    .replace(/\*/g, '.*') + '$';
+  return new RegExp(regexPattern, 'i').test(url);
 }

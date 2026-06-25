@@ -162,6 +162,43 @@ def run_smoke_test():
         if not blocked_res.get("ok") or "*google-analytics.com*" not in blocked_res.get("urls", []):
             raise RuntimeError("network.setBlockedUrls failed")
 
+        # Test network.setInterceptors
+        intercept_res = client.rpc("network.setInterceptors", {
+            "tabId": tab_id,
+            "rules": [
+                {
+                    "urlPattern": "*my-mock-api.com/user*",
+                    "action": "mock",
+                    "responseCode": 200,
+                    "responseHeaders": {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*"
+                    },
+                    "responseBody": '{"username": "bridge-smoke-user"}'
+                }
+            ]
+        })
+        print(f"Intercept result: {intercept_res}")
+        if not intercept_res.get("ok") or intercept_res.get("rulesCount") != 1:
+            raise RuntimeError("network.setInterceptors failed")
+
+        client.rpc("page.executeJavaScript", {
+            "tabId": tab_id,
+            "script": """
+            fetch('https://my-mock-api.com/user')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('network-result').innerText = data.username;
+                }).catch(err => {
+                    document.getElementById('network-result').innerText = 'Mock Fail: ' + err.message;
+                });
+            """
+        })
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "bridge-smoke-user", "timeoutMs": 5000})
+
+        # Clear interceptors
+        client.rpc("network.setInterceptors", {"tabId": tab_id, "rules": []})
+
         client.rpc("page.executeJavaScript", {
             "tabId": tab_id,
             "script": "setTimeout(async () => { await fetch('data:application/json,%7B%22ok%22%3Atrue%7D'); document.getElementById('network-result').innerText = 'Network Done'; }, 250)"

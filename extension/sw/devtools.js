@@ -4,7 +4,8 @@ export function createDevtoolsHandlers({
   attachDebugger,
   cdp,
   consoleEventsByTab,
-  networkEventsByTab
+  networkEventsByTab,
+  fetchInterceptorsByTab
 }) {
   async function consoleRead(params) {
     const tabId = assertTabId(params.tabId);
@@ -32,9 +33,27 @@ export function createDevtoolsHandlers({
     return { ok: true, urls };
   }
 
+  async function networkSetInterceptors(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'network.setInterceptors');
+    const rules = Array.isArray(params.rules) ? params.rules : [];
+    await attachDebugger(tabId);
+    if (rules.length > 0) {
+      fetchInterceptorsByTab.set(tabId, rules);
+      await cdp(tabId, 'Fetch.enable', {
+        patterns: [{ urlPattern: '*', requestStage: 'Request' }]
+      });
+    } else {
+      fetchInterceptorsByTab.delete(tabId);
+      await cdp(tabId, 'Fetch.disable').catch(() => {});
+    }
+    return { ok: true, rulesCount: rules.length };
+  }
+
   return {
     consoleRead,
     networkRead,
-    networkSetBlockedUrls
+    networkSetBlockedUrls,
+    networkSetInterceptors
   };
 }
