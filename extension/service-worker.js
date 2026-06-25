@@ -1,5 +1,6 @@
 import { createLocatorHandlers } from './sw/locator.js';
 import { createDomHandlers } from './sw/dom.js';
+import { createComputerHandlers } from './sw/computer.js';
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
@@ -66,6 +67,17 @@ const domHandlers = createDomHandlers({
   assertTabId,
   assertTabAllowed,
   assertString,
+  recordAction
+});
+
+const computerHandlers = createComputerHandlers({
+  assertTabId,
+  assertTabAllowed,
+  assertString,
+  assertNumber,
+  attachDebugger,
+  cdp,
+  indicatorSet,
   recordAction
 });
 
@@ -450,17 +462,17 @@ async function handleRpc(request) {
     case 'locator.fill':
       return locatorHandlers.locatorFill(params);
     case 'computer.click':
-      return computerClick(params);
+      return computerHandlers.computerClick(params);
     case 'computer.drag':
-      return computerDrag(params);
+      return computerHandlers.computerDrag(params);
     case 'computer.type':
-      return computerType(params);
+      return computerHandlers.computerType(params);
     case 'computer.key':
-      return computerKey(params);
+      return computerHandlers.computerKey(params);
     case 'computer.scroll':
-      return computerScroll(params);
+      return computerHandlers.computerScroll(params);
     case 'computer.hover':
-      return computerHover(params);
+      return computerHandlers.computerHover(params);
     case 'console.read':
       return consoleRead(params);
     case 'network.read':
@@ -1161,150 +1173,6 @@ async function pageDomSnapshot(params) {
     includePaintOrder: params.includePaintOrder === true
   });
   return result;
-}
-
-async function computerClick(params) {
-  const tabId = assertTabId(params.tabId);
-  await assertTabAllowed(tabId, 'computer.click');
-  await attachDebugger(tabId);
-  const x = assertNumber(params.x, 'x');
-  const y = assertNumber(params.y, 'y');
-  const button = params.button || 'left';
-  await cdp(tabId, 'Input.dispatchMouseEvent', {
-    type: 'mousePressed',
-    x,
-    y,
-    button,
-    clickCount: params.clickCount || 1
-  });
-  await cdp(tabId, 'Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x,
-    y,
-    button,
-    clickCount: params.clickCount || 1
-  });
-  if (params.showIndicator === true) {
-    await indicatorSet({ tabId, visible: true, x, y, label: params.indicatorLabel || 'click' }).catch(() => {});
-  }
-  await recordAction(tabId, 'computer.click', { x, y, button, clickCount: params.clickCount || 1 });
-  return { ok: true };
-}
-
-async function computerDrag(params) {
-  const tabId = assertTabId(params.tabId);
-  await assertTabAllowed(tabId, 'computer.drag');
-  await attachDebugger(tabId);
-  const fromX = assertNumber(params.fromX, 'fromX');
-  const fromY = assertNumber(params.fromY, 'fromY');
-  const toX = assertNumber(params.toX, 'toX');
-  const toY = assertNumber(params.toY, 'toY');
-  const button = params.button || 'left';
-  const steps = Number.isInteger(params.steps) && params.steps > 0 ? params.steps : 12;
-  await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: fromX, y: fromY, button, clickCount: 1 });
-  for (let i = 1; i <= steps; i += 1) {
-    const t = i / steps;
-    await cdp(tabId, 'Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: fromX + (toX - fromX) * t,
-      y: fromY + (toY - fromY) * t,
-      button,
-      buttons: 1
-    });
-  }
-  await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: toX, y: toY, button, clickCount: 1 });
-  if (params.showIndicator === true) {
-    await indicatorSet({ tabId, visible: true, x: toX, y: toY, label: params.indicatorLabel || 'drag' }).catch(() => {});
-  }
-  await recordAction(tabId, 'computer.drag', { fromX, fromY, toX, toY, button, steps });
-  return { ok: true };
-}
-
-async function computerType(params) {
-  const tabId = assertTabId(params.tabId);
-  await assertTabAllowed(tabId, 'computer.type');
-  assertString(params.text, 'text');
-  await attachDebugger(tabId);
-  await cdp(tabId, 'Input.insertText', { text: params.text });
-  await recordAction(tabId, 'computer.type', { text: params.text });
-  return { ok: true };
-}
-
-function parseKeyModifiers(keyString) {
-  let modifiers = 0;
-  let key = keyString;
-  const parts = keyString.split('+');
-  if (parts.length > 1) {
-    key = parts.pop();
-    for (const part of parts) {
-      const lower = part.toLowerCase();
-      if (lower === 'alt') modifiers |= 1;
-      else if (lower === 'control' || lower === 'ctrl') modifiers |= 2;
-      else if (lower === 'meta' || lower === 'command' || lower === 'cmd') modifiers |= 4;
-      else if (lower === 'shift') modifiers |= 8;
-    }
-  }
-  return { key, modifiers };
-}
-
-async function computerKey(params) {
-  const tabId = assertTabId(params.tabId);
-  await assertTabAllowed(tabId, 'computer.key');
-  assertString(params.key, 'key');
-  await attachDebugger(tabId);
-  
-  const { key, modifiers } = parseKeyModifiers(params.key);
-  
-  await cdp(tabId, 'Input.dispatchKeyEvent', {
-    type: 'rawKeyDown',
-    key,
-    modifiers,
-    text: key.length === 1 ? key : undefined
-  });
-  await cdp(tabId, 'Input.dispatchKeyEvent', {
-    type: 'keyUp',
-    key,
-    modifiers
-  });
-  await recordAction(tabId, 'computer.key', { key: params.key });
-  return { ok: true };
-}
-
-async function computerScroll(params) {
-  const tabId = assertTabId(params.tabId);
-  await assertTabAllowed(tabId, 'computer.scroll');
-  await attachDebugger(tabId);
-  const x = typeof params.x === 'number' ? params.x : 400;
-  const y = typeof params.y === 'number' ? params.y : 400;
-  const deltaX = typeof params.deltaX === 'number' ? params.deltaX : 0;
-  const deltaY = typeof params.deltaY === 'number' ? params.deltaY : 500;
-  await cdp(tabId, 'Input.dispatchMouseEvent', {
-    type: 'mouseWheel',
-    x,
-    y,
-    deltaX,
-    deltaY
-  });
-  await recordAction(tabId, 'computer.scroll', { x, y, deltaX, deltaY });
-  return { ok: true };
-}
-
-async function computerHover(params) {
-  const tabId = assertTabId(params.tabId);
-  await assertTabAllowed(tabId, 'computer.hover');
-  await attachDebugger(tabId);
-  const x = assertNumber(params.x, 'x');
-  const y = assertNumber(params.y, 'y');
-  await cdp(tabId, 'Input.dispatchMouseEvent', {
-    type: 'mouseMoved',
-    x,
-    y
-  });
-  if (params.showIndicator === true) {
-    await indicatorSet({ tabId, visible: true, x, y, label: params.indicatorLabel || 'hover' }).catch(() => {});
-  }
-  await recordAction(tabId, 'computer.hover', { x, y });
-  return { ok: true };
 }
 
 async function consoleRead(params) {
