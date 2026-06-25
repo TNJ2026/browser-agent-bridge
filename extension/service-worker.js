@@ -7,6 +7,7 @@ import { createDownloadsHandlers } from './sw/downloads.js';
 import { CSP_BYPASS_ALARM, createCspHandlers } from './sw/csp.js';
 import { createRecordingHandlers } from './sw/recording.js';
 import { createSessionHandlers } from './sw/sessions.js';
+import { createPolicyHandlers } from './sw/policy.js';
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
@@ -14,7 +15,6 @@ const DEFAULT_TIMEOUT_MS = 30000;
 const PERMISSION_PROMPT_TIMEOUT_MS = 60000;
 const APPROVAL_NOTIFICATION_ID = 'browser-agent-bridge-permission-approval';
 const APPROVAL_POPUP_PATH = 'approval.html';
-const POLICY_STORAGE_KEY = 'browserAgentBridgePolicy';
 
 let nativePort = null;
 let nextRequestId = 1;
@@ -35,22 +35,12 @@ let nextPromptId = 1;
 const pendingPrompts = new Map();
 let approvalPopupWindowId = null;
 const cspHandlers = createCspHandlers({});
-
-const DEFAULT_POLICY = {
-  blockedUrlPatterns: [
-    'chrome://*',
-    'chrome-extension://*',
-    'chromewebstore.google.com/*'
-  ],
-  allowedUrlPatterns: [],
-  blockedMethods: [],
-  allowedMethods: []
-};
+const policyHandlers = createPolicyHandlers({});
 
 const sessionsHandlers = createSessionHandlers({
   assertString,
   assertTabId,
-  assertUrlAllowed,
+  assertUrlAllowed: policyHandlers.assertUrlAllowed,
   assertTabAllowed,
   normalizeTab,
   errorMessage,
@@ -62,8 +52,8 @@ const recordingHandlers = createRecordingHandlers({
   assertString,
   normalizeTab,
   captureTabScreenshot,
-  loadPolicy,
-  isUrlAllowedByPolicy,
+  loadPolicy: policyHandlers.loadPolicy,
+  isUrlAllowedByPolicy: policyHandlers.isUrlAllowedByPolicy,
   errorMessage
 });
 
@@ -98,7 +88,7 @@ const pageHandlers = createPageHandlers({
   assertTabId,
   assertString,
   assertTabAllowed,
-  assertUrlAllowed,
+  assertUrlAllowed: policyHandlers.assertUrlAllowed,
   maybeEnableTemporaryCspBypassForUrl: cspHandlers.maybeEnableTemporaryCspBypassForUrl,
   maybeEnableTemporaryCspBypass: cspHandlers.maybeEnableTemporaryCspBypass,
   recordAction: recordingHandlers.recordAction,
@@ -401,7 +391,7 @@ async function handleRpc(request) {
   if (!request || request.jsonrpc !== '2.0' || typeof request.method !== 'string') {
     throw new Error('Invalid JSON-RPC request');
   }
-  await assertMethodAllowed(request.method);
+  await policyHandlers.assertMethodAllowed(request.method);
   const params = request.params || {};
   await assertOptionalPermissions(request.method, params);
   await assertRpcTabIsolation(request.method, params);
@@ -514,11 +504,11 @@ async function handleRpc(request) {
     case 'indicator.set':
       return indicatorSet(params);
     case 'policy.get':
-      return policyGet();
+      return policyHandlers.policyGet();
     case 'policy.set':
-      return policySet(params);
+      return policyHandlers.policySet(params);
     case 'policy.checkUrl':
-      return policyCheckUrl(params);
+      return policyHandlers.policyCheckUrl(params);
     default:
       throw new Error(`Unknown method: ${request.method}`);
   }
@@ -609,38 +599,6 @@ async function indicatorSet(params) {
   });
   if (!response?.ok) throw new Error(response?.error || 'Failed to update indicator');
   return { ok: true };
-}
-
-async function policyGet() {
-  return await loadPolicy();
-}
-
-async function policySet(params) {
-  const policy = {
-    blockedUrlPatterns: normalizePatternList(params.blockedUrlPatterns),
-    allowedUrlPatterns: normalizePatternList(params.allowedUrlPatterns),
-    blockedMethods: normalizePatternList(params.blockedMethods),
-    allowedMethods: normalizePatternList(params.allowedMethods)
-  };
-  await chrome.storage.local.set({ [POLICY_STORAGE_KEY]: policy });
-  return { policy };
-}
-
-async function policyCheckUrl(params) {
-  if (typeof params.url !== 'string' && typeof params.method !== 'string') {
-    throw new Error('policy.checkUrl requires url or method');
-  }
-  const policy = await loadPolicy();
-  return {
-    url: params.url,
-    method: params.method,
-    allowed: (typeof params.url === 'string' ? isUrlAllowedByPolicy(params.url, policy) : true)
-      && (typeof params.method === 'string' ? isMethodAllowedByPolicy(params.method, policy) : true),
-    matchedBlockedPattern: typeof params.url === 'string' ? firstMatchingPattern(params.url, policy.blockedUrlPatterns) : null,
-    matchedAllowedPattern: typeof params.url === 'string' ? firstMatchingPattern(params.url, policy.allowedUrlPatterns) : null,
-    matchedBlockedMethod: typeof params.method === 'string' ? firstMatchingPattern(params.method, policy.blockedMethods) : null,
-    matchedAllowedMethod: typeof params.method === 'string' ? firstMatchingPattern(params.method, policy.allowedMethods) : null
-  };
 }
 
 async function attachDebugger(tabId) {
@@ -751,29 +709,6 @@ function normalizeTab(tab) {
   };
 }
 
-async function loadPolicy() {
-  const result = await chrome.storage.local.get(POLICY_STORAGE_KEY);
-  const stored = result[POLICY_STORAGE_KEY];
-  if (!stored || typeof stored !== 'object') return { ...DEFAULT_POLICY };
-  return {
-    blockedUrlPatterns: normalizePatternList(stored.blockedUrlPatterns, DEFAULT_POLICY.blockedUrlPatterns),
-    allowedUrlPatterns: normalizePatternList(stored.allowedUrlPatterns),
-    blockedMethods: normalizePatternList(stored.blockedMethods, DEFAULT_POLICY.blockedMethods),
-    allowedMethods: normalizePatternList(stored.allowedMethods, DEFAULT_POLICY.allowedMethods)
-  };
-}
-
-async function assertMethodAllowed(method) {
-
-  const alwaysAllowed = new Set(['extension.info', 'native.status', 'policy.get', 'policy.checkUrl', 'permission.check']);
-  if (alwaysAllowed.has(method)) return;
-  const policy = await loadPolicy();
-  if (!isMethodAllowedByPolicy(method, policy)) {
-    const pattern = firstMatchingPattern(method, policy.blockedMethods);
-    throw new Error(`Method blocked by policy: ${method}${pattern ? ` (matched ${pattern})` : ''}`);
-  }
-}
-
 async function assertRpcTabIsolation(method, params = {}) {
   if (method === 'tabs.list') {
     if (typeof params.query?.groupId !== 'number') {
@@ -864,16 +799,7 @@ async function assertAgentManagedGroup(groupId, action) {
 async function assertTabAllowed(tabId, action) {
   const tab = await chrome.tabs.get(tabId);
   await assertAgentManagedGroup(tab.groupId, action);
-  await assertUrlAllowed(tab.url || '', action);
-}
-
-async function assertUrlAllowed(url, action) {
-  if (!url || url === 'about:blank') return;
-  const policy = await loadPolicy();
-  if (!isUrlAllowedByPolicy(url, policy)) {
-    const pattern = firstMatchingPattern(url, policy.blockedUrlPatterns);
-    throw new Error(`${action} blocked by policy for ${url}${pattern ? ` (matched ${pattern})` : ''}`);
-  }
+  await policyHandlers.assertUrlAllowed(tab.url || '', action);
 }
 
 async function captureTabScreenshot(tabId, options = {}) {
@@ -885,37 +811,6 @@ async function captureTabScreenshot(tabId, options = {}) {
     format: options.format === 'jpeg' ? 'jpeg' : 'png',
     ...(typeof options.quality === 'number' ? { quality: options.quality } : {})
   });
-}
-
-function isUrlAllowedByPolicy(url, policy) {
-  const allowed = firstMatchingPattern(url, policy.allowedUrlPatterns);
-  if (allowed) return true;
-  return !firstMatchingPattern(url, policy.blockedUrlPatterns);
-}
-
-function isMethodAllowedByPolicy(method, policy) {
-  const allowed = firstMatchingPattern(method, policy.allowedMethods);
-  if (allowed) return true;
-  return !firstMatchingPattern(method, policy.blockedMethods);
-}
-
-function firstMatchingPattern(url, patterns) {
-  for (const pattern of patterns || []) {
-    if (urlPatternMatches(url, pattern)) return pattern;
-  }
-  return null;
-}
-
-function urlPatternMatches(url, pattern) {
-  if (typeof pattern !== 'string' || !pattern) return false;
-  const escaped = pattern
-    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-    .replaceAll('*', '.*');
-  return new RegExp(`^${escaped}$`, 'i').test(url);
-}
-
-function normalizePatternList(value, fallback = []) {
-  return Array.isArray(value) ? value.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim()) : [...fallback];
 }
 
 function pushLimited(map, key, value, limit) {
