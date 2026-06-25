@@ -3,6 +3,7 @@ import { createDomHandlers } from './sw/dom.js';
 import { createComputerHandlers } from './sw/computer.js';
 import { createPageHandlers } from './sw/page.js';
 import { createDevtoolsHandlers } from './sw/devtools.js';
+import { createDownloadsHandlers } from './sw/downloads.js';
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
@@ -109,6 +110,8 @@ const devtoolsHandlers = createDevtoolsHandlers({
   consoleEventsByTab,
   networkEventsByTab
 });
+
+const downloadsHandlers = createDownloadsHandlers({});
 
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY]).catch(() => {});
@@ -507,7 +510,7 @@ async function handleRpc(request) {
     case 'network.read':
       return devtoolsHandlers.networkRead(params);
     case 'downloads.list':
-      return downloadsList(params);
+      return downloadsHandlers.downloadsList(params);
     case 'recording.start':
       return recordingStart(params);
     case 'recording.stop':
@@ -973,34 +976,6 @@ async function sessionStop(params) {
   delete sessions[session.id];
   await saveSessions(sessions);
   return { stopped: session.id };
-}
-
-async function downloadsList(params) {
-  const query = {
-    limit: Number.isInteger(params.limit) && params.limit > 0 ? params.limit : 50,
-    orderBy: ['-startTime'],
-    ...(typeof params.query === 'string' && params.query ? { query: [params.query] } : {}),
-    ...(typeof params.filenameRegex === 'string' ? { filenameRegex: params.filenameRegex } : {}),
-    ...(typeof params.urlRegex === 'string' ? { urlRegex: params.urlRegex } : {})
-  };
-  const items = await chrome.downloads.search(query);
-  return {
-    items: items.map(item => ({
-      id: item.id,
-      url: item.url,
-      finalUrl: item.finalUrl,
-      filename: item.filename,
-      mime: item.mime,
-      state: item.state,
-      danger: item.danger,
-      exists: item.exists,
-      paused: item.paused,
-      startTime: item.startTime,
-      endTime: item.endTime,
-      bytesReceived: item.bytesReceived,
-      totalBytes: item.totalBytes
-    }))
-  };
 }
 
 async function recordingStart(params) {
