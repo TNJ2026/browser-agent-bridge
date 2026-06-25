@@ -14,6 +14,7 @@ export function createPageHandlers({
   attachDebugger,
   cdp,
   resolveFrameTarget,
+  networkEventsByTab,
   defaultTimeoutMs,
   chromeApi = chrome
 }) {
@@ -36,6 +37,51 @@ export function createPageHandlers({
     const tab = await chromeApi.tabs.get(tabId);
     if (tab.status !== 'complete') await waitForTabComplete(tabId, params.timeoutMs);
     return { tab: normalizeTab(await chromeApi.tabs.get(tabId)) };
+  }
+
+  async function pageWaitForNavigation(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.waitForNavigation');
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
+    const waitUntil = params.waitUntil === 'commit' ? 'commit' : 'load';
+    const initialTab = await chromeApi.tabs.get(tabId);
+    const initialUrl = initialTab.url || '';
+    const started = Date.now();
+
+    while (Date.now() - started <= timeoutMs) {
+      const tab = await chromeApi.tabs.get(tabId);
+      const url = tab.url || '';
+      const changed = url !== initialUrl;
+      const urlMatched = matchesUrlPattern(url, params);
+      const reachedState = waitUntil === 'commit' ? changed : tab.status === 'complete';
+      if ((changed || hasUrlPattern(params)) && urlMatched && reachedState) {
+        return { ok: true, tab: normalizeTab(tab), url, waitUntil, elapsedMs: Date.now() - started };
+      }
+      await sleep(intervalMs);
+    }
+    throw new Error(`Timed out waiting for navigation${describeUrlPattern(params)}`);
+  }
+
+  async function pageWaitForResponse(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.waitForResponse');
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
+    const status = Number.isInteger(params.status) ? params.status : null;
+    const method = typeof params.method === 'string' && params.method ? params.method.toUpperCase() : null;
+    const resourceType = typeof params.resourceType === 'string' && params.resourceType ? params.resourceType.toLowerCase() : null;
+    const started = Date.now();
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Network.enable').catch(() => {});
+
+    while (Date.now() - started <= timeoutMs) {
+      const events = networkEventsByTab?.get(tabId) || [];
+      const match = findMatchingResponse(events, { ...params, status, method, resourceType, started });
+      if (match) return { ok: true, response: match, elapsedMs: Date.now() - started };
+      await sleep(intervalMs);
+    }
+    throw new Error(`Timed out waiting for response${describeUrlPattern(params)}`);
   }
 
   async function pageFrames(params) {
@@ -353,6 +399,8 @@ export function createPageHandlers({
   return {
     pageNavigate,
     pageWaitForLoad,
+    pageWaitForNavigation,
+    pageWaitForResponse,
     pageFrames,
     pageWaitForSelector,
     pageWaitForText,
@@ -362,4 +410,70 @@ export function createPageHandlers({
     pageExecuteJavaScript,
     pageDomSnapshot
   };
+}
+
+function findMatchingResponse(events, options) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (event.timestamp < options.started) break;
+    if (event.method !== 'Network.responseReceived') continue;
+    const params = event.params || {};
+    const response = params.response || {};
+    const url = response.url || '';
+    if (!matchesUrlPattern(url, options)) continue;
+    if (options.status !== null && response.status !== options.status) continue;
+    if (options.resourceType && String(params.type || '').toLowerCase() !== options.resourceType) continue;
+    if (options.method) {
+      const requestMethod = findRequestMethod(events, params.requestId, i);
+      if (requestMethod !== options.method) continue;
+    }
+    return {
+      requestId: params.requestId || '',
+      url,
+      status: response.status,
+      statusText: response.statusText || '',
+      mimeType: response.mimeType || '',
+      resourceType: params.type || '',
+      method: findRequestMethod(events, params.requestId, i) || null,
+      fromDiskCache: response.fromDiskCache === true,
+      fromServiceWorker: response.fromServiceWorker === true,
+      timestamp: event.timestamp
+    };
+  }
+  return null;
+}
+
+function findRequestMethod(events, requestId, beforeIndex) {
+  if (!requestId) return null;
+  for (let i = beforeIndex; i >= 0; i -= 1) {
+    const event = events[i];
+    if (event.method !== 'Network.requestWillBeSent') continue;
+    if (event.params?.requestId !== requestId) continue;
+    return String(event.params?.request?.method || '').toUpperCase() || null;
+  }
+  return null;
+}
+
+function hasUrlPattern(params) {
+  return Boolean(params.url || params.urlContains || params.urlRegex);
+}
+
+function matchesUrlPattern(url, params) {
+  if (typeof params.url === 'string' && params.url && url !== params.url) return false;
+  if (typeof params.urlContains === 'string' && params.urlContains && !url.includes(params.urlContains)) return false;
+  if (typeof params.urlRegex === 'string' && params.urlRegex) {
+    try {
+      if (!new RegExp(params.urlRegex).test(url)) return false;
+    } catch {
+      throw new Error(`Invalid urlRegex: ${params.urlRegex}`);
+    }
+  }
+  return true;
+}
+
+function describeUrlPattern(params) {
+  if (typeof params.url === 'string' && params.url) return ` for URL: ${params.url}`;
+  if (typeof params.urlContains === 'string' && params.urlContains) return ` for URL containing: ${params.urlContains}`;
+  if (typeof params.urlRegex === 'string' && params.urlRegex) return ` for URL regex: ${params.urlRegex}`;
+  return '';
 }

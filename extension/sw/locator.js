@@ -132,6 +132,31 @@ export function createLocatorHandlers({
     return { ok: true, element: result.element, selected: result.selected, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
+  async function locatorSetInputFiles(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.setInputFiles');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const files = normalizeFilePaths(params, 'locator.setInputFiles');
+    const markerName = 'data-browser-agent-bridge-file-input';
+    const markerValue = `bab-file-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const prepared = await runLocatorScript(tabId, { ...params, index, markerName, markerValue }, 'markFileInput', frameTarget);
+    if (files.length > 1 && prepared.multiple !== true) {
+      await runLocatorScript(tabId, { ...params, markerName, markerValue, index }, 'clearMarkedFileInput', frameTarget).catch(() => {});
+      throw new Error('Cannot set multiple files on an input without the multiple attribute');
+    }
+    let result = null;
+    try {
+      await setFilesOnMarkedInput(tabId, markerName, markerValue, files);
+      result = await runLocatorScript(tabId, { ...params, markerName, markerValue, index }, 'summarizeMarkedFileInput', frameTarget);
+    } catch (error) {
+      await runLocatorScript(tabId, { ...params, markerName, markerValue, index }, 'clearMarkedFileInput', frameTarget).catch(() => {});
+      throw error;
+    }
+    await recordAction(tabId, 'locator.setInputFiles', { locator: locatorSpecForRecording(params), index, files, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result.element, frame: frameTarget.frame };
+  }
+
   async function waitForLocatorActionable(tabId, params, actionKind, frameTarget) {
     const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
@@ -234,6 +259,8 @@ export function createLocatorHandlers({
       limit,
       text: typeof params.fillText === 'string' ? params.fillText : (typeof params.text === 'string' ? params.text : ''),
       selectOptions: Array.isArray(params.selectOptions) ? params.selectOptions : [],
+      markerName: typeof params.markerName === 'string' ? params.markerName : '',
+      markerValue: typeof params.markerValue === 'string' ? params.markerValue : '',
       replace: params.replace !== false,
       scrollIntoView: params.scrollIntoView !== false,
       force: params.force === true,
@@ -291,6 +318,34 @@ export function createLocatorHandlers({
         if (options.action === 'checkState') {
           const state = checkState(element);
           return { ...state, element: summarizeElement(element, options.index) };
+        }
+
+        if (options.action === 'markFileInput') {
+          if (element.tagName.toLowerCase() !== 'input' || (element.getAttribute('type') || '').toLowerCase() !== 'file') {
+            throw new Error('Element is not an input[type=file]');
+          }
+          element.setAttribute(options.markerName, options.markerValue);
+          return {
+            element: summarizeElement(element, options.index),
+            multiple: element.multiple === true,
+            accept: element.getAttribute('accept') || '',
+            disabled: element.disabled === true
+          };
+        }
+
+        if (options.action === 'summarizeMarkedFileInput') {
+          const marked = querySelectorDeep(root, `input[${options.markerName}="${cssEscapeAttribute(options.markerValue)}"]`);
+          if (!marked) throw new Error('Marked file input not found after setting files');
+          marked.dispatchEvent(new Event('input', { bubbles: true }));
+          marked.dispatchEvent(new Event('change', { bubbles: true }));
+          marked.removeAttribute(options.markerName);
+          return { element: summarizeFileInput(marked, options.index) };
+        }
+
+        if (options.action === 'clearMarkedFileInput') {
+          const marked = querySelectorDeep(root, `input[${options.markerName}="${cssEscapeAttribute(options.markerValue)}"]`);
+          if (marked) marked.removeAttribute(options.markerName);
+          return { cleared: Boolean(marked) };
         }
 
         if (!options.force && !actionability.actionable) {
@@ -429,6 +484,24 @@ export function createLocatorHandlers({
           element.dispatchEvent(new Event('input', { bubbles: true }));
           element.dispatchEvent(new Event('change', { bubbles: true }));
           return selected;
+        }
+
+        function summarizeFileInput(element, index) {
+          const rect = element.getBoundingClientRect();
+          return {
+            index,
+            tagName: element.tagName.toLowerCase(),
+            type: element.getAttribute('type') || '',
+            multiple: element.multiple === true,
+            fileCount: element.files ? element.files.length : 0,
+            files: Array.from(element.files || []).map(file => ({ name: file.name, size: file.size, type: file.type })),
+            value: element.value || '',
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          };
+        }
+
+        function cssEscapeAttribute(value) {
+          return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         }
 
         function findOption(select, request) {
@@ -902,6 +975,41 @@ export function createLocatorHandlers({
     return null;
   }
 
+  async function setFilesOnMarkedInput(tabId, markerName, markerValue, files) {
+    await attachDebugger(tabId);
+    await cdp(tabId, 'DOM.enable').catch(() => {});
+    const search = await cdp(tabId, 'DOM.performSearch', {
+      query: `input[${markerName}="${escapeCssAttributeValue(markerValue)}"]`,
+      includeUserAgentShadowDOM: true
+    });
+    try {
+      if (!search.resultCount) throw new Error('Unable to resolve file input through CDP DOM');
+      const result = await cdp(tabId, 'DOM.getSearchResults', {
+        searchId: search.searchId,
+        fromIndex: 0,
+        toIndex: 1
+      });
+      const nodeId = result.nodeIds?.[0];
+      if (!nodeId) throw new Error('Unable to resolve file input node');
+      await cdp(tabId, 'DOM.setFileInputFiles', { nodeId, files });
+    } finally {
+      if (search.searchId) await cdp(tabId, 'DOM.discardSearchResults', { searchId: search.searchId }).catch(() => {});
+    }
+  }
+
+  function normalizeFilePaths(params, methodName) {
+    const value = params.files ?? params.filePaths ?? params.filePath ?? params.path;
+    const files = Array.isArray(value) ? value : (typeof value === 'string' ? [value] : []);
+    for (const file of files) {
+      if (typeof file !== 'string' || !file) throw new Error(`${methodName} requires file path strings`);
+    }
+    return files;
+  }
+
+  function escapeCssAttributeValue(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
   function normalizeSelectOptionValues(params) {
     const source = params.options ?? params.values ?? params.value ?? params.label ?? params.option;
     const values = Array.isArray(source) ? source : [source];
@@ -944,6 +1052,7 @@ export function createLocatorHandlers({
     locatorFill,
     locatorCheck,
     locatorUncheck,
-    locatorSelectOption
+    locatorSelectOption,
+    locatorSetInputFiles
   };
 }

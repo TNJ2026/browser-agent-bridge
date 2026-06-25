@@ -267,6 +267,27 @@ Waits until Chrome reports the tab load status as complete.
 { "tabId": 123, "timeoutMs": 30000 }
 ```
 
+### `page.waitForNavigation`
+
+Waits for a tab URL change, optionally matching the destination URL. Set
+`waitUntil` to `commit` to return as soon as the URL changes, or omit it to
+wait until Chrome reports the tab load status as complete.
+
+```json
+{ "tabId": 123, "urlContains": "/dashboard", "waitUntil": "load", "timeoutMs": 30000 }
+```
+
+URL filters can be `url` for exact match, `urlContains`, or `urlRegex`.
+
+### `page.waitForResponse`
+
+Waits for a CDP `Network.responseReceived` event. Supports `url`,
+`urlContains`, `urlRegex`, `status`, `method`, and `resourceType` filters.
+
+```json
+{ "tabId": 123, "urlContains": "/api/items", "status": 200, "method": "GET", "timeoutMs": 30000 }
+```
+
 ### `page.frames`
 
 Lists frames in a tab. Use a returned `frameId` with `page.*`, `dom.*`, and
@@ -364,6 +385,17 @@ select, and stable.
 
 ```json
 { "tabId": 123, "selector": "select[name=country]", "value": "US", "frameSelector": "iframe[name=app]" }
+```
+
+### `dom.setInputFiles`
+
+Sets local file paths on an `<input type="file">` through CDP
+`DOM.setFileInputFiles`, then dispatches input/change events. Use `files`,
+`filePaths`, `filePath`, or `path`. Multiple files require the input to have
+the `multiple` attribute.
+
+```json
+{ "tabId": 123, "selector": "input[type=file]", "files": ["/tmp/report.pdf"], "frameId": 7 }
 ```
 
 ### `dom.hover`
@@ -478,6 +510,16 @@ select locator itself also needs a `label`.
 { "tabId": 123, "locator": { "label": "Country" }, "option": { "label": "United States", "exact": true } }
 ```
 
+### `locator.setInputFiles`
+
+Sets local file paths on a located `<input type="file">`. Supports the same
+locator fields as `locator.click`, plus `files`, `filePaths`, `filePath`, or
+`path`.
+
+```json
+{ "tabId": 123, "label": "Upload receipt", "files": ["/tmp/receipt.png"] }
+```
+
 ### `computer.click`
 
 Coordinates are CSS viewport coordinates.
@@ -500,6 +542,33 @@ Coordinates are CSS viewport coordinates.
 { "tabId": 123, "text": "hello" }
 ```
 
+### `keyboard.type`
+
+Types text through CDP `Input.insertText`. Pass `delayMs` to insert one
+character at a time.
+
+```json
+{ "tabId": 123, "text": "hello", "delayMs": 20 }
+```
+
+### `keyboard.press`
+
+Dispatches one key or shortcut with realistic key metadata such as `code`,
+`windowsVirtualKeyCode`, and modifier key down/up events.
+
+```json
+{ "tabId": 123, "key": "Control+a" }
+```
+
+### `keyboard.down` / `keyboard.up`
+
+Dispatches a single key down or key up event. Use `keyboard.press` for normal
+shortcuts.
+
+```json
+{ "tabId": 123, "key": "Shift" }
+```
+
 ### `computer.scroll`
 
 ```json
@@ -508,7 +577,8 @@ Coordinates are CSS viewport coordinates.
 
 ### `computer.key`
 
-Dispatches one key or combination shortcut (e.g. "Enter", "Control+a", "Meta+c").
+Compatibility alias for a keyboard shortcut. Prefer `keyboard.press` for new
+automation code.
 
 ```json
 { "tabId": 123, "key": "Control+a" }

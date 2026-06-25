@@ -316,11 +316,15 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Interactive | `locator.check` | Check checkbox, radio, or switch-like controls. |
 | Interactive | `locator.uncheck` | Uncheck checkbox or switch-like controls. |
 | Interactive | `locator.selectOption` | Select native `<select>` options. |
+| Interactive | `locator.setInputFiles` | Set local files on a located file input. |
 | Interactive | `dom.click` | Click by CSS selector. |
 | Interactive | `dom.type` | Type into a selector. |
+| Interactive | `dom.setInputFiles` | Set local files on an `<input type="file">`. |
 | Interactive | `computer.click` | Click at viewport coordinates. |
 | Interactive | `computer.key` | Send key combinations. |
 | Interactive | `computer.scroll` | Scroll by pixel offsets. |
+| Interactive | `keyboard.type` | Type focused text with optional per-character delay. |
+| Interactive | `keyboard.press` | Send realistic key presses and shortcuts. |
 | Recording | `recording.start` | Start workflow recording. |
 | Recording | `recording.stop` | Stop workflow recording. |
 | Trace | `trace.start` | Start lightweight RPC debug tracing. |

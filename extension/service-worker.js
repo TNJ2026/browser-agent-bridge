@@ -10,6 +10,7 @@ import { createSessionHandlers } from './sw/sessions.js';
 import { createPolicyHandlers } from './sw/policy.js';
 import { createTraceHandlers } from './sw/tracing.js';
 import { createFrameTargetResolver } from './sw/frames.js';
+import { createKeyboardDispatcher, createKeyboardHandlers } from './sw/keyboard.js';
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
@@ -43,6 +44,7 @@ const traceHandlers = createTraceHandlers({
   errorMessage
 });
 const frameTargetResolver = createFrameTargetResolver({});
+const keyboardDispatcher = createKeyboardDispatcher({ cdp, sleep });
 
 const sessionsHandlers = createSessionHandlers({
   assertString,
@@ -96,7 +98,17 @@ const computerHandlers = createComputerHandlers({
   attachDebugger,
   cdp,
   indicatorSet,
-  recordAction: recordingHandlers.recordAction
+  recordAction: recordingHandlers.recordAction,
+  keyboardDispatcher
+});
+
+const keyboardHandlers = createKeyboardHandlers({
+  assertTabId,
+  assertTabAllowed,
+  assertString,
+  attachDebugger,
+  recordAction: recordingHandlers.recordAction,
+  dispatcher: keyboardDispatcher
 });
 
 const pageHandlers = createPageHandlers({
@@ -494,6 +506,8 @@ async function dispatchRpc(request) {
       return domHandlers.domType(params);
     case 'dom.select':
       return domHandlers.domSelect(params);
+    case 'dom.setInputFiles':
+      return domHandlers.domSetInputFiles(params);
     case 'dom.hover':
       return domHandlers.domHover(params);
     case 'dom.scroll':
@@ -514,6 +528,8 @@ async function dispatchRpc(request) {
       return locatorHandlers.locatorUncheck(params);
     case 'locator.selectOption':
       return locatorHandlers.locatorSelectOption(params);
+    case 'locator.setInputFiles':
+      return locatorHandlers.locatorSetInputFiles(params);
     case 'computer.click':
       return computerHandlers.computerClick(params);
     case 'computer.drag':
@@ -526,6 +542,14 @@ async function dispatchRpc(request) {
       return computerHandlers.computerScroll(params);
     case 'computer.hover':
       return computerHandlers.computerHover(params);
+    case 'keyboard.type':
+      return keyboardHandlers.keyboardType(params);
+    case 'keyboard.press':
+      return keyboardHandlers.keyboardPress(params);
+    case 'keyboard.down':
+      return keyboardHandlers.keyboardDown(params);
+    case 'keyboard.up':
+      return keyboardHandlers.keyboardUp(params);
     case 'console.read':
       return devtoolsHandlers.consoleRead(params);
     case 'network.read':
@@ -605,6 +629,7 @@ async function extensionInfo() {
       'dom.click',
       'dom.type',
       'dom.select',
+      'dom.setInputFiles',
       'dom.hover',
       'dom.scroll',
       'locator.count',
@@ -615,12 +640,17 @@ async function extensionInfo() {
       'locator.check',
       'locator.uncheck',
       'locator.selectOption',
+      'locator.setInputFiles',
       'computer.click',
       'computer.drag',
       'computer.type',
       'computer.key',
       'computer.scroll',
       'computer.hover',
+      'keyboard.type',
+      'keyboard.press',
+      'keyboard.down',
+      'keyboard.up',
       'console.read',
       'network.read',
       'downloads.list',
@@ -971,7 +1001,16 @@ function getMethodCategory(method, params = {}) {
   if (method === 'page.screenshot' || method === 'page.domSnapshot') {
     return 'page_screenshot';
   }
-  if (method === 'dom.type' || method === 'locator.fill' || method === 'computer.type' || method === 'computer.key') {
+  if (
+    method === 'dom.type' ||
+    method === 'locator.fill' ||
+    method === 'computer.type' ||
+    method === 'computer.key' ||
+    method === 'keyboard.type' ||
+    method === 'keyboard.press' ||
+    method === 'keyboard.down' ||
+    method === 'keyboard.up'
+  ) {
     return 'page_input';
   }
   if (
@@ -980,7 +1019,9 @@ function getMethodCategory(method, params = {}) {
     method === 'locator.check' ||
     method === 'locator.uncheck' ||
     method === 'locator.selectOption' ||
+    method === 'locator.setInputFiles' ||
     method === 'dom.select' ||
+    method === 'dom.setInputFiles' ||
     method === 'computer.click' ||
     method === 'computer.drag'
   ) {

@@ -6,7 +6,8 @@ export function createComputerHandlers({
   attachDebugger,
   cdp,
   indicatorSet,
-  recordAction
+  recordAction,
+  keyboardDispatcher
 }) {
   async function computerClick(params) {
     const tabId = assertTabId(params.tabId);
@@ -70,26 +71,9 @@ export function createComputerHandlers({
     await assertTabAllowed(tabId, 'computer.type');
     assertString(params.text, 'text');
     await attachDebugger(tabId);
-    await cdp(tabId, 'Input.insertText', { text: params.text });
+    await keyboardDispatcher.typeText(tabId, params.text, params);
     await recordAction(tabId, 'computer.type', { text: params.text });
     return { ok: true };
-  }
-
-  function parseKeyModifiers(keyString) {
-    let modifiers = 0;
-    let key = keyString;
-    const parts = keyString.split('+');
-    if (parts.length > 1) {
-      key = parts.pop();
-      for (const part of parts) {
-        const lower = part.toLowerCase();
-        if (lower === 'alt') modifiers |= 1;
-        else if (lower === 'control' || lower === 'ctrl') modifiers |= 2;
-        else if (lower === 'meta' || lower === 'command' || lower === 'cmd') modifiers |= 4;
-        else if (lower === 'shift') modifiers |= 8;
-      }
-    }
-    return { key, modifiers };
   }
 
   async function computerKey(params) {
@@ -97,20 +81,7 @@ export function createComputerHandlers({
     await assertTabAllowed(tabId, 'computer.key');
     assertString(params.key, 'key');
     await attachDebugger(tabId);
-  
-    const { key, modifiers } = parseKeyModifiers(params.key);
-  
-    await cdp(tabId, 'Input.dispatchKeyEvent', {
-      type: 'rawKeyDown',
-      key,
-      modifiers,
-      text: key.length === 1 ? key : undefined
-    });
-    await cdp(tabId, 'Input.dispatchKeyEvent', {
-      type: 'keyUp',
-      key,
-      modifiers
-    });
+    await keyboardDispatcher.press(tabId, params.key, params);
     await recordAction(tabId, 'computer.key', { key: params.key });
     return { ok: true };
   }

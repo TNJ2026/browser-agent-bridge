@@ -44,8 +44,8 @@ function getCategoryLabel(category) {
       en: 'Type text or send keyboard shortcuts to the current page'
     },
     page_action: {
-      zh: '在当前网页中点击、拖拽或选择控件',
-      en: 'Click, drag, or select controls in the current page'
+      zh: '在当前网页中点击、拖拽、选择控件或设置文件上传',
+      en: 'Click, drag, select controls, or set file uploads in the current page'
     },
     page_logs: {
       zh: '读取当前网页的控制台报错与网络请求日志',

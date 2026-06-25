@@ -187,6 +187,111 @@ export function createDomHandlers({
     return { ok: true, element: result, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
+  async function domSetInputFiles(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'dom.setInputFiles');
+    assertString(params.selector, 'selector');
+    const files = normalizeFilePaths(params);
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const markerName = 'data-browser-agent-bridge-file-input';
+    const markerValue = `bab-file-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    const [{ result: prepared }] = await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (selector, index, markerName, markerValue, scroll, frameSelector) => {
+        const root = resolveDomRoot(frameSelector);
+        const element = querySelectorAllDeep(root, selector)[index];
+        if (!element) throw new Error(`Element not found: ${selector} at index ${index}`);
+        if (element.tagName.toLowerCase() !== 'input' || (element.getAttribute('type') || '').toLowerCase() !== 'file') {
+          throw new Error('Element is not an input[type=file]');
+        }
+        if (scroll !== false) element.scrollIntoView({ block: 'center', inline: 'center' });
+        element.setAttribute(markerName, markerValue);
+        const rect = element.getBoundingClientRect();
+        return {
+          tagName: element.tagName.toLowerCase(),
+          type: element.getAttribute('type') || '',
+          multiple: element.multiple === true,
+          disabled: element.disabled === true,
+          accept: element.getAttribute('accept') || '',
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        };
+
+        function resolveDomRoot(frameSelector) {
+          if (!frameSelector) return document;
+          const frame = querySelectorDeep(document, frameSelector);
+          if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
+          try {
+            if (!frame.contentDocument) throw new Error('Frame document is not accessible');
+            return frame.contentDocument;
+          } catch {
+            throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
+          }
+        }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
+      },
+      args: [params.selector, index, markerName, markerValue, params.scrollIntoView !== false, frameTarget.frameSelector],
+      world: 'MAIN'
+    });
+
+    if (files.length > 1 && prepared.multiple !== true) {
+      await clearFileInputMarker(tabId, frameTarget, markerName, markerValue).catch(() => {});
+      throw new Error('Cannot set multiple files on an input without the multiple attribute');
+    }
+
+    let summary = null;
+    try {
+      await attachDebugger(tabId);
+      await cdp(tabId, 'DOM.enable').catch(() => {});
+      const search = await cdp(tabId, 'DOM.performSearch', {
+        query: `input[${markerName}="${escapeCssAttributeValue(markerValue)}"]`,
+        includeUserAgentShadowDOM: true
+      });
+      try {
+        if (!search.resultCount) throw new Error('Unable to resolve file input through CDP DOM');
+        const result = await cdp(tabId, 'DOM.getSearchResults', {
+          searchId: search.searchId,
+          fromIndex: 0,
+          toIndex: 1
+        });
+        const nodeId = result.nodeIds?.[0];
+        if (!nodeId) throw new Error('Unable to resolve file input node');
+        await cdp(tabId, 'DOM.setFileInputFiles', { nodeId, files });
+      } finally {
+        if (search.searchId) await cdp(tabId, 'DOM.discardSearchResults', { searchId: search.searchId }).catch(() => {});
+      }
+      summary = await summarizeFileInputAfterSet(tabId, frameTarget, markerName, markerValue);
+    } catch (error) {
+      await clearFileInputMarker(tabId, frameTarget, markerName, markerValue).catch(() => {});
+      throw error;
+    }
+
+    await recordAction(tabId, 'dom.setInputFiles', { selector: params.selector, index, files, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, summary);
+    return { ok: true, element: summary, frame: frameTarget.frame };
+  }
+
   async function domHover(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'dom.hover');
@@ -908,6 +1013,135 @@ export function createDomHandlers({
     await cdp(tabId, 'Input.insertText', { text });
   }
 
+  function normalizeFilePaths(params) {
+    const value = params.files ?? params.filePaths ?? params.filePath ?? params.path;
+    const files = Array.isArray(value) ? value : (typeof value === 'string' ? [value] : []);
+    for (const file of files) {
+      if (typeof file !== 'string' || !file) throw new Error('dom.setInputFiles requires file path strings');
+    }
+    return files;
+  }
+
+  function escapeCssAttributeValue(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  async function summarizeFileInputAfterSet(tabId, frameTarget, markerName, markerValue) {
+    const [{ result }] = await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (markerName, markerValue, frameSelector) => {
+        const root = resolveDomRoot(frameSelector);
+        const element = querySelectorDeep(root, `input[${markerName}="${cssEscapeAttribute(markerValue)}"]`);
+        if (!element) throw new Error('Marked file input not found after setting files');
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+        element.removeAttribute(markerName);
+        const rect = element.getBoundingClientRect();
+        return {
+          tagName: element.tagName.toLowerCase(),
+          type: element.getAttribute('type') || '',
+          multiple: element.multiple === true,
+          fileCount: element.files ? element.files.length : 0,
+          files: Array.from(element.files || []).map(file => ({ name: file.name, size: file.size, type: file.type })),
+          value: element.value || '',
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        };
+
+        function cssEscapeAttribute(value) {
+          return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        }
+
+        function resolveDomRoot(frameSelector) {
+          if (!frameSelector) return document;
+          const frame = querySelectorDeep(document, frameSelector);
+          if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
+          try {
+            if (!frame.contentDocument) throw new Error('Frame document is not accessible');
+            return frame.contentDocument;
+          } catch {
+            throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
+          }
+        }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
+      },
+      args: [markerName, markerValue, frameTarget.frameSelector],
+      world: 'MAIN'
+    });
+    return result;
+  }
+
+  async function clearFileInputMarker(tabId, frameTarget, markerName, markerValue) {
+    await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (markerName, markerValue, frameSelector) => {
+        const root = resolveDomRoot(frameSelector);
+        const element = querySelectorDeep(root, `input[${markerName}="${cssEscapeAttribute(markerValue)}"]`);
+        if (element) element.removeAttribute(markerName);
+
+        function cssEscapeAttribute(value) {
+          return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        }
+
+        function resolveDomRoot(frameSelector) {
+          if (!frameSelector) return document;
+          const frame = querySelectorDeep(document, frameSelector);
+          if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
+          try {
+            if (!frame.contentDocument) throw new Error('Frame document is not accessible');
+            return frame.contentDocument;
+          } catch {
+            return document;
+          }
+        }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
+      },
+      args: [markerName, markerValue, frameTarget.frameSelector],
+      world: 'MAIN'
+    });
+  }
+
   async function dispatchRealClick(tabId, point, params) {
     await attachDebugger(tabId);
     const button = params.button || 'left';
@@ -929,6 +1163,7 @@ export function createDomHandlers({
     domClick,
     domType,
     domSelect,
+    domSetInputFiles,
     domHover,
     domScroll
   };
