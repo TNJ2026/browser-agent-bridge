@@ -439,13 +439,23 @@ export function createDomHandlers({
                 return { receivesEvents: false, description: describeElementForHit(frameHit) };
               }
               const frameRect = frame.getBoundingClientRect();
-              const localHit = root.elementFromPoint(point.x - frameRect.x, point.y - frameRect.y);
+              let localHit = root.elementFromPoint(point.x - frameRect.x, point.y - frameRect.y);
+              while (localHit && localHit.shadowRoot) {
+                const inner = localHit.shadowRoot.elementFromPoint(point.x - frameRect.x, point.y - frameRect.y);
+                if (!inner || inner === localHit) break;
+                localHit = inner;
+              }
               return {
                 receivesEvents: Boolean(localHit && (localHit === element || element.contains(localHit))),
                 description: describeElementForHit(localHit)
               };
             }
-            const hit = document.elementFromPoint(point.x, point.y);
+            let hit = document.elementFromPoint(point.x, point.y);
+            while (hit && hit.shadowRoot) {
+              const inner = hit.shadowRoot.elementFromPoint(point.x, point.y);
+              if (!inner || inner === hit) break;
+              hit = inner;
+            }
             return {
               receivesEvents: Boolean(hit && (hit === element || element.contains(hit))),
               description: describeElementForHit(hit)
@@ -639,13 +649,23 @@ export function createDomHandlers({
               return { receivesEvents: false, description: describeElementForHit(frameHit) };
             }
             const frameRect = frame.getBoundingClientRect();
-            const localHit = root.elementFromPoint(point.x - frameRect.x, point.y - frameRect.y);
+            let localHit = root.elementFromPoint(point.x - frameRect.x, point.y - frameRect.y);
+            while (localHit && localHit.shadowRoot) {
+              const inner = localHit.shadowRoot.elementFromPoint(point.x - frameRect.x, point.y - frameRect.y);
+              if (!inner || inner === localHit) break;
+              localHit = inner;
+            }
             return {
               receivesEvents: Boolean(localHit && (localHit === element || element.contains(localHit))),
               description: describeElementForHit(localHit)
             };
           }
-          const hit = document.elementFromPoint(point.x, point.y);
+          let hit = document.elementFromPoint(point.x, point.y);
+          while (hit && hit.shadowRoot) {
+            const inner = hit.shadowRoot.elementFromPoint(point.x, point.y);
+            if (!inner || inner === hit) break;
+            hit = inner;
+          }
           return {
             receivesEvents: Boolean(hit && (hit === element || element.contains(hit))),
             description: describeElementForHit(hit)

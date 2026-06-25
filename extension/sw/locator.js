@@ -332,12 +332,12 @@ export function createLocatorHandlers({
           if (locator.placeholder && !matchesText(element.getAttribute('placeholder') || '', locator.placeholder, locator)) return false;
           if (locator.visible === true && !isVisible(element)) return false;
           if (locator.visible === false && isVisible(element)) return false;
-          if (locator.level !== null && headingLevel(element) !== locator.level) return false;
-          if (locator.checked !== null && ariaBooleanState(element, 'checked') !== locator.checked) return false;
-          if (locator.disabled !== null && !matchesDisabled(element, locator.disabled)) return false;
-          if (locator.expanded !== null && ariaBooleanState(element, 'expanded') !== locator.expanded) return false;
-          if (locator.pressed !== null && ariaBooleanState(element, 'pressed') !== locator.pressed) return false;
-          if (locator.selected !== null && ariaBooleanState(element, 'selected') !== locator.selected) return false;
+          if (locator.level !== undefined && locator.level !== null && headingLevel(element) !== locator.level) return false;
+          if (locator.checked !== undefined && locator.checked !== null && ariaBooleanState(element, 'checked') !== locator.checked) return false;
+          if (locator.disabled !== undefined && locator.disabled !== null && !matchesDisabled(element, locator.disabled)) return false;
+          if (locator.expanded !== undefined && locator.expanded !== null && ariaBooleanState(element, 'expanded') !== locator.expanded) return false;
+          if (locator.pressed !== undefined && locator.pressed !== null && ariaBooleanState(element, 'pressed') !== locator.pressed) return false;
+          if (locator.selected !== undefined && locator.selected !== null && ariaBooleanState(element, 'selected') !== locator.selected) return false;
           return true;
         }
 
@@ -531,13 +531,23 @@ export function createLocatorHandlers({
               return { receivesEvents: false, description: describeElementForHit(frameHit) };
             }
             const frameRect = frame.getBoundingClientRect();
-            const localHit = root.elementFromPoint(point.x - frameRect.x, point.y - frameRect.y);
+            let localHit = root.elementFromPoint(point.x - frameRect.x, point.y - frameRect.y);
+            while (localHit && localHit.shadowRoot) {
+              const inner = localHit.shadowRoot.elementFromPoint(point.x - frameRect.x, point.y - frameRect.y);
+              if (!inner || inner === localHit) break;
+              localHit = inner;
+            }
             return {
               receivesEvents: Boolean(localHit && (localHit === element || element.contains(localHit))),
               description: describeElementForHit(localHit)
             };
           }
-          const hit = document.elementFromPoint(point.x, point.y);
+          let hit = document.elementFromPoint(point.x, point.y);
+          while (hit && hit.shadowRoot) {
+            const inner = hit.shadowRoot.elementFromPoint(point.x, point.y);
+            if (!inner || inner === hit) break;
+            hit = inner;
+          }
           return {
             receivesEvents: Boolean(hit && (hit === element || element.contains(hit))),
             description: describeElementForHit(hit)
