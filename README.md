@@ -307,17 +307,31 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Session | `session.get` | Get session details. |
 | Session | `session.stop` | Close a session workspace. |
 | Page | `page.navigate` | Navigate to a URL. |
+| Page | `page.waitForURL` | Wait for the tab URL to match. |
+| Page | `page.waitForRequest` | Wait for a matching network request. |
+| Page | `page.waitForResponse` | Wait for a matching network response. |
+| Page | `page.waitForNetworkIdle` | Wait until network activity becomes idle. |
+| Page | `page.waitForDialog` | Wait for a JavaScript dialog. |
+| Page | `page.acceptDialog` | Accept the current JavaScript dialog. |
+| Page | `page.dismissDialog` | Dismiss the current JavaScript dialog. |
 | Page | `page.readText` | Extract visible page text. |
 | Page | `page.accessibilityTree` | Get a structured accessibility tree. |
 | Page | `page.screenshot` | Capture a page screenshot. |
 | Page | `page.domSnapshot` | Get a CDP DOM snapshot. |
+| Interactive | `locator.allTextContents` | Extract text from all matching locators. |
+| Interactive | `locator.first` | Get first/last/nth locator summaries. |
+| Interactive | `expect.locator.toHaveText` | Wait for locator assertions to pass. |
+| Interactive | `locator.screenshot` | Capture a screenshot of one matched element. |
 | Interactive | `locator.click` | Click by selector, text, role/name, label, or placeholder. |
 | Interactive | `locator.fill` | Fill fields by selector, label, or other locator fields. |
 | Interactive | `locator.check` | Check checkbox, radio, or switch-like controls. |
 | Interactive | `locator.uncheck` | Uncheck checkbox or switch-like controls. |
 | Interactive | `locator.selectOption` | Select native `<select>` options. |
 | Interactive | `locator.setInputFiles` | Set local files on a located file input. |
+| Interactive | `locator.dragTo` | Drag from one locator to another. |
+| Interactive | `locator.dispatchDragDrop` | Dispatch HTML5 drag/drop events. |
 | Interactive | `dom.click` | Click by CSS selector. |
+| Interactive | `dom.dragTo` | Drag from one selector to another. |
 | Interactive | `dom.type` | Type into a selector. |
 | Interactive | `dom.setInputFiles` | Set local files on an `<input type="file">`. |
 | Interactive | `computer.click` | Click at viewport coordinates. |
@@ -325,10 +339,12 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Interactive | `computer.scroll` | Scroll by pixel offsets. |
 | Interactive | `keyboard.type` | Type focused text with optional per-character delay. |
 | Interactive | `keyboard.press` | Send realistic key presses and shortcuts. |
+| Downloads | `downloads.waitFor` | Wait for a matching download to finish. |
 | Recording | `recording.start` | Start workflow recording. |
 | Recording | `recording.stop` | Stop workflow recording. |
 | Trace | `trace.start` | Start lightweight RPC debug tracing. |
 | Trace | `trace.export` | Export a captured trace. |
+| Trace | `trace.exportHtml` | Export a trace as an HTML timeline. |
 
 ## Repository Paths
 

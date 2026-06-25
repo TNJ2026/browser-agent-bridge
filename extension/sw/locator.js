@@ -5,6 +5,7 @@ export function createLocatorHandlers({
   recordAction,
   attachDebugger,
   cdp,
+  captureElementScreenshot,
   resolveFrameTarget,
   sleep,
   defaultTimeoutMs,
@@ -25,6 +26,62 @@ export function createLocatorHandlers({
     const frameTarget = await resolveFrameTarget(tabId, params);
     const result = await runLocatorScript(tabId, { ...params, index }, 'textContent', frameTarget);
     return { text: result.text, element: result.element, frame: frameTarget.frame };
+  }
+
+  async function locatorAllTextContents(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.allTextContents');
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const result = await runLocatorScript(tabId, params, 'allTextContents', frameTarget);
+    return { texts: result.texts, count: result.count, frame: frameTarget.frame };
+  }
+
+  async function locatorAllInnerTexts(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.allInnerTexts');
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const result = await runLocatorScript(tabId, params, 'allInnerTexts', frameTarget);
+    return { texts: result.texts, count: result.count, frame: frameTarget.frame };
+  }
+
+  async function locatorGetAttribute(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.getAttribute');
+    assertString(params.name, 'name');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const result = await runLocatorScript(tabId, { ...params, index, attributeName: params.name }, 'getAttribute', frameTarget);
+    return { value: result.value, element: result.element, frame: frameTarget.frame };
+  }
+
+  async function locatorNth(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.nth');
+    const nth = Number.isInteger(params.nth) && params.nth >= 0
+      ? params.nth
+      : Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const result = await runLocatorScript(tabId, { ...params, index: nth }, 'summarize', frameTarget);
+    return { element: result.element, index: nth, frame: frameTarget.frame };
+  }
+
+  async function locatorFirst(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.first');
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const result = await runLocatorScript(tabId, { ...params, index: 0 }, 'summarize', frameTarget);
+    return { element: result.element, index: 0, frame: frameTarget.frame };
+  }
+
+  async function locatorLast(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.last');
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const query = await runLocatorScript(tabId, params, 'query', frameTarget);
+    if (query.count <= 0) throw new Error(`Element not found for locator: ${describeLocator(params)}`);
+    const index = query.count - 1;
+    const result = await runLocatorScript(tabId, { ...params, index }, 'summarize', frameTarget);
+    return { element: result.element, index, count: query.count, frame: frameTarget.frame };
   }
 
   async function locatorWaitFor(params) {
@@ -56,19 +113,183 @@ export function createLocatorHandlers({
     throw new Error(`Timed out waiting for locator ${describeLocator(params)} to be ${state}${last ? ` (last count: ${last.count})` : ''}`);
   }
 
+  async function expectLocatorToBeVisible(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'expect.locator.toBeVisible');
+    const result = await locatorWaitFor({ ...params, state: 'visible' });
+    return { ok: true, assertion: 'toBeVisible', ...result };
+  }
+
+  async function expectLocatorToHaveCount(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'expect.locator.toHaveCount');
+    const expected = normalizeExpectedCount(params);
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
+    const started = Date.now();
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    let last = null;
+
+    while (Date.now() - started <= timeoutMs) {
+      last = await runLocatorScript(tabId, params, 'query', frameTarget);
+      if (last.count === expected) {
+        return { ok: true, assertion: 'toHaveCount', expected, actual: last.count, elapsedMs: Date.now() - started, frame: frameTarget.frame };
+      }
+      await sleep(intervalMs);
+    }
+    throw new Error(`Expected locator ${describeLocator(params)} to have count ${expected}, got ${last?.count ?? 0}`);
+  }
+
+  async function expectLocatorToHaveText(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'expect.locator.toHaveText');
+    const expected = normalizeExpectedText(params);
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
+    const started = Date.now();
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    let last = null;
+
+    while (Date.now() - started <= timeoutMs) {
+      const result = await runLocatorScript(tabId, params, Array.isArray(expected) ? 'allInnerTexts' : 'textContent', frameTarget);
+      last = Array.isArray(expected) ? result.texts : result.text;
+      if (matchesExpectedText(last, expected, params)) {
+        return { ok: true, assertion: 'toHaveText', expected, actual: last, elapsedMs: Date.now() - started, frame: frameTarget.frame };
+      }
+      await sleep(intervalMs);
+    }
+    throw new Error(`Expected locator ${describeLocator(params)} to have text ${JSON.stringify(expected)}, got ${JSON.stringify(last)}`);
+  }
+
+  async function expectLocatorToHaveAttribute(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'expect.locator.toHaveAttribute');
+    const attributeName = typeof params.attribute === 'string' && params.attribute ? params.attribute : params.name;
+    assertString(attributeName, 'attribute');
+    const expected = params.expectedValue ?? params.expected ?? params.value;
+    if (typeof expected !== 'string') throw new Error('expect.locator.toHaveAttribute requires expectedValue, expected, or value');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
+    const started = Date.now();
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    let last = null;
+
+    while (Date.now() - started <= timeoutMs) {
+      const result = await runLocatorScript(tabId, { ...params, index, attributeName }, 'getAttribute', frameTarget);
+      last = result.value;
+      if (matchesExpectedText(last || '', expected, params)) {
+        return { ok: true, assertion: 'toHaveAttribute', attribute: attributeName, expected, actual: last, elapsedMs: Date.now() - started, frame: frameTarget.frame };
+      }
+      await sleep(intervalMs);
+    }
+    throw new Error(`Expected locator ${describeLocator(params)} attribute ${attributeName} to be ${JSON.stringify(expected)}, got ${JSON.stringify(last)}`);
+  }
+
   async function locatorClick(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.click');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
-    const frameTarget = await resolveFrameTarget(tabId, params);
+    let frameTarget = await resolveFrameTarget(tabId, params);
     const target = params.force === true
       ? await runLocatorScript(tabId, { ...params, index, actionKind: 'click' }, 'actionability', frameTarget)
       : await waitForLocatorActionable(tabId, { ...params, index }, 'click', frameTarget);
     if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for locator ${describeLocator(params)}`);
+    frameTarget = await resolveFrameTarget(tabId, params);
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = { element: target.element };
     await recordAction(tabId, 'locator.click', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
     return { ok: true, element: result.element, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
+  }
+
+  async function locatorDragTo(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.dragTo');
+    const sourceIndex = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const targetParams = normalizeTargetLocatorParams(params);
+    const targetIndex = Number.isInteger(params.targetIndex) && params.targetIndex >= 0 ? params.targetIndex : 0;
+    let sourceFrameTarget = await resolveFrameTarget(tabId, params);
+    let targetFrameTarget = await resolveFrameTarget(tabId, targetParams);
+    const source = params.force === true
+      ? await runLocatorScript(tabId, { ...params, index: sourceIndex, actionKind: 'click' }, 'actionability', sourceFrameTarget)
+      : await waitForLocatorActionable(tabId, { ...params, index: sourceIndex }, 'click', sourceFrameTarget);
+    const target = params.force === true
+      ? await runLocatorScript(tabId, { ...targetParams, index: targetIndex, actionKind: 'click' }, 'actionability', targetFrameTarget)
+      : await waitForLocatorActionable(tabId, { ...targetParams, index: targetIndex }, 'click', targetFrameTarget);
+    if (!source?.element?.clickPoint) throw new Error(`Source element has no draggable point for locator ${describeLocator(params)}`);
+    if (!target?.element?.clickPoint) throw new Error(`Target element has no drop point for locator ${describeLocator(targetParams)}`);
+    sourceFrameTarget = await resolveFrameTarget(tabId, params);
+    targetFrameTarget = await resolveFrameTarget(tabId, targetParams);
+    await dispatchRealDrag(
+      tabId,
+      applyFrameOffset(source.element.clickPoint, sourceFrameTarget),
+      applyFrameOffset(target.element.clickPoint, targetFrameTarget),
+      params
+    );
+    const result = { source: source.element, target: target.element };
+    await recordAction(tabId, 'locator.dragTo', {
+      locator: locatorSpecForRecording(params),
+      index: sourceIndex,
+      target: locatorSpecForRecording(targetParams),
+      targetIndex,
+      frameSelector: params.frameSelector || params.locator?.frameSelector || null,
+      frameId: sourceFrameTarget.frameId,
+      targetFrameId: targetFrameTarget.frameId
+    }, result);
+    return {
+      ok: true,
+      source: result.source,
+      target: result.target,
+      frame: sourceFrameTarget.frame,
+      targetFrame: targetFrameTarget.frame,
+      ...(params.force === true ? {} : { actionability: { source: source.actionability, target: target.actionability } })
+    };
+  }
+
+  async function locatorDispatchDragDrop(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.dispatchDragDrop');
+    const sourceIndex = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const targetParams = normalizeTargetLocatorParams(params);
+    const targetIndex = Number.isInteger(params.targetIndex) && params.targetIndex >= 0 ? params.targetIndex : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const targetFrameTarget = await resolveFrameTarget(tabId, targetParams);
+    if (frameTarget.frameId !== targetFrameTarget.frameId || frameTarget.frameSelector !== targetFrameTarget.frameSelector) {
+      throw new Error('locator.dispatchDragDrop requires source and target in the same frame');
+    }
+    const result = await runLocatorScript(tabId, {
+      ...params,
+      index: sourceIndex,
+      targetLocator: normalizeLocatorParams(targetParams),
+      targetIndex,
+      dragData: params.data || null
+    }, 'dispatchDragDrop', frameTarget);
+    await recordAction(tabId, 'locator.dispatchDragDrop', {
+      locator: locatorSpecForRecording(params),
+      index: sourceIndex,
+      target: locatorSpecForRecording(targetParams),
+      targetIndex,
+      frameSelector: params.frameSelector || params.locator?.frameSelector || null,
+      frameId: frameTarget.frameId
+    }, result);
+    return { ok: true, ...result, frame: frameTarget.frame };
+  }
+
+  async function locatorScreenshot(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.screenshot');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    let frameTarget = await resolveFrameTarget(tabId, params);
+    const target = params.force === true
+      ? await runLocatorScript(tabId, { ...params, index, actionKind: 'screenshot' }, 'actionability', frameTarget)
+      : await waitForLocatorActionable(tabId, { ...params, index, stable: params.stable !== false }, 'screenshot', frameTarget);
+    const rect = target?.element?.rect;
+    if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error(`Element has no screenshot area for locator ${describeLocator(params)}`);
+    frameTarget = await resolveFrameTarget(tabId, params);
+    const deviceScaleFactor = await getDeviceScaleFactor(tabId, frameTarget);
+    const dataUrl = await captureElementScreenshot(tabId, applyFrameOffset(rect, frameTarget), { ...params, deviceScaleFactor });
+    await recordAction(tabId, 'locator.screenshot', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, target.element);
+    return { dataUrl, element: target.element, frame: frameTarget.frame };
   }
 
   async function locatorFill(params) {
@@ -99,7 +320,7 @@ export function createLocatorHandlers({
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, actionName);
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
-    const frameTarget = await resolveFrameTarget(tabId, params);
+    let frameTarget = await resolveFrameTarget(tabId, params);
     const target = params.force === true
       ? await runLocatorScript(tabId, { ...params, index, actionKind: 'click' }, 'actionability', frameTarget)
       : await waitForLocatorActionable(tabId, { ...params, index }, 'click', frameTarget);
@@ -112,6 +333,7 @@ export function createLocatorHandlers({
       return { ok: true, changed: false, element: before.element, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
     }
     if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for locator ${describeLocator(params)}`);
+    frameTarget = await resolveFrameTarget(tabId, params);
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const after = await runLocatorScript(tabId, { ...params, index }, 'checkState', frameTarget);
     if (after.checked !== desiredChecked) throw new Error(`${actionName} failed to set checked=${desiredChecked}`);
@@ -178,7 +400,7 @@ export function createLocatorHandlers({
       const checks = result.actionability || {};
       const ready = result.found &&
         checks.visible === true &&
-        checks.enabled === true &&
+        (actionKind === 'screenshot' || checks.enabled === true) &&
         (actionKind !== 'click' || checks.receivesEvents === true) &&
         stable === true &&
         (actionKind !== 'fill' || checks.editable === true) &&
@@ -207,6 +429,15 @@ export function createLocatorHandlers({
       x: point.x + frameTarget.frameOffset.x,
       y: point.y + frameTarget.frameOffset.y
     };
+  }
+
+  async function getDeviceScaleFactor(tabId, frameTarget) {
+    const [{ result }] = await chromeApi.scripting.executeScript({
+      target: frameTarget?.target || { tabId },
+      func: () => window.devicePixelRatio || 1,
+      world: 'MAIN'
+    });
+    return typeof result === 'number' && result > 0 ? result : 1;
   }
 
   function rectsAlmostEqual(a, b) {
@@ -242,6 +473,43 @@ export function createLocatorHandlers({
     });
   }
 
+  async function dispatchRealDrag(tabId, from, to, params) {
+    await attachDebugger(tabId);
+    const button = params.button || 'left';
+    const steps = Number.isInteger(params.steps) && params.steps > 0 ? params.steps : 12;
+    await cdp(tabId, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: from.x,
+      y: from.y,
+      button: 'none'
+    });
+    await cdp(tabId, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: from.x,
+      y: from.y,
+      button,
+      buttons: 1,
+      clickCount: 1
+    });
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
+      await cdp(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+        button,
+        buttons: 1
+      });
+    }
+    await cdp(tabId, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: to.x,
+      y: to.y,
+      button,
+      clickCount: 1
+    });
+  }
+
   async function dispatchRealTextInput(tabId, text) {
     await attachDebugger(tabId);
     await cdp(tabId, 'Input.insertText', { text });
@@ -261,6 +529,10 @@ export function createLocatorHandlers({
       selectOptions: Array.isArray(params.selectOptions) ? params.selectOptions : [],
       markerName: typeof params.markerName === 'string' ? params.markerName : '',
       markerValue: typeof params.markerValue === 'string' ? params.markerValue : '',
+      attributeName: typeof params.attributeName === 'string' ? params.attributeName : '',
+      targetLocator: params.targetLocator && typeof params.targetLocator === 'object' ? params.targetLocator : null,
+      targetIndex: Number.isInteger(params.targetIndex) && params.targetIndex >= 0 ? params.targetIndex : 0,
+      dragData: params.dragData || null,
       replace: params.replace !== false,
       scrollIntoView: params.scrollIntoView !== false,
       force: params.force === true,
@@ -276,6 +548,14 @@ export function createLocatorHandlers({
 
         if (options.action === 'query') {
           return { count: matches.length, visibleCount: matches.filter(isVisible).length, elements };
+        }
+
+        if (options.action === 'allTextContents') {
+          return { count: matches.length, texts: matches.slice(0, options.limit).map(item => item.textContent || '') };
+        }
+
+        if (options.action === 'allInnerTexts') {
+          return { count: matches.length, texts: matches.slice(0, options.limit).map(item => item.innerText || item.textContent || '') };
         }
 
         const element = matches[options.index];
@@ -320,6 +600,13 @@ export function createLocatorHandlers({
           return { ...state, element: summarizeElement(element, options.index) };
         }
 
+        if (options.action === 'getAttribute') {
+          return {
+            value: element.getAttribute(options.attributeName),
+            element: summarizeElement(element, options.index)
+          };
+        }
+
         if (options.action === 'markFileInput') {
           if (element.tagName.toLowerCase() !== 'input' || (element.getAttribute('type') || '').toLowerCase() !== 'file') {
             throw new Error('Element is not an input[type=file]');
@@ -346,6 +633,27 @@ export function createLocatorHandlers({
           const marked = querySelectorDeep(root, `input[${options.markerName}="${cssEscapeAttribute(options.markerValue)}"]`);
           if (marked) marked.removeAttribute(options.markerName);
           return { cleared: Boolean(marked) };
+        }
+
+        if (options.action === 'dispatchDragDrop') {
+          if (!options.targetLocator) throw new Error('Missing target locator');
+          const targetMatches = findLocatorMatches(root, options.targetLocator);
+          const target = targetMatches[options.targetIndex];
+          if (!target) throw new Error(`Target element not found for locator: ${describeLocator(options.targetLocator)} at index ${options.targetIndex}`);
+          const dataTransfer = new DataTransfer();
+          for (const item of normalizeDragData(options.dragData)) dataTransfer.setData(item.type, item.value);
+          const sourceRect = element.getBoundingClientRect();
+          const targetRect = target.getBoundingClientRect();
+          dispatchDragEvent(element, 'dragstart', dataTransfer, sourceRect);
+          dispatchDragEvent(target, 'dragenter', dataTransfer, targetRect);
+          dispatchDragEvent(target, 'dragover', dataTransfer, targetRect);
+          dispatchDragEvent(target, 'drop', dataTransfer, targetRect);
+          dispatchDragEvent(element, 'dragend', dataTransfer, sourceRect);
+          return {
+            source: summarizeElement(element, options.index),
+            target: summarizeElement(target, options.targetIndex),
+            types: Array.from(dataTransfer.types || [])
+          };
         }
 
         if (!options.force && !actionability.actionable) {
@@ -384,6 +692,10 @@ export function createLocatorHandlers({
           if (locator.role && inferredRole(element) !== locator.role.toLowerCase()) return false;
           if (locator.name && !matchesText(accessibleName(element, root), locator.name, locator)) return false;
           if (locator.text && !matchesText(visibleText(element), locator.text, locator)) return false;
+          if (locator.hasText && !matchesText(visibleText(element), locator.hasText, locator)) return false;
+          if (locator.hasNotText && matchesText(visibleText(element), locator.hasNotText, locator)) return false;
+          if (locator.hasAttribute && !matchesAttributeFilter(element, locator.hasAttribute, locator)) return false;
+          if (locator.hasNotAttribute && matchesAttributeFilter(element, locator.hasNotAttribute, locator)) return false;
           if (locator.placeholder && !matchesText(element.getAttribute('placeholder') || '', locator.placeholder, locator)) return false;
           if (locator.visible === true && !isVisible(element)) return false;
           if (locator.visible === false && isVisible(element)) return false;
@@ -413,6 +725,44 @@ export function createLocatorHandlers({
             if (matchesText(aria, locator.label, locator) || matchesText(placeholder, locator.label, locator)) controls.push(element);
           }
           return Array.from(new Set(controls));
+        }
+
+        function dispatchDragEvent(element, type, dataTransfer, rect) {
+          const event = new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: rect.x + rect.width / 2,
+            clientY: rect.y + rect.height / 2,
+            dataTransfer
+          });
+          element.dispatchEvent(event);
+        }
+
+        function normalizeDragData(data) {
+          if (!data) return [];
+          if (Array.isArray(data)) return data.filter(item => item && typeof item.type === 'string' && typeof item.value === 'string');
+          if (typeof data === 'object') {
+            return Object.entries(data)
+              .filter(([, value]) => typeof value === 'string')
+              .map(([type, value]) => ({ type, value }));
+          }
+          return [];
+        }
+
+        function matchesAttributeFilter(element, filter, locator) {
+          if (!filter || typeof filter !== 'object') return false;
+          const name = typeof filter.name === 'string' ? filter.name : '';
+          if (!name) return false;
+          if (!element.hasAttribute(name)) return filter.present === false;
+          if (filter.present === true) return true;
+          if (filter.present === false) return false;
+          if (typeof filter.value !== 'string') return true;
+          return matchesText(element.getAttribute(name) || '', filter.value, {
+            ...locator,
+            exact: filter.exact === true || locator.exact === true,
+            caseSensitive: filter.caseSensitive === true || locator.caseSensitive === true
+          });
         }
 
         function fillElement(element, text) {
@@ -937,10 +1287,14 @@ export function createLocatorHandlers({
     const locator = {
       selector: pickString('selector'),
       text: params._ignoreTopLevelTextLocator ? stringOrNull(nested.text) : pickString('text'),
+      hasText: pickString('hasText'),
+      hasNotText: pickString('hasNotText'),
       role: pickString('role'),
       name: pickString('name'),
       label: pickString('label'),
       placeholder: pickString('placeholder'),
+      hasAttribute: objectOrNull(params.hasAttribute, nested.hasAttribute),
+      hasNotAttribute: objectOrNull(params.hasNotAttribute, nested.hasNotAttribute),
       frameSelector: pickString('frameSelector'),
       exact: params.exact === true || nested.exact === true,
       caseSensitive: params.caseSensitive === true || nested.caseSensitive === true,
@@ -969,15 +1323,46 @@ export function createLocatorHandlers({
     return null;
   }
 
+  function objectOrNull(value, nestedValue) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+    if (nestedValue && typeof nestedValue === 'object' && !Array.isArray(nestedValue)) return nestedValue;
+    return null;
+  }
+
   function integerOrNull(value, nestedValue) {
     if (Number.isInteger(value)) return value;
     if (Number.isInteger(nestedValue)) return nestedValue;
     return null;
   }
 
+  function normalizeTargetLocatorParams(params) {
+    const target = params.targetLocator || params.target;
+    if (!target || typeof target !== 'object') {
+      if (typeof params.targetSelector === 'string' && params.targetSelector) {
+        return inheritFrameParams(params, { selector: params.targetSelector });
+      }
+      throw new Error('locator.dragTo requires targetLocator, target, or targetSelector');
+    }
+    return inheritFrameParams(params, { locator: target });
+  }
+
+  function inheritFrameParams(source, target) {
+    return {
+      tabId: source.tabId,
+      ...target,
+      ...(Number.isInteger(source.targetFrameId) ? { frameId: source.targetFrameId } : {}),
+      ...(typeof source.targetFrameUrl === 'string' ? { frameUrl: source.targetFrameUrl } : {}),
+      ...(typeof source.targetFrameSelector === 'string' ? { frameSelector: source.targetFrameSelector } : {}),
+      ...(!Number.isInteger(source.targetFrameId) && typeof source.targetFrameUrl !== 'string' && typeof source.targetFrameSelector !== 'string' && Number.isInteger(source.frameId) ? { frameId: source.frameId } : {}),
+      ...(!Number.isInteger(source.targetFrameId) && typeof source.targetFrameUrl !== 'string' && typeof source.targetFrameSelector !== 'string' && typeof source.frameUrl === 'string' ? { frameUrl: source.frameUrl } : {}),
+      ...(!Number.isInteger(source.targetFrameId) && typeof source.targetFrameUrl !== 'string' && typeof source.targetFrameSelector !== 'string' && typeof source.frameSelector === 'string' ? { frameSelector: source.frameSelector } : {})
+    };
+  }
+
   async function setFilesOnMarkedInput(tabId, markerName, markerValue, files) {
     await attachDebugger(tabId);
     await cdp(tabId, 'DOM.enable').catch(() => {});
+    await cdp(tabId, 'DOM.getDocument', { depth: 0 }).catch(() => {});
     const search = await cdp(tabId, 'DOM.performSearch', {
       query: `input[${markerName}="${escapeCssAttributeValue(markerValue)}"]`,
       includeUserAgentShadowDOM: true
@@ -1010,6 +1395,43 @@ export function createLocatorHandlers({
     return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
+  function normalizeExpectedCount(params) {
+    const value = params.count ?? params.expected ?? params.value;
+    if (!Number.isInteger(value) || value < 0) throw new Error('expect.locator.toHaveCount requires a non-negative integer count');
+    return value;
+  }
+
+  function normalizeExpectedText(params) {
+    const value = params.expectedText ?? params.expected ?? params.value;
+    if (Array.isArray(value)) {
+      if (!value.every(item => typeof item === 'string')) throw new Error('Expected text array must contain only strings');
+      return value;
+    }
+    if (typeof value !== 'string') throw new Error('expect.locator.toHaveText requires expectedText, expected, or value');
+    return value;
+  }
+
+  function matchesExpectedText(actual, expected, params) {
+    if (Array.isArray(expected)) {
+      if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+      return expected.every((item, index) => matchesExpectedTextValue(actual[index] || '', item, params));
+    }
+    return matchesExpectedTextValue(String(actual || ''), expected, params);
+  }
+
+  function matchesExpectedTextValue(actual, expected, params) {
+    const normalizeWhitespace = params.normalizeWhitespace !== false;
+    const contains = params.contains === true;
+    const caseSensitive = params.caseSensitive === true;
+    let left = normalizeWhitespace ? actual.replace(/\s+/g, ' ').trim() : actual;
+    let right = normalizeWhitespace ? expected.replace(/\s+/g, ' ').trim() : expected;
+    if (!caseSensitive) {
+      left = left.toLowerCase();
+      right = right.toLowerCase();
+    }
+    return contains ? left.includes(right) : left === right;
+  }
+
   function normalizeSelectOptionValues(params) {
     const source = params.options ?? params.values ?? params.value ?? params.label ?? params.option;
     const values = Array.isArray(source) ? source : [source];
@@ -1033,7 +1455,7 @@ export function createLocatorHandlers({
 
   function describeLocator(params) {
     const locator = normalizeLocatorParams(params);
-    return ['selector', 'role', 'name', 'text', 'label', 'placeholder']
+    return ['selector', 'role', 'name', 'text', 'hasText', 'hasNotText', 'label', 'placeholder']
       .filter(key => locator[key])
       .map(key => `${key}=${JSON.stringify(locator[key])}`)
       .join(', ') || '<empty>';
@@ -1047,8 +1469,21 @@ export function createLocatorHandlers({
   return {
     locatorCount,
     locatorTextContent,
+    locatorAllTextContents,
+    locatorAllInnerTexts,
+    locatorGetAttribute,
+    locatorNth,
+    locatorFirst,
+    locatorLast,
     locatorWaitFor,
+    expectLocatorToBeVisible,
+    expectLocatorToHaveCount,
+    expectLocatorToHaveText,
+    expectLocatorToHaveAttribute,
     locatorClick,
+    locatorDragTo,
+    locatorScreenshot,
+    locatorDispatchDragDrop,
     locatorFill,
     locatorCheck,
     locatorUncheck,

@@ -79,6 +79,20 @@ export function createTraceHandlers({
     return payload;
   }
 
+  async function traceExportHtml(params = {}) {
+    await ensureTracesLoaded();
+    await pruneExpiredTraces();
+    const trace = params.traceId ? requireTrace(params.traceId) : activeTrace();
+    const html = renderTraceHtml(trace);
+    if (params.download === true) {
+      const filename = safeFilename(params.filename || `${trace.name}-${trace.id}.html`, 'trace.html');
+      const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+      const downloadId = await chromeApi.downloads.download({ url, filename, saveAs: params.saveAs === true });
+      return { downloadId, trace: summarizeTrace(trace) };
+    }
+    return { schemaVersion: 1, exportedAt: new Date(now()).toISOString(), trace: summarizeTrace(trace), html };
+  }
+
   async function traceClear(params = {}) {
     await ensureTracesLoaded();
     if (params.traceId) {
@@ -291,8 +305,90 @@ export function createTraceHandlers({
     return typeof trace.expiresAt === 'string' && Date.parse(trace.expiresAt) <= now();
   }
 
-  function safeFilename(value) {
-    return String(value).replace(/[\\/:*?"<>|]+/g, '-').replace(/^-+|-+$/g, '') || 'trace.json';
+  function safeFilename(value, fallback = 'trace.json') {
+    return String(value).replace(/[\\/:*?"<>|]+/g, '-').replace(/^-+|-+$/g, '') || fallback;
+  }
+
+  function renderTraceHtml(trace) {
+    const events = Array.isArray(trace.events) ? trace.events : [];
+    const maxDuration = Math.max(1, ...events.map(event => Number(event.durationMs) || 0));
+    const errorCount = events.filter(event => event.status === 'error').length;
+    const rows = events.map(event => renderTraceEvent(event, maxDuration)).join('\n');
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(trace.name)} trace</title>
+<style>
+:root{color-scheme:light dark;--bg:#f7f7f8;--fg:#1f2328;--muted:#667085;--line:#d0d5dd;--ok:#177245;--err:#b42318;--bar:#2f6fed;--card:#fff}
+@media (prefers-color-scheme: dark){:root{--bg:#101114;--fg:#f2f4f7;--muted:#98a2b3;--line:#344054;--card:#181a20}}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{padding:24px 28px 16px;border-bottom:1px solid var(--line);background:var(--card)}
+h1{margin:0 0 8px;font-size:22px}
+.meta{display:flex;flex-wrap:wrap;gap:12px;color:var(--muted)}
+.wrap{padding:20px 28px}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:120px}
+.stat strong{display:block;font-size:18px}
+.event{background:var(--card);border:1px solid var(--line);border-radius:8px;margin:10px 0;overflow:hidden}
+.event summary{cursor:pointer;display:grid;grid-template-columns:64px 1fr 96px 120px;gap:12px;align-items:center;padding:10px 12px}
+.idx{color:var(--muted);font-variant-numeric:tabular-nums}
+.method{font-weight:600;overflow-wrap:anywhere}
+.status.ok{color:var(--ok)}.status.error{color:var(--err)}
+.bar{height:8px;background:color-mix(in srgb,var(--bar) 20%,transparent);border-radius:999px;overflow:hidden}
+.bar span{display:block;height:100%;background:var(--bar)}
+pre{margin:0;padding:12px;border-top:1px solid var(--line);overflow:auto;white-space:pre-wrap;word-break:break-word}
+</style>
+</head>
+<body>
+<header>
+<h1>${escapeHtml(trace.name)}</h1>
+<div class="meta"><span>ID ${escapeHtml(trace.id)}</span><span>Started ${escapeHtml(trace.startedAt)}</span><span>Stopped ${escapeHtml(trace.stoppedAt || 'active')}</span></div>
+</header>
+<main class="wrap">
+<section class="stats">
+<div class="stat"><strong>${events.length}</strong><span>events</span></div>
+<div class="stat"><strong>${errorCount}</strong><span>errors</span></div>
+<div class="stat"><strong>${Math.round(events.reduce((sum, event) => sum + (Number(event.durationMs) || 0), 0))}ms</strong><span>total duration</span></div>
+</section>
+${rows || '<p>No events recorded.</p>'}
+</main>
+</body>
+</html>`;
+  }
+
+  function renderTraceEvent(event, maxDuration) {
+    const duration = Number(event.durationMs) || 0;
+    const width = Math.max(2, Math.round((duration / maxDuration) * 100));
+    const detail = {
+      timestamp: event.timestamp,
+      endedAt: event.endedAt,
+      requestId: event.requestId,
+      params: event.params,
+      result: event.result,
+      error: event.error
+    };
+    return `<details class="event" ${event.status === 'error' ? 'open' : ''}>
+<summary>
+<span class="idx">#${event.index}</span>
+<span class="method">${escapeHtml(event.method || '')}</span>
+<span class="status ${event.status === 'error' ? 'error' : 'ok'}">${escapeHtml(event.status || '')}</span>
+<span>${duration}ms</span>
+<span class="bar" style="grid-column:1/-1"><span style="width:${width}%"></span></span>
+</summary>
+<pre>${escapeHtml(JSON.stringify(detail, null, 2))}</pre>
+</details>`;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[char]));
   }
 
   return {
@@ -300,6 +396,7 @@ export function createTraceHandlers({
     traceStop,
     traceStatus,
     traceExport,
+    traceExportHtml,
     traceClear,
     traceRpcStart,
     traceRpcEnd,

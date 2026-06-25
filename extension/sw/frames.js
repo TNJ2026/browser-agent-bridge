@@ -59,14 +59,22 @@ export function createFrameTargetResolver({ chromeApi = chrome } = {}) {
             try {
               src = src ? new URL(src, document.baseURI).href : '';
             } catch {}
+            let currentUrl = '';
+            try {
+              currentUrl = frame.contentWindow?.location?.href || '';
+            } catch {}
             return {
               src,
+              currentUrl,
+              srcdoc: frame.hasAttribute('srcdoc'),
               name: frame.getAttribute('name') || '',
               id: frame.id || '',
               rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
             };
           });
-          return candidates.find(item => item.src === childUrl)
+          return candidates.find(item => item.currentUrl === childUrl)
+            || candidates.find(item => item.src === childUrl)
+            || candidates.find(item => item.srcdoc && childUrl === 'about:srcdoc')
             || candidates.find(item => childName && (item.name === childName || item.id === childName))
             || candidates.find(item => item.src && (item.src.startsWith(childUrl) || childUrl.startsWith(item.src)))
             || (candidates.length === 1 ? candidates[0] : null)
@@ -99,6 +107,7 @@ function normalizeFrame(frame) {
     parentFrameId: frame.parentFrameId,
     processId: frame.processId,
     url: frame.url || '',
+    name: frame.name || '',
     errorOccurred: frame.errorOccurred === true
   };
 }

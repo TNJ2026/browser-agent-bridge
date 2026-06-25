@@ -34,6 +34,7 @@ const attachedTabs = new Set();
 const cdpEvents = [];
 const networkEventsByTab = new Map();
 const consoleEventsByTab = new Map();
+const dialogsByTab = new Map();
 let nextPromptId = 1;
 const pendingPrompts = new Map();
 let approvalPopupWindowId = null;
@@ -73,6 +74,7 @@ const locatorHandlers = createLocatorHandlers({
   recordAction: recordingHandlers.recordAction,
   attachDebugger,
   cdp,
+  captureElementScreenshot,
   resolveFrameTarget: frameTargetResolver.resolveFrameTarget,
   sleep,
   defaultTimeoutMs: DEFAULT_TIMEOUT_MS
@@ -128,6 +130,7 @@ const pageHandlers = createPageHandlers({
   cdp,
   resolveFrameTarget: frameTargetResolver.resolveFrameTarget,
   networkEventsByTab,
+  dialogsByTab,
   defaultTimeoutMs: DEFAULT_TIMEOUT_MS
 });
 
@@ -141,6 +144,7 @@ const devtoolsHandlers = createDevtoolsHandlers({
 });
 
 const downloadsHandlers = createDownloadsHandlers({});
+downloadsHandlers.initDownloadEvents();
 
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY]).catch(() => {});
@@ -197,6 +201,12 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     if (method === 'Runtime.consoleAPICalled' || method === 'Runtime.exceptionThrown') {
       pushLimited(consoleEventsByTab, tabId, event, 200);
     }
+    if (method === 'Page.javascriptDialogOpening') {
+      dialogsByTab.set(tabId, { ...params, timestamp: event.timestamp });
+    }
+    if (method === 'Page.javascriptDialogClosed') {
+      dialogsByTab.delete(tabId);
+    }
   }
   sendNativeNotification('cdp.event', event);
 });
@@ -214,6 +224,7 @@ chrome.windows.onRemoved.addListener(windowId => {
 chrome.tabs.onRemoved.addListener(tabId => {
   networkEventsByTab.delete(tabId);
   consoleEventsByTab.delete(tabId);
+  dialogsByTab.delete(tabId);
   sessionsHandlers.onTabRemoved(tabId).catch(() => {});
   recordingHandlers.onTabRemoved(tabId).catch(() => {});
 });
@@ -482,6 +493,18 @@ async function dispatchRpc(request) {
       return pageHandlers.pageWaitForNavigation(params);
     case 'page.waitForResponse':
       return pageHandlers.pageWaitForResponse(params);
+    case 'page.waitForRequest':
+      return pageHandlers.pageWaitForRequest(params);
+    case 'page.waitForURL':
+      return pageHandlers.pageWaitForURL(params);
+    case 'page.waitForNetworkIdle':
+      return pageHandlers.pageWaitForNetworkIdle(params);
+    case 'page.waitForDialog':
+      return pageHandlers.pageWaitForDialog(params);
+    case 'page.acceptDialog':
+      return pageHandlers.pageAcceptDialog(params);
+    case 'page.dismissDialog':
+      return pageHandlers.pageDismissDialog(params);
     case 'page.frames':
       return pageHandlers.pageFrames(params);
     case 'page.waitForSelector':
@@ -502,6 +525,10 @@ async function dispatchRpc(request) {
       return domHandlers.domQuery(params);
     case 'dom.click':
       return domHandlers.domClick(params);
+    case 'dom.dragTo':
+      return domHandlers.domDragTo(params);
+    case 'dom.dispatchDragDrop':
+      return domHandlers.domDispatchDragDrop(params);
     case 'dom.type':
       return domHandlers.domType(params);
     case 'dom.select':
@@ -516,10 +543,36 @@ async function dispatchRpc(request) {
       return locatorHandlers.locatorCount(params);
     case 'locator.textContent':
       return locatorHandlers.locatorTextContent(params);
+    case 'locator.allTextContents':
+      return locatorHandlers.locatorAllTextContents(params);
+    case 'locator.allInnerTexts':
+      return locatorHandlers.locatorAllInnerTexts(params);
+    case 'locator.getAttribute':
+      return locatorHandlers.locatorGetAttribute(params);
+    case 'locator.nth':
+      return locatorHandlers.locatorNth(params);
+    case 'locator.first':
+      return locatorHandlers.locatorFirst(params);
+    case 'locator.last':
+      return locatorHandlers.locatorLast(params);
     case 'locator.waitFor':
       return locatorHandlers.locatorWaitFor(params);
+    case 'expect.locator.toBeVisible':
+      return locatorHandlers.expectLocatorToBeVisible(params);
+    case 'expect.locator.toHaveCount':
+      return locatorHandlers.expectLocatorToHaveCount(params);
+    case 'expect.locator.toHaveText':
+      return locatorHandlers.expectLocatorToHaveText(params);
+    case 'expect.locator.toHaveAttribute':
+      return locatorHandlers.expectLocatorToHaveAttribute(params);
     case 'locator.click':
       return locatorHandlers.locatorClick(params);
+    case 'locator.dragTo':
+      return locatorHandlers.locatorDragTo(params);
+    case 'locator.dispatchDragDrop':
+      return locatorHandlers.locatorDispatchDragDrop(params);
+    case 'locator.screenshot':
+      return locatorHandlers.locatorScreenshot(params);
     case 'locator.fill':
       return locatorHandlers.locatorFill(params);
     case 'locator.check':
@@ -556,6 +609,8 @@ async function dispatchRpc(request) {
       return devtoolsHandlers.networkRead(params);
     case 'downloads.list':
       return downloadsHandlers.downloadsList(params);
+    case 'downloads.waitFor':
+      return downloadsHandlers.downloadsWaitFor(params);
     case 'recording.start':
       return recordingHandlers.recordingStart(params);
     case 'recording.stop':
@@ -574,6 +629,8 @@ async function dispatchRpc(request) {
       return traceHandlers.traceStatus(params);
     case 'trace.export':
       return traceHandlers.traceExport(params);
+    case 'trace.exportHtml':
+      return traceHandlers.traceExportHtml(params);
     case 'trace.clear':
       return traceHandlers.traceClear(params);
     case 'indicator.set':
@@ -617,6 +674,12 @@ async function extensionInfo() {
       'page.waitForLoad',
       'page.waitForNavigation',
       'page.waitForResponse',
+      'page.waitForRequest',
+      'page.waitForURL',
+      'page.waitForNetworkIdle',
+      'page.waitForDialog',
+      'page.acceptDialog',
+      'page.dismissDialog',
       'page.frames',
       'page.waitForSelector',
       'page.waitForText',
@@ -627,6 +690,8 @@ async function extensionInfo() {
       'page.domSnapshot',
       'dom.query',
       'dom.click',
+      'dom.dragTo',
+      'dom.dispatchDragDrop',
       'dom.type',
       'dom.select',
       'dom.setInputFiles',
@@ -634,8 +699,21 @@ async function extensionInfo() {
       'dom.scroll',
       'locator.count',
       'locator.textContent',
+      'locator.allTextContents',
+      'locator.allInnerTexts',
+      'locator.getAttribute',
+      'locator.nth',
+      'locator.first',
+      'locator.last',
       'locator.waitFor',
+      'expect.locator.toBeVisible',
+      'expect.locator.toHaveCount',
+      'expect.locator.toHaveText',
+      'expect.locator.toHaveAttribute',
       'locator.click',
+      'locator.dragTo',
+      'locator.dispatchDragDrop',
+      'locator.screenshot',
       'locator.fill',
       'locator.check',
       'locator.uncheck',
@@ -654,6 +732,7 @@ async function extensionInfo() {
       'console.read',
       'network.read',
       'downloads.list',
+      'downloads.waitFor',
       'recording.start',
       'recording.stop',
       'recording.status',
@@ -663,6 +742,7 @@ async function extensionInfo() {
       'trace.stop',
       'trace.status',
       'trace.export',
+      'trace.exportHtml',
       'trace.clear',
       'indicator.set',
       'policy.get',
@@ -712,6 +792,7 @@ async function attachDebugger(tabId) {
   attachedTabs.add(tabId);
   await cdp(tabId, 'Runtime.enable').catch(() => {});
   await cdp(tabId, 'Network.enable').catch(() => {});
+  await cdp(tabId, 'Page.enable').catch(() => {});
 }
 
 async function cdp(tabId, method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -905,6 +986,41 @@ async function captureTabScreenshot(tabId, options = {}) {
   });
 }
 
+async function captureElementScreenshot(tabId, rect, options = {}) {
+  const dataUrl = await captureTabScreenshot(tabId, options);
+  const scale = typeof options.deviceScaleFactor === 'number' && options.deviceScaleFactor > 0 ? options.deviceScaleFactor : 1;
+  const image = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const crop = {
+    x: Math.max(0, Math.floor(rect.x * scale)),
+    y: Math.max(0, Math.floor(rect.y * scale)),
+    width: Math.max(1, Math.ceil(rect.width * scale)),
+    height: Math.max(1, Math.ceil(rect.height * scale))
+  };
+  crop.width = Math.min(crop.width, image.width - crop.x);
+  crop.height = Math.min(crop.height, image.height - crop.y);
+  if (crop.width <= 0 || crop.height <= 0) throw new Error('Element screenshot crop is outside the captured viewport');
+  const canvas = new OffscreenCanvas(crop.width, crop.height);
+  const context = canvas.getContext('2d');
+  context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+  const format = options.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+  const blob = await canvas.convertToBlob({
+    type: format,
+    ...(typeof options.quality === 'number' ? { quality: options.quality / 100 } : {})
+  });
+  const base64 = await blobToBase64(blob);
+  return `data:${format};base64,${base64}`;
+}
+
+async function blobToBase64(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 function pushLimited(map, key, value, limit) {
   const values = map.get(key) || [];
   values.push(value);
@@ -956,9 +1072,9 @@ function optionalPermissionsForMethod(method, params = {}) {
   if (method === 'tabs.group') return ['tabs', 'tabGroups'];
   if (method.startsWith('tabs.')) return ['tabs'];
   if (method.startsWith('session.')) return ['tabs', 'tabGroups'];
-  if (method === 'downloads.list' || method === 'downloads.download') return ['downloads'];
+  if (method === 'downloads.list' || method === 'downloads.waitFor' || method === 'downloads.download') return ['downloads'];
   if (method === 'recording.export' && params.download === true) return ['downloads'];
-  if (method === 'trace.export' && params.download === true) return ['downloads'];
+  if ((method === 'trace.export' || method === 'trace.exportHtml') && params.download === true) return ['downloads'];
   if (
     method.startsWith('page.') ||
     method.startsWith('dom.') ||
@@ -992,13 +1108,13 @@ function getMethodCategory(method, params = {}) {
   if (method === 'tabs.close' || method === 'session.closeTab' || method === 'session.stop') {
     return 'tab_control';
   }
-  if (method === 'downloads.list' || method === 'downloads.download') {
+  if (method === 'downloads.list' || method === 'downloads.waitFor' || method === 'downloads.download') {
     return 'read_downloads';
   }
   if (method === 'page.executeJavaScript') {
     return 'page_script';
   }
-  if (method === 'page.screenshot' || method === 'page.domSnapshot') {
+  if (method === 'page.screenshot' || method === 'page.domSnapshot' || method === 'locator.screenshot') {
     return 'page_screenshot';
   }
   if (
@@ -1015,13 +1131,19 @@ function getMethodCategory(method, params = {}) {
   }
   if (
     method === 'dom.click' ||
+    method === 'dom.dragTo' ||
+    method === 'dom.dispatchDragDrop' ||
     method === 'locator.click' ||
+    method === 'locator.dragTo' ||
+    method === 'locator.dispatchDragDrop' ||
     method === 'locator.check' ||
     method === 'locator.uncheck' ||
     method === 'locator.selectOption' ||
     method === 'locator.setInputFiles' ||
     method === 'dom.select' ||
     method === 'dom.setInputFiles' ||
+    method === 'page.acceptDialog' ||
+    method === 'page.dismissDialog' ||
     method === 'computer.click' ||
     method === 'computer.drag'
   ) {
@@ -1043,6 +1165,7 @@ function getMethodCategory(method, params = {}) {
     method === 'trace.status' ||
     method === 'trace.stop' ||
     method === 'trace.export' ||
+    method === 'trace.exportHtml' ||
     method === 'trace.clear'
   ) {
     return 'trace_data';

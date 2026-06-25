@@ -177,6 +177,15 @@ Exports the active trace, or a specific trace by `traceId`. Pass
 { "traceId": "uuid", "download": false }
 ```
 
+### `trace.exportHtml`
+
+Exports the active trace, or a specific trace by `traceId`, as a standalone
+HTML timeline. Pass `download:true` to save it through Chrome downloads.
+
+```json
+{ "traceId": "uuid", "download": true, "filename": "trace.html" }
+```
+
 ### `trace.clear`
 
 Clears one trace by `traceId`, or all traces when omitted.
@@ -279,6 +288,23 @@ wait until Chrome reports the tab load status as complete.
 
 URL filters can be `url` for exact match, `urlContains`, or `urlRegex`.
 
+### `page.waitForURL`
+
+Polls the active tab URL until it matches `url`, `urlContains`, or `urlRegex`.
+
+```json
+{ "tabId": 123, "urlRegex": "/dashboard(\\?|$)", "timeoutMs": 30000 }
+```
+
+### `page.waitForRequest`
+
+Waits for a CDP `Network.requestWillBeSent` event. Supports `url`,
+`urlContains`, `urlRegex`, `method`, and `resourceType` filters.
+
+```json
+{ "tabId": 123, "urlContains": "/api/items", "method": "POST", "timeoutMs": 30000 }
+```
+
 ### `page.waitForResponse`
 
 Waits for a CDP `Network.responseReceived` event. Supports `url`,
@@ -286,6 +312,34 @@ Waits for a CDP `Network.responseReceived` event. Supports `url`,
 
 ```json
 { "tabId": 123, "urlContains": "/api/items", "status": 200, "method": "GET", "timeoutMs": 30000 }
+```
+
+### `page.waitForNetworkIdle`
+
+Waits until new network activity has been idle for `idleMs` (default `500`).
+Set `maxInflight` to allow a small number of still-open requests.
+
+```json
+{ "tabId": 123, "idleMs": 500, "maxInflight": 0, "timeoutMs": 30000 }
+```
+
+### `page.waitForDialog`
+
+Waits for a JavaScript dialog (`alert`, `confirm`, `prompt`, or
+`beforeunload`). Supports `type`, `message`, `messageContains`, and
+`messageRegex` filters.
+
+```json
+{ "tabId": 123, "type": "confirm", "messageContains": "Delete", "timeoutMs": 30000 }
+```
+
+### `page.acceptDialog` / `page.dismissDialog`
+
+Handles the currently open JavaScript dialog. Pass `promptText` when accepting
+a prompt dialog.
+
+```json
+{ "tabId": 123, "promptText": "hello" }
 ```
 
 ### `page.frames`
@@ -366,6 +420,25 @@ bypass actionability checks.
 { "tabId": 123, "selector": "button[type=submit]", "index": 0, "timeoutMs": 30000, "frameSelector": "iframe[name=app]" }
 ```
 
+### `dom.dragTo`
+
+Drags from a source selector to a target selector using CDP mouse events.
+Both source and target auto-wait for actionability unless `force:true` is set.
+
+```json
+{ "tabId": 123, "selector": ".card", "targetSelector": ".drop-zone", "steps": 12 }
+```
+
+### `dom.dispatchDragDrop`
+
+Dispatches an HTML5 drag/drop event sequence with `DataTransfer`:
+`dragstart`, `dragenter`, `dragover`, `drop`, and `dragend`. This is useful for
+apps that listen for DOM drag events instead of mouse movement.
+
+```json
+{ "tabId": 123, "selector": ".card", "targetSelector": ".drop-zone", "data": { "text/plain": "card-1" } }
+```
+
 ### `dom.type`
 
 Types into an input, textarea, or contenteditable element using CDP text input.
@@ -417,7 +490,8 @@ for same-origin nested DOM traversal.
 
 Finds elements using a Playwright-like locator shape. Locator fields can be
 passed directly or under `locator`. Supported fields are `selector`, `text`,
-`role`, `name`, `label`, `placeholder`, `exact`, `caseSensitive`, `visible`,
+`role`, `name`, `label`, `placeholder`, `hasText`, `hasNotText`,
+`hasAttribute`, `hasNotAttribute`, `exact`, `caseSensitive`, `visible`,
 `includeHidden`, `checked`, `disabled`, `expanded`, `pressed`, `selected`,
 `level`, `frameId`, `frameUrl`, and `frameSelector`. Role/name matching uses implicit HTML roles,
 explicit ARIA roles, `aria-label`, `aria-labelledby`, associated labels,
@@ -440,6 +514,40 @@ Returns the text of the matched element at `index` (default `0`).
 { "tabId": 123, "text": "Order total", "index": 0 }
 ```
 
+### `locator.allTextContents`
+
+Returns `textContent` for all matched elements, capped by `limit` (default `50`,
+maximum `200`). Empty matches return an empty array.
+
+```json
+{ "tabId": 123, "selector": ".result-title", "limit": 100 }
+```
+
+### `locator.allInnerTexts`
+
+Returns rendered `innerText` for all matched elements, capped by `limit`.
+
+```json
+{ "tabId": 123, "role": "listitem", "limit": 100 }
+```
+
+### `locator.getAttribute`
+
+Returns an attribute value for the matched element at `index`.
+
+```json
+{ "tabId": 123, "selector": "a.result", "name": "href", "index": 0 }
+```
+
+### `locator.first` / `locator.last` / `locator.nth`
+
+Returns an element summary for the first, last, or nth matched element. `nth`
+accepts `nth` or `index`.
+
+```json
+{ "tabId": 123, "selector": ".result", "hasText": "OpenAI", "nth": 2 }
+```
+
 ### `locator.waitFor`
 
 Waits for a locator state: `attached`, `visible` (default), `hidden`, or
@@ -448,6 +556,42 @@ Waits for a locator state: `attached`, `visible` (default), `hidden`, or
 ```json
 { "tabId": 123, "label": "Email", "state": "visible", "timeoutMs": 30000 }
 ```
+
+### `locator.screenshot`
+
+Captures a screenshot cropped to the matched element at `index`. By default it
+waits for the element to be visible and stable, then returns a `dataUrl`.
+
+```json
+{ "tabId": 123, "role": "img", "name": "Chart", "format": "png" }
+```
+
+### `expect.locator.*`
+
+Assertion-style waits for common locator conditions. The locator can be passed
+directly or under `locator`. Text and attribute assertions support
+`timeoutMs`, `intervalMs`, `contains`, `caseSensitive`, and
+`normalizeWhitespace`.
+
+```json
+{ "tabId": 123, "locator": { "role": "button", "name": "Save" } }
+```
+
+```json
+{ "tabId": 123, "selector": ".result", "count": 10 }
+```
+
+```json
+{ "tabId": 123, "locator": { "selector": "h1" }, "expectedText": "Dashboard" }
+```
+
+```json
+{ "tabId": 123, "locator": { "selector": "a.result" }, "attribute": "href", "expectedValue": "/items/1", "contains": true }
+```
+
+Supported methods are `expect.locator.toBeVisible`,
+`expect.locator.toHaveCount`, `expect.locator.toHaveText`, and
+`expect.locator.toHaveAttribute`.
 
 ### `locator.click`
 
@@ -479,6 +623,25 @@ different value, use the nested form.
 
 ```json
 { "tabId": 123, "locator": { "text": "Search" }, "value": "browser bridge" }
+```
+
+### `locator.dragTo`
+
+Drags from one locator to another. Pass the destination as `targetLocator`,
+`target`, or `targetSelector`.
+
+```json
+{ "tabId": 123, "text": "Card A", "targetLocator": { "text": "Done" }, "steps": 12 }
+```
+
+### `locator.dispatchDragDrop`
+
+Dispatches the same HTML5 drag/drop event sequence as `dom.dispatchDragDrop`,
+using locator semantics for the source and destination. Source and target must
+be in the same frame.
+
+```json
+{ "tabId": 123, "text": "Card A", "targetLocator": { "text": "Done" }, "data": { "text/plain": "card-a" } }
 ```
 
 ### `locator.check`
@@ -596,6 +759,17 @@ Moves the mouse cursor to specific CSS viewport coordinates.
 
 ```json
 { "limit": 50, "query": "report" }
+```
+
+### `downloads.waitFor`
+
+Waits for a matching Chrome download. By default it waits for a new download
+started after the call to reach `state:"complete"`. Set `includeExisting:true`
+to match older downloads, or `state:"any"` to return as soon as a matching item
+is visible.
+
+```json
+{ "filenameContains": "report", "state": "complete", "timeoutMs": 30000 }
 ```
 
 ### `recording.start`

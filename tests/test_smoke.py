@@ -23,6 +23,7 @@ def run_smoke_test():
 
 
     local_page = Path(__file__).resolve().parent / "smoke_test.html"
+    upload_path = Path(__file__).resolve().parent / "smoke_upload.txt"
     file_url = local_page.resolve().as_uri()
     print(f"Loading local test page: {file_url}")
 
@@ -67,6 +68,11 @@ def run_smoke_test():
         frame_heading = client.rpc("locator.count", {"tabId": tab_id, "frameId": frame_id, "role": "heading", "name": "Frame Area", "level": 2})
         if frame_heading.get("count", 0) != 1:
             raise RuntimeError("Locator frame role/name/level failed")
+        client.rpc("page.executeJavaScript", {
+            "tabId": tab_id,
+            "script": "document.getElementById('same-origin-frame').scrollIntoView({block:'center', inline:'center'})"
+        })
+        time.sleep(0.5)
         frame_click = client.rpc("locator.click", {"tabId": tab_id, "frameId": frame_id, "role": "button", "name": "Frame Action"})
         print(f"Frame click result: {frame_click}")
         client.rpc("page.waitForText", {"tabId": tab_id, "frameId": frame_id, "text": "Frame Done", "timeoutMs": 5000})
@@ -118,6 +124,66 @@ def run_smoke_test():
         if unchecked_count.get("count", 0) != 1:
             raise RuntimeError("Locator uncheck failed")
 
+        # 4.5 New advanced Playwright-like APIs
+        print("\n4.5 Testing advanced locator/page/download APIs...")
+        first_res = client.rpc("locator.first", {"tabId": tab_id, "selector": "button", "hasText": "Submit"})
+        print(f"Locator first result: {first_res}")
+        nth_res = client.rpc("locator.nth", {"tabId": tab_id, "selector": "button", "nth": 1})
+        print(f"Locator nth result: {nth_res}")
+        text_list = client.rpc("locator.allInnerTexts", {"tabId": tab_id, "selector": "button", "limit": 10})
+        if not any("Submit Action" in text for text in text_list.get("texts", [])):
+            raise RuntimeError("locator.allInnerTexts failed")
+        href_res = client.rpc("locator.getAttribute", {"tabId": tab_id, "selector": "a#download-link", "name": "download"})
+        if href_res.get("value") != "browser-agent-bridge-smoke.txt":
+            raise RuntimeError("locator.getAttribute failed")
+        client.rpc("expect.locator.toHaveCount", {"tabId": tab_id, "selector": "body > button", "count": 7, "timeoutMs": 5000})
+        client.rpc("expect.locator.toHaveText", {"tabId": tab_id, "locator": {"selector": "#screenshot-target"}, "expectedText": "Screenshot Target"})
+        client.rpc("expect.locator.toHaveAttribute", {"tabId": tab_id, "locator": {"selector": "a#download-link"}, "attribute": "download", "expectedValue": "browser-agent-bridge-smoke.txt"})
+
+        screenshot_res = client.rpc("locator.screenshot", {"tabId": tab_id, "selector": "#screenshot-target", "format": "png"})
+        if not screenshot_res.get("dataUrl", "").startswith("data:image/png;base64,"):
+            raise RuntimeError("locator.screenshot failed")
+
+        upload_path.write_text("browser agent bridge upload smoke\n", encoding="utf-8")
+        upload_res = client.rpc("locator.setInputFiles", {"tabId": tab_id, "label": "Upload Receipt", "files": [str(upload_path)]})
+        print(f"Upload result: {upload_res}")
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "File Selected: smoke_upload.txt", "timeoutMs": 5000})
+
+        client.rpc("locator.dispatchDragDrop", {
+            "tabId": tab_id,
+            "selector": "#drag-source",
+            "targetSelector": "#drop-zone",
+            "data": {"text/plain": "drag-smoke"}
+        })
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "Dropped: drag-smoke", "timeoutMs": 5000})
+
+        client.rpc("page.executeJavaScript", {
+            "tabId": tab_id,
+            "script": "setTimeout(async () => { await fetch('data:application/json,%7B%22ok%22%3Atrue%7D'); document.getElementById('network-result').innerText = 'Network Done'; }, 250)"
+        })
+        client.rpc("page.waitForRequest", {"tabId": tab_id, "urlContains": "application/json", "timeoutMs": 5000})
+        client.rpc("page.executeJavaScript", {
+            "tabId": tab_id,
+            "script": "setTimeout(async () => { await fetch('data:application/json,%7B%22ok%22%3Atrue%7D'); document.getElementById('network-result').innerText = 'Network Done'; }, 250)"
+        })
+        client.rpc("page.waitForResponse", {"tabId": tab_id, "urlContains": "application/json", "timeoutMs": 5000})
+        client.rpc("page.waitForNetworkIdle", {"tabId": tab_id, "idleMs": 250, "timeoutMs": 5000})
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "Network Done", "timeoutMs": 5000})
+
+        client.rpc("page.executeJavaScript", {"tabId": tab_id, "script": "setTimeout(() => alert('Smoke Dialog'), 250)"})
+        dialog_res = client.rpc("page.waitForDialog", {"tabId": tab_id, "messageContains": "Smoke", "timeoutMs": 5000})
+        print(f"Dialog result: {dialog_res}")
+        client.rpc("page.acceptDialog", {"tabId": tab_id})
+
+        client.rpc("locator.click", {"tabId": tab_id, "selector": "#download-link"})
+        download_res = client.rpc("downloads.waitFor", {
+            "filenameContains": "browser-agent-bridge-smoke",
+            "state": "complete",
+            "includeExisting": True,
+            "timeoutMs": 10000
+        })
+        print(f"Download result: {download_res}")
+
         # 5. Click the submit button
         print("\n5. Clicking submit button...")
         click_res = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "Submit Action"})
@@ -134,6 +200,7 @@ def run_smoke_test():
         # Cleanup: Close the tab
         print("\nCleaning up: Closing test tab...")
         client.rpc("tabs.close", {"tabId": tab_id})
+        upload_path.unlink(missing_ok=True)
 
 if __name__ == "__main__":
     try:

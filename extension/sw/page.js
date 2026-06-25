@@ -15,6 +15,7 @@ export function createPageHandlers({
   cdp,
   resolveFrameTarget,
   networkEventsByTab,
+  dialogsByTab,
   defaultTimeoutMs,
   chromeApi = chrome
 }) {
@@ -82,6 +83,109 @@ export function createPageHandlers({
       await sleep(intervalMs);
     }
     throw new Error(`Timed out waiting for response${describeUrlPattern(params)}`);
+  }
+
+  async function pageWaitForRequest(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.waitForRequest');
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
+    const method = typeof params.method === 'string' && params.method ? params.method.toUpperCase() : null;
+    const resourceType = typeof params.resourceType === 'string' && params.resourceType ? params.resourceType.toLowerCase() : null;
+    const started = Date.now();
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Network.enable').catch(() => {});
+
+    while (Date.now() - started <= timeoutMs) {
+      const events = networkEventsByTab?.get(tabId) || [];
+      const match = findMatchingRequest(events, { ...params, method, resourceType, started });
+      if (match) return { ok: true, request: match, elapsedMs: Date.now() - started };
+      await sleep(intervalMs);
+    }
+    throw new Error(`Timed out waiting for request${describeUrlPattern(params)}`);
+  }
+
+  async function pageWaitForURL(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.waitForURL');
+    if (!hasUrlPattern(params)) throw new Error('page.waitForURL requires url, urlContains, or urlRegex');
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
+    const started = Date.now();
+
+    while (Date.now() - started <= timeoutMs) {
+      const tab = await chromeApi.tabs.get(tabId);
+      const url = tab.url || '';
+      if (matchesUrlPattern(url, params)) {
+        return { ok: true, tab: normalizeTab(tab), url, elapsedMs: Date.now() - started };
+      }
+      await sleep(intervalMs);
+    }
+    throw new Error(`Timed out waiting for URL${describeUrlPattern(params)}`);
+  }
+
+  async function pageWaitForNetworkIdle(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.waitForNetworkIdle');
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const idleMs = Number.isInteger(params.idleMs) && params.idleMs > 0 ? params.idleMs : 500;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
+    const maxInflight = Number.isInteger(params.maxInflight) && params.maxInflight >= 0 ? params.maxInflight : 0;
+    const started = Date.now();
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Network.enable').catch(() => {});
+
+    while (Date.now() - started <= timeoutMs) {
+      const events = networkEventsByTab?.get(tabId) || [];
+      const state = computeNetworkIdleState(events, { started, now: Date.now() });
+      if (state.inflight <= maxInflight && Date.now() - state.lastActivityAt >= idleMs) {
+        return { ok: true, inflight: state.inflight, idleMs, maxInflight, elapsedMs: Date.now() - started };
+      }
+      await sleep(intervalMs);
+    }
+    const state = computeNetworkIdleState(networkEventsByTab?.get(tabId) || [], { started, now: Date.now() });
+    throw new Error(`Timed out waiting for network idle (inflight: ${state.inflight})`);
+  }
+
+  async function pageWaitForDialog(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.waitForDialog');
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
+    const started = Date.now();
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Page.enable').catch(() => {});
+
+    while (Date.now() - started <= timeoutMs) {
+      const dialog = dialogsByTab?.get(tabId);
+      if (dialog && matchesDialog(dialog, params)) {
+        return { ok: true, dialog: normalizeDialog(dialog), elapsedMs: Date.now() - started };
+      }
+      await sleep(intervalMs);
+    }
+    throw new Error(`Timed out waiting for dialog${describeDialogPattern(params)}`);
+  }
+
+  async function pageAcceptDialog(params) {
+    return pageHandleDialog(params, true, 'page.acceptDialog');
+  }
+
+  async function pageDismissDialog(params) {
+    return pageHandleDialog(params, false, 'page.dismissDialog');
+  }
+
+  async function pageHandleDialog(params, accept, methodName) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, methodName);
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Page.enable').catch(() => {});
+    const dialog = dialogsByTab?.get(tabId) || null;
+    const commandParams = { accept };
+    if (accept && typeof params.promptText === 'string') commandParams.promptText = params.promptText;
+    await cdp(tabId, 'Page.handleJavaScriptDialog', commandParams);
+    dialogsByTab?.delete(tabId);
+    await recordAction(tabId, methodName, { accept, promptText: params.promptText || null }, dialog ? normalizeDialog(dialog) : null);
+    return { ok: true, dialog: dialog ? normalizeDialog(dialog) : null };
   }
 
   async function pageFrames(params) {
@@ -401,6 +505,12 @@ export function createPageHandlers({
     pageWaitForLoad,
     pageWaitForNavigation,
     pageWaitForResponse,
+    pageWaitForRequest,
+    pageWaitForURL,
+    pageWaitForNetworkIdle,
+    pageWaitForDialog,
+    pageAcceptDialog,
+    pageDismissDialog,
     pageFrames,
     pageWaitForSelector,
     pageWaitForText,
@@ -441,6 +551,84 @@ function findMatchingResponse(events, options) {
     };
   }
   return null;
+}
+
+function findMatchingRequest(events, options) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (event.timestamp < options.started) break;
+    if (event.method !== 'Network.requestWillBeSent') continue;
+    const params = event.params || {};
+    const request = params.request || {};
+    const url = request.url || '';
+    if (!matchesUrlPattern(url, options)) continue;
+    if (options.method && String(request.method || '').toUpperCase() !== options.method) continue;
+    if (options.resourceType && String(params.type || '').toLowerCase() !== options.resourceType) continue;
+    return {
+      requestId: params.requestId || '',
+      url,
+      method: request.method || '',
+      resourceType: params.type || '',
+      documentURL: params.documentURL || '',
+      hasPostData: request.hasPostData === true,
+      timestamp: event.timestamp
+    };
+  }
+  return null;
+}
+
+function computeNetworkIdleState(events, options) {
+  const inflight = new Map();
+  let lastActivityAt = options.started;
+  for (const event of events) {
+    if (event.timestamp < options.started) continue;
+    if (!event.method?.startsWith('Network.')) continue;
+    lastActivityAt = Math.max(lastActivityAt, event.timestamp);
+    const requestId = event.params?.requestId;
+    if (!requestId) continue;
+    if (event.method === 'Network.requestWillBeSent') {
+      inflight.set(requestId, event);
+    } else if (
+      event.method === 'Network.loadingFinished' ||
+      event.method === 'Network.loadingFailed' ||
+      event.method === 'Network.responseReceived'
+    ) {
+      if (event.method !== 'Network.responseReceived') inflight.delete(requestId);
+    }
+  }
+  return { inflight: inflight.size, lastActivityAt: Math.min(lastActivityAt, options.now) };
+}
+
+function matchesDialog(dialog, params) {
+  if (typeof params.type === 'string' && params.type && dialog.type !== params.type) return false;
+  if (typeof params.message === 'string' && params.message && dialog.message !== params.message) return false;
+  if (typeof params.messageContains === 'string' && params.messageContains && !String(dialog.message || '').includes(params.messageContains)) return false;
+  if (typeof params.messageRegex === 'string' && params.messageRegex) {
+    try {
+      if (!new RegExp(params.messageRegex).test(dialog.message || '')) return false;
+    } catch {
+      throw new Error(`Invalid messageRegex: ${params.messageRegex}`);
+    }
+  }
+  return true;
+}
+
+function normalizeDialog(dialog) {
+  return {
+    type: dialog.type || '',
+    message: dialog.message || '',
+    defaultPrompt: dialog.defaultPrompt || '',
+    url: dialog.url || '',
+    timestamp: dialog.timestamp
+  };
+}
+
+function describeDialogPattern(params) {
+  if (typeof params.type === 'string' && params.type) return ` of type: ${params.type}`;
+  if (typeof params.message === 'string' && params.message) return ` with message: ${params.message}`;
+  if (typeof params.messageContains === 'string' && params.messageContains) return ` with message containing: ${params.messageContains}`;
+  if (typeof params.messageRegex === 'string' && params.messageRegex) return ` with message regex: ${params.messageRegex}`;
+  return '';
 }
 
 function findRequestMethod(events, requestId, beforeIndex) {

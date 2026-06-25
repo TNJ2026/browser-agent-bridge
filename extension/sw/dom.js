@@ -93,13 +93,148 @@ export function createDomHandlers({
     await assertTabAllowed(tabId, 'dom.click');
     assertString(params.selector, 'selector');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
-    const frameTarget = await resolveFrameTarget(tabId, params);
+    let frameTarget = await resolveFrameTarget(tabId, params);
     const target = params.force === true ? await getDomClickTarget(tabId, params, frameTarget) : await waitForDomActionable(tabId, params, 'click', frameTarget);
     if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point: ${params.selector} at index ${index}`);
+    frameTarget = await resolveFrameTarget(tabId, params);
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = target.element;
     await recordAction(tabId, 'dom.click', { selector: params.selector, index, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
     return { ok: true, element: result, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
+  }
+
+  async function domDragTo(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'dom.dragTo');
+    assertString(params.selector, 'selector');
+    assertString(params.targetSelector, 'targetSelector');
+    const sourceIndex = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const targetIndex = Number.isInteger(params.targetIndex) && params.targetIndex >= 0 ? params.targetIndex : 0;
+    let frameTarget = await resolveFrameTarget(tabId, params);
+    const source = params.force === true
+      ? await getDomClickTarget(tabId, { ...params, index: sourceIndex }, frameTarget)
+      : await waitForDomActionable(tabId, { ...params, index: sourceIndex }, 'click', frameTarget);
+    const target = params.force === true
+      ? await getDomClickTarget(tabId, { ...params, selector: params.targetSelector, index: targetIndex }, frameTarget)
+      : await waitForDomActionable(tabId, { ...params, selector: params.targetSelector, index: targetIndex }, 'click', frameTarget);
+    if (!source?.element?.clickPoint) throw new Error(`Source element has no draggable point: ${params.selector} at index ${sourceIndex}`);
+    if (!target?.element?.clickPoint) throw new Error(`Target element has no drop point: ${params.targetSelector} at index ${targetIndex}`);
+    frameTarget = await resolveFrameTarget(tabId, params);
+    await dispatchRealDrag(tabId, applyFrameOffset(source.element.clickPoint, frameTarget), applyFrameOffset(target.element.clickPoint, frameTarget), params);
+    const result = { source: source.element, target: target.element };
+    await recordAction(tabId, 'dom.dragTo', { selector: params.selector, index: sourceIndex, targetSelector: params.targetSelector, targetIndex, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return {
+      ok: true,
+      source: result.source,
+      target: result.target,
+      frame: frameTarget.frame,
+      ...(params.force === true ? {} : { actionability: { source: source.actionability, target: target.actionability } })
+    };
+  }
+
+  async function domDispatchDragDrop(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'dom.dispatchDragDrop');
+    assertString(params.selector, 'selector');
+    assertString(params.targetSelector, 'targetSelector');
+    const sourceIndex = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const targetIndex = Number.isInteger(params.targetIndex) && params.targetIndex >= 0 ? params.targetIndex : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const [{ result }] = await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (selector, sourceIndex, targetSelector, targetIndex, data, frameSelector) => {
+        const root = resolveDomRoot(frameSelector);
+        const source = querySelectorAllDeep(root, selector)[sourceIndex];
+        const target = querySelectorAllDeep(root, targetSelector)[targetIndex];
+        if (!source) throw new Error(`Source element not found: ${selector} at index ${sourceIndex}`);
+        if (!target) throw new Error(`Target element not found: ${targetSelector} at index ${targetIndex}`);
+        const dataTransfer = new DataTransfer();
+        for (const item of normalizeDragData(data)) dataTransfer.setData(item.type, item.value);
+        const sourceRect = source.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        dispatchDragEvent(source, 'dragstart', dataTransfer, sourceRect);
+        dispatchDragEvent(target, 'dragenter', dataTransfer, targetRect);
+        dispatchDragEvent(target, 'dragover', dataTransfer, targetRect);
+        dispatchDragEvent(target, 'drop', dataTransfer, targetRect);
+        dispatchDragEvent(source, 'dragend', dataTransfer, sourceRect);
+        return {
+          source: summarizeElement(source),
+          target: summarizeElement(target),
+          types: Array.from(dataTransfer.types || [])
+        };
+
+        function dispatchDragEvent(element, type, dataTransfer, rect) {
+          const event = new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: rect.x + rect.width / 2,
+            clientY: rect.y + rect.height / 2,
+            dataTransfer
+          });
+          element.dispatchEvent(event);
+        }
+
+        function normalizeDragData(data) {
+          if (!data) return [];
+          if (Array.isArray(data)) return data.filter(item => item && typeof item.type === 'string' && typeof item.value === 'string');
+          if (typeof data === 'object') {
+            return Object.entries(data)
+              .filter(([, value]) => typeof value === 'string')
+              .map(([type, value]) => ({ type, value }));
+          }
+          return [];
+        }
+
+        function summarizeElement(element) {
+          const rect = element.getBoundingClientRect();
+          return {
+            tagName: element.tagName.toLowerCase(),
+            id: element.id || '',
+            text: (element.innerText || element.textContent || '').trim().slice(0, 500),
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          };
+        }
+
+        function resolveDomRoot(frameSelector) {
+          if (!frameSelector) return document;
+          const frame = querySelectorDeep(document, frameSelector);
+          if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
+          try {
+            if (!frame.contentDocument) throw new Error('Frame document is not accessible');
+            return frame.contentDocument;
+          } catch {
+            throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
+          }
+        }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
+      },
+      args: [params.selector, sourceIndex, params.targetSelector, targetIndex, params.data || null, frameTarget.frameSelector],
+      world: 'MAIN'
+    });
+    await recordAction(tabId, 'dom.dispatchDragDrop', { selector: params.selector, index: sourceIndex, targetSelector: params.targetSelector, targetIndex, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, ...result, frame: frameTarget.frame };
   }
 
   async function domType(params) {
@@ -265,6 +400,7 @@ export function createDomHandlers({
     try {
       await attachDebugger(tabId);
       await cdp(tabId, 'DOM.enable').catch(() => {});
+      await cdp(tabId, 'DOM.getDocument', { depth: 0 }).catch(() => {});
       const search = await cdp(tabId, 'DOM.performSearch', {
         query: `input[${markerName}="${escapeCssAttributeValue(markerValue)}"]`,
         includeUserAgentShadowDOM: true
@@ -1151,6 +1287,25 @@ export function createDomHandlers({
     await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button, clickCount });
   }
 
+  async function dispatchRealDrag(tabId, from, to, params) {
+    await attachDebugger(tabId);
+    const button = params.button || 'left';
+    const steps = Number.isInteger(params.steps) && params.steps > 0 ? params.steps : 12;
+    await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y, button: 'none' });
+    await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button, buttons: 1, clickCount: 1 });
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
+      await cdp(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+        button,
+        buttons: 1
+      });
+    }
+    await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button, clickCount: 1 });
+  }
+
   function rectsAlmostEqual(a, b) {
     return Math.abs(a.x - b.x) < 0.5 &&
       Math.abs(a.y - b.y) < 0.5 &&
@@ -1161,6 +1316,8 @@ export function createDomHandlers({
   return {
     domQuery,
     domClick,
+    domDragTo,
+    domDispatchDragDrop,
     domType,
     domSelect,
     domSetInputFiles,
