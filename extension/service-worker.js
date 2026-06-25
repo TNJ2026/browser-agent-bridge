@@ -2,6 +2,7 @@ import { createLocatorHandlers } from './sw/locator.js';
 import { createDomHandlers } from './sw/dom.js';
 import { createComputerHandlers } from './sw/computer.js';
 import { createPageHandlers } from './sw/page.js';
+import { createDevtoolsHandlers } from './sw/devtools.js';
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
@@ -98,6 +99,15 @@ const pageHandlers = createPageHandlers({
   attachDebugger,
   cdp,
   defaultTimeoutMs: DEFAULT_TIMEOUT_MS
+});
+
+const devtoolsHandlers = createDevtoolsHandlers({
+  assertTabId,
+  assertTabAllowed,
+  attachDebugger,
+  cdp,
+  consoleEventsByTab,
+  networkEventsByTab
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -493,9 +503,9 @@ async function handleRpc(request) {
     case 'computer.hover':
       return computerHandlers.computerHover(params);
     case 'console.read':
-      return consoleRead(params);
+      return devtoolsHandlers.consoleRead(params);
     case 'network.read':
-      return networkRead(params);
+      return devtoolsHandlers.networkRead(params);
     case 'downloads.list':
       return downloadsList(params);
     case 'recording.start':
@@ -963,22 +973,6 @@ async function sessionStop(params) {
   delete sessions[session.id];
   await saveSessions(sessions);
   return { stopped: session.id };
-}
-
-async function consoleRead(params) {
-  const tabId = assertTabId(params.tabId);
-  await assertTabAllowed(tabId, 'console.read');
-  await attachDebugger(tabId);
-  await cdp(tabId, 'Runtime.enable').catch(() => {});
-  return { events: (consoleEventsByTab.get(tabId) || []).slice(-(params.limit || 100)) };
-}
-
-async function networkRead(params) {
-  const tabId = assertTabId(params.tabId);
-  await assertTabAllowed(tabId, 'network.read');
-  await attachDebugger(tabId);
-  await cdp(tabId, 'Network.enable').catch(() => {});
-  return { events: (networkEventsByTab.get(tabId) || []).slice(-(params.limit || 100)) };
 }
 
 async function downloadsList(params) {
