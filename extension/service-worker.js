@@ -4,14 +4,12 @@ import { createComputerHandlers } from './sw/computer.js';
 import { createPageHandlers } from './sw/page.js';
 import { createDevtoolsHandlers } from './sw/devtools.js';
 import { createDownloadsHandlers } from './sw/downloads.js';
+import { CSP_BYPASS_ALARM, createCspHandlers } from './sw/csp.js';
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
 const DEFAULT_TIMEOUT_MS = 30000;
 const PERMISSION_PROMPT_TIMEOUT_MS = 60000;
-const CSP_BYPASS_DYNAMIC_RULE_ID = 10001;
-const CSP_BYPASS_ALARM = 'clear-temporary-csp-bypass';
-const DEFAULT_CSP_BYPASS_TTL_MS = 3 * 60 * 1000;
 const APPROVAL_NOTIFICATION_ID = 'browser-agent-bridge-permission-approval';
 const APPROVAL_POPUP_PATH = 'approval.html';
 const DEFAULT_RECORDING_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -44,8 +42,6 @@ let nextPromptId = 1;
 const pendingPrompts = new Map();
 let approvalPopupWindowId = null;
 let recordingsSaveTimer = null;
-let cspBypassTimer = null;
-let activeCspBypass = null;
 const DEFAULT_POLICY = {
   blockedUrlPatterns: [
     'chrome://*',
@@ -84,13 +80,15 @@ const computerHandlers = createComputerHandlers({
   recordAction
 });
 
+const cspHandlers = createCspHandlers({});
+
 const pageHandlers = createPageHandlers({
   assertTabId,
   assertString,
   assertTabAllowed,
   assertUrlAllowed,
-  maybeEnableTemporaryCspBypassForUrl,
-  maybeEnableTemporaryCspBypass,
+  maybeEnableTemporaryCspBypassForUrl: cspHandlers.maybeEnableTemporaryCspBypassForUrl,
+  maybeEnableTemporaryCspBypass: cspHandlers.maybeEnableTemporaryCspBypass,
   recordAction,
   normalizeTab,
   waitForTabComplete,
@@ -118,14 +116,14 @@ chrome.runtime.onInstalled.addListener(async () => {
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   await initializeBridgeEnabled().catch(err => console.error(err));
   await connectNative();
-  await initCspBypass().catch(err => console.error(err));
+  await cspHandlers.initCspBypass().catch(err => console.error(err));
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY]).catch(() => {});
   await initializeBridgeEnabled().catch(err => console.error(err));
   await connectNative();
-  await initCspBypass().catch(err => console.error(err));
+  await cspHandlers.initCspBypass().catch(err => console.error(err));
 });
 
 chrome.action.onClicked.addListener(async tab => {
@@ -140,7 +138,7 @@ chrome.commands.onCommand.addListener(async command => {
 
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === CSP_BYPASS_ALARM) {
-    clearTemporaryCspBypass().catch(err => console.error('Error clearing temporary CSP bypass:', err));
+    cspHandlers.clearTemporaryCspBypass().catch(err => console.error('Error clearing temporary CSP bypass:', err));
   }
 });
 
@@ -224,7 +222,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 initializeBridgeEnabled().then(connectNative).catch(err => console.error(err));
-initCspBypass().catch(err => console.error(err));
+cspHandlers.initCspBypass().catch(err => console.error(err));
 
 async function initializeBridgeEnabled() {
   const result = await chrome.storage.local.get('bridgeEnabled');
@@ -350,11 +348,11 @@ async function handleRuntimeMessage(message, sender) {
     case 'STOP_BRIDGE':
       return { ok: true, status: await stopBridge() };
     case 'GET_CSP_BYPASS':
-      return { ok: true, ...(await extensionGetCspBypass()) };
+      return { ok: true, ...(await cspHandlers.extensionGetCspBypass()) };
     case 'SET_CSP_BYPASS': {
       const bypass = message.enabled !== false;
       await chrome.storage.local.set({ bypassCSP: bypass });
-      if (!bypass) await clearTemporaryCspBypass();
+      if (!bypass) await cspHandlers.clearTemporaryCspBypass();
       return { ok: true };
     }
     case 'PERMISSION_RESPONSE': {
@@ -424,7 +422,7 @@ async function handleRpc(request) {
     case 'extension.reload':
       return extensionReload();
     case 'extension.getCspBypass':
-      return extensionGetCspBypass();
+      return cspHandlers.extensionGetCspBypass();
     case 'native.status':
       return nativeStatus;
     case 'native.sitePatterns':
@@ -600,133 +598,6 @@ async function extensionInfo() {
   };
 }
 
-async function initCspBypass() {
-  const result = await chrome.storage.local.get('bypassCSP');
-  let bypass = result.bypassCSP;
-  if (bypass === undefined) {
-    bypass = true;
-    await chrome.storage.local.set({ bypassCSP: true });
-  }
-  await disableStaticCspRuleset();
-  await clearTemporaryCspBypass();
-}
-
-async function disableStaticCspRuleset() {
-  const rulesetId = 'ruleset_1';
-  await chrome.declarativeNetRequest.updateEnabledRulesets({
-    disableRulesetIds: [rulesetId]
-  }).catch(() => {});
-}
-
-async function extensionGetCspBypass() {
-  const result = await chrome.storage.local.get('bypassCSP');
-  const activeResult = await chrome.storage.local.get('cspBypassActive');
-  return {
-    enabled: result.bypassCSP === true,
-    mode: 'temporary-origin',
-    active: activeCspBypass || activeResult.cspBypassActive || null
-  };
-}
-
-function cspBypassResponseHeaders() {
-  return [
-    { header: 'content-security-policy', operation: 'remove' },
-    { header: 'content-security-policy-report-only', operation: 'remove' },
-    { header: 'x-webkit-csp', operation: 'remove' },
-    { header: 'x-content-security-policy', operation: 'remove' }
-  ];
-}
-
-function cspBypassResourceTypes() {
-  return [
-    'main_frame',
-    'sub_frame',
-    'stylesheet',
-    'script',
-    'image',
-    'font',
-    'object',
-    'xmlhttprequest',
-    'ping',
-    'csp_report',
-    'media',
-    'websocket',
-    'other'
-  ];
-}
-
-function cspBypassUrlFilter(origin) {
-  return `|${origin}/*`;
-}
-
-function normalizeCspBypassTtl(value) {
-  if (!Number.isFinite(value)) return DEFAULT_CSP_BYPASS_TTL_MS;
-  return Math.max(10 * 1000, Math.min(Math.trunc(value), 10 * 60 * 1000));
-}
-
-async function maybeEnableTemporaryCspBypass(tabId, params = {}) {
-  const tab = await chrome.tabs.get(tabId);
-  return maybeEnableTemporaryCspBypassForUrl(tab.url || '', params);
-}
-
-async function maybeEnableTemporaryCspBypassForUrl(urlString, params = {}) {
-  const result = await chrome.storage.local.get('bypassCSP');
-  if (result.bypassCSP !== true || params.bypassCSP === false) return null;
-
-  let url;
-  try {
-    url = new URL(urlString);
-  } catch (e) {
-    return null;
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return null;
-  }
-
-  const ttlMs = normalizeCspBypassTtl(params.cspBypassTtlMs);
-  const expiresAt = Date.now() + ttlMs;
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: [CSP_BYPASS_DYNAMIC_RULE_ID],
-    addRules: [{
-      id: CSP_BYPASS_DYNAMIC_RULE_ID,
-      priority: 1,
-      action: {
-        type: 'modifyHeaders',
-        responseHeaders: cspBypassResponseHeaders()
-      },
-      condition: {
-        urlFilter: cspBypassUrlFilter(url.origin),
-        resourceTypes: cspBypassResourceTypes()
-      }
-    }]
-  });
-
-  activeCspBypass = {
-    origin: url.origin,
-    ruleId: CSP_BYPASS_DYNAMIC_RULE_ID,
-    expiresAt,
-    ttlMs
-  };
-  await chrome.storage.local.set({ cspBypassActive: activeCspBypass });
-  clearTimeout(cspBypassTimer);
-  cspBypassTimer = setTimeout(() => {
-    clearTemporaryCspBypass().catch(err => console.error('Error clearing temporary CSP bypass:', err));
-  }, ttlMs);
-  await chrome.alarms.create(CSP_BYPASS_ALARM, { when: expiresAt });
-  return activeCspBypass;
-}
-
-async function clearTemporaryCspBypass() {
-  clearTimeout(cspBypassTimer);
-  cspBypassTimer = null;
-  activeCspBypass = null;
-  await chrome.storage.local.remove('cspBypassActive').catch(() => {});
-  await chrome.alarms.clear(CSP_BYPASS_ALARM).catch(() => {});
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: [CSP_BYPASS_DYNAMIC_RULE_ID]
-  }).catch(err => console.error('Error removing temporary CSP bypass rule:', err));
-}
-
 async function extensionReload() {
   setTimeout(() => chrome.runtime.reload(), 50);
   return { reloading: true };
@@ -753,7 +624,7 @@ async function tabsList(params) {
 async function tabsCreate(params) {
   assertString(params.url, 'url');
   await assertUrlAllowed(params.url, 'tabs.create');
-  await maybeEnableTemporaryCspBypassForUrl(params.url, params);
+  await cspHandlers.maybeEnableTemporaryCspBypassForUrl(params.url, params);
   const tab = await chrome.tabs.create({
     url: params.url,
     active: params.active !== false,
@@ -820,7 +691,7 @@ async function sessionStart(params) {
   }
   const url = typeof params.url === 'string' && params.url ? params.url : 'about:blank';
   if (url !== 'about:blank') await assertUrlAllowed(url, 'session.start');
-  if (url !== 'about:blank') await maybeEnableTemporaryCspBypassForUrl(url, params);
+  if (url !== 'about:blank') await cspHandlers.maybeEnableTemporaryCspBypassForUrl(url, params);
   const tab = await chrome.tabs.create({
     url,
     active: params.active !== false,
@@ -895,7 +766,7 @@ async function sessionCreateTab(params) {
   }
   const url = typeof params.url === 'string' && params.url ? params.url : 'about:blank';
   if (url !== 'about:blank') await assertUrlAllowed(url, 'session.createTab');
-  if (url !== 'about:blank') await maybeEnableTemporaryCspBypassForUrl(url, params);
+  if (url !== 'about:blank') await cspHandlers.maybeEnableTemporaryCspBypassForUrl(url, params);
   const tab = await chrome.tabs.create({
     url,
     active: params.active !== false,
