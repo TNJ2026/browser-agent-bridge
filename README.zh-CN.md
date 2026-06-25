@@ -311,6 +311,8 @@ scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
 | Page | `page.accessibilityTree` | 获取结构化无障碍树。 |
 | Page | `page.screenshot` | 截取页面截图。 |
 | Page | `page.domSnapshot` | 获取 CDP DOM 快照。 |
+| Interactive | `locator.click` | 通过 selector、文本、role/name、label 或 placeholder 点击。 |
+| Interactive | `locator.fill` | 通过 selector、label 或其他 locator 字段填写表单。 |
 | Interactive | `dom.click` | 通过 CSS selector 点击。 |
 | Interactive | `dom.type` | 向 selector 对应元素输入文本。 |
 | Interactive | `computer.click` | 按视口坐标点击。 |

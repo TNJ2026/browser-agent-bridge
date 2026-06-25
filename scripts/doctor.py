@@ -398,7 +398,7 @@ def check_live(checks, args):
         result = client.rpc("extension.info", {}, "doctor-extension-info", 10000)
         tools = result.get("tools", [])
         add(checks, "live.rpc", "pass", f"extension {result.get('extensionId')} exposes {len(tools)} tools")
-        for tool in ["extension.reload", "dom.query", "page.waitForSelector", "page.waitForText"]:
+        for tool in ["extension.reload", "dom.query", "locator.click", "locator.fill", "page.waitForSelector", "page.waitForText"]:
             add(checks, f"live.tool.{tool}", "pass" if tool in tools else "warn", "available" if tool in tools else "not exposed; reload extension")
     except BrowserBridgeError as error:
         add(checks, "live.rpc", "fail", str(error))

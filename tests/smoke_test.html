@@ -24,9 +24,19 @@
     </select>
   </div>
   <button id="submit-btn" onclick="document.getElementById('result').innerText = document.getElementById('input-field').value">Submit Action</button>
+  <button id="delayed-btn" disabled onclick="document.getElementById('delayed-result').innerText = 'Delayed Done'">Delayed Action</button>
   <div>
     <strong>Result:</strong>
     <span id="result">Initial Text</span>
   </div>
+  <div>
+    <strong>Delayed:</strong>
+    <span id="delayed-result">Waiting</span>
+  </div>
+  <script>
+    setTimeout(() => {
+      document.getElementById('delayed-btn').disabled = false;
+    }, 350);
+  </script>
 </body>
 </html>

@@ -43,6 +43,18 @@ def run_smoke_test():
             raise RuntimeError("Input element not found")
         print(f"Query succeeded: {elements[0]}")
 
+        print("\n2.25 Testing locator APIs...")
+        count_res = client.rpc("locator.count", {"tabId": tab_id, "label": "Text Input"})
+        if count_res.get("count", 0) < 1:
+            raise RuntimeError("Locator label count failed")
+        wait_res = client.rpc("locator.waitFor", {"tabId": tab_id, "role": "button", "name": "Submit Action", "state": "visible"})
+        print(f"Locator wait result: {wait_res}")
+        text_res = client.rpc("locator.textContent", {"tabId": tab_id, "text": "Bridge Smoke Test"})
+        print(f"Locator text result: {text_res}")
+        delayed_res = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "Delayed Action", "timeoutMs": 3000})
+        print(f"Locator delayed click result: {delayed_res}")
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "Delayed Done", "timeoutMs": 5000})
+
         # 2.5 Test Hover, Scroll and Shortcut Key APIs
         print("\n2.5 Testing Hover, Scroll and Shortcut Key APIs...")
         hover_res = client.rpc("dom.hover", {"tabId": tab_id, "selector": "button#submit-btn"})
@@ -54,7 +66,7 @@ def run_smoke_test():
 
         # 3. Type text into input
         print("\n3. Typing text...")
-        client.rpc("dom.type", {"tabId": tab_id, "selector": "input#input-field", "text": "Scraper Test Value", "replace": True})
+        client.rpc("locator.fill", {"tabId": tab_id, "label": "Text Input", "text": "Scraper Test Value"})
 
         # 4. Select from dropdown
         print("\n4. Selecting option B...")
@@ -63,7 +75,7 @@ def run_smoke_test():
 
         # 5. Click the submit button
         print("\n5. Clicking submit button...")
-        click_res = client.rpc("dom.click", {"tabId": tab_id, "selector": "button#submit-btn"})
+        click_res = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "Submit Action"})
         print(f"Click result: {click_res}")
 
         # 6. Wait for text

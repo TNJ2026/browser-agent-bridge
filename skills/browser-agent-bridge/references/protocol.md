@@ -367,6 +367,62 @@ Scrolls a specific element or the entire page/window.
 {"tabId":123,"selector":"div.scrollable-list","x":0,"y":300,"mode":"scrollBy","behavior":"auto"}
 ```
 
+### `locator.count`
+
+Finds elements using a Playwright-like locator shape. Locator fields can be
+passed directly or under `locator`. Supported fields are `selector`, `text`,
+`role`, `name`, `label`, `placeholder`, `exact`, `caseSensitive`, `visible`,
+and `frameSelector`.
+
+```json
+{"tabId":123,"role":"button","name":"Submit","visible":true}
+```
+
+### `locator.textContent`
+
+Returns the text of the matched element at `index` (default `0`).
+
+```json
+{"tabId":123,"text":"Order total","index":0}
+```
+
+### `locator.waitFor`
+
+Waits for a locator state: `attached`, `visible` (default), `hidden`, or
+`detached`.
+
+```json
+{"tabId":123,"label":"Email","state":"visible","timeoutMs":30000}
+```
+
+### `locator.click`
+
+Clicks the matched element at `index` (default `0`). By default this auto-waits
+for the element to be visible, enabled, and have a stable bounding box. Use
+`timeoutMs` and `intervalMs` to tune the wait, `strict:true` to require exactly
+one match, `stable:false` to skip the bounding-box stability check, or
+`force:true` to bypass actionability checks.
+
+```json
+{"tabId":123,"role":"button","name":"Submit","timeoutMs":30000}
+```
+
+### `locator.fill`
+
+Fills an input, textarea, select-like value field, or contenteditable element.
+By default this auto-waits for the element to be visible, enabled, editable,
+and have a stable bounding box.
+For flat params, `text` is the value to fill. To locate by text and fill a
+different value, use the nested form.
+
+```json
+{"tabId":123,"label":"Search","text":"browser bridge"}
+```
+
+```json
+{"tabId":123,"locator":{"text":"Search"},"value":"browser bridge"}
+```
+
 ### `computer.click`
 
 Coordinates are CSS viewport coordinates.

@@ -311,6 +311,8 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Page | `page.accessibilityTree` | Get a structured accessibility tree. |
 | Page | `page.screenshot` | Capture a page screenshot. |
 | Page | `page.domSnapshot` | Get a CDP DOM snapshot. |
+| Interactive | `locator.click` | Click by selector, text, role/name, label, or placeholder. |
+| Interactive | `locator.fill` | Fill fields by selector, label, or other locator fields. |
 | Interactive | `dom.click` | Click by CSS selector. |
 | Interactive | `dom.type` | Type into a selector. |
 | Interactive | `computer.click` | Click at viewport coordinates. |
