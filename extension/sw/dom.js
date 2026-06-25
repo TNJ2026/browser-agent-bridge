@@ -96,7 +96,7 @@ export function createDomHandlers({
     let frameTarget = await resolveFrameTarget(tabId, params);
     const target = params.force === true ? await getDomClickTarget(tabId, params, frameTarget) : await waitForDomActionable(tabId, params, 'click', frameTarget);
     if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point: ${params.selector} at index ${index}`);
-    frameTarget = await resolveFrameTarget(tabId, params);
+    if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, params);
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = target.element;
     await recordAction(tabId, 'dom.click', { selector: params.selector, index, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
@@ -119,7 +119,7 @@ export function createDomHandlers({
       : await waitForDomActionable(tabId, { ...params, selector: params.targetSelector, index: targetIndex }, 'click', frameTarget);
     if (!source?.element?.clickPoint) throw new Error(`Source element has no draggable point: ${params.selector} at index ${sourceIndex}`);
     if (!target?.element?.clickPoint) throw new Error(`Target element has no drop point: ${params.targetSelector} at index ${targetIndex}`);
-    frameTarget = await resolveFrameTarget(tabId, params);
+    if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, params);
     await dispatchRealDrag(tabId, applyFrameOffset(source.element.clickPoint, frameTarget), applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = { source: source.element, target: target.element };
     await recordAction(tabId, 'dom.dragTo', { selector: params.selector, index: sourceIndex, targetSelector: params.targetSelector, targetIndex, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);

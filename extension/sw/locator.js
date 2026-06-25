@@ -195,7 +195,7 @@ export function createLocatorHandlers({
       ? await runLocatorScript(tabId, { ...params, index, actionKind: 'click' }, 'actionability', frameTarget)
       : await waitForLocatorActionable(tabId, { ...params, index }, 'click', frameTarget);
     if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for locator ${describeLocator(params)}`);
-    frameTarget = await resolveFrameTarget(tabId, params);
+    if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, params);
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = { element: target.element };
     await recordAction(tabId, 'locator.click', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
@@ -218,8 +218,8 @@ export function createLocatorHandlers({
       : await waitForLocatorActionable(tabId, { ...targetParams, index: targetIndex }, 'click', targetFrameTarget);
     if (!source?.element?.clickPoint) throw new Error(`Source element has no draggable point for locator ${describeLocator(params)}`);
     if (!target?.element?.clickPoint) throw new Error(`Target element has no drop point for locator ${describeLocator(targetParams)}`);
-    sourceFrameTarget = await resolveFrameTarget(tabId, params);
-    targetFrameTarget = await resolveFrameTarget(tabId, targetParams);
+    if (sourceFrameTarget.frameOffset) sourceFrameTarget = await resolveFrameTarget(tabId, params);
+    if (targetFrameTarget.frameOffset) targetFrameTarget = await resolveFrameTarget(tabId, targetParams);
     await dispatchRealDrag(
       tabId,
       applyFrameOffset(source.element.clickPoint, sourceFrameTarget),
@@ -285,7 +285,7 @@ export function createLocatorHandlers({
       : await waitForLocatorActionable(tabId, { ...params, index, stable: params.stable !== false }, 'screenshot', frameTarget);
     const rect = target?.element?.rect;
     if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error(`Element has no screenshot area for locator ${describeLocator(params)}`);
-    frameTarget = await resolveFrameTarget(tabId, params);
+    if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, params);
     const deviceScaleFactor = await getDeviceScaleFactor(tabId, frameTarget);
     const dataUrl = await captureElementScreenshot(tabId, applyFrameOffset(rect, frameTarget), { ...params, deviceScaleFactor });
     await recordAction(tabId, 'locator.screenshot', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, target.element);
@@ -333,7 +333,7 @@ export function createLocatorHandlers({
       return { ok: true, changed: false, element: before.element, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
     }
     if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for locator ${describeLocator(params)}`);
-    frameTarget = await resolveFrameTarget(tabId, params);
+    if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, params);
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const after = await runLocatorScript(tabId, { ...params, index }, 'checkState', frameTarget);
     if (after.checked !== desiredChecked) throw new Error(`${actionName} failed to set checked=${desiredChecked}`);
