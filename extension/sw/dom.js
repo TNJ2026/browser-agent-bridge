@@ -5,6 +5,7 @@ export function createDomHandlers({
   recordAction,
   attachDebugger,
   cdp,
+  resolveFrameTarget,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   defaultTimeoutMs = 30000,
   chromeApi = chrome
@@ -14,11 +15,12 @@ export function createDomHandlers({
     await assertTabAllowed(tabId, 'dom.query');
     assertString(params.selector, 'selector');
     const limit = Number.isInteger(params.limit) && params.limit > 0 ? Math.min(params.limit, 200) : 50;
+    const frameTarget = await resolveFrameTarget(tabId, params);
     const [{ result }] = await chromeApi.scripting.executeScript({
-      target: { tabId },
+      target: frameTarget.target,
       func: (selector, limit, frameSelector) => {
         const root = resolveDomRoot(frameSelector);
-        return Array.from(root.querySelectorAll(selector)).slice(0, limit).map((element, index) => summarizeElement(element, index));
+        return querySelectorAllDeep(root, selector).slice(0, limit).map((element, index) => summarizeElement(element, index));
 
         function summarizeElement(element, index) {
           const rect = element.getBoundingClientRect();
@@ -48,7 +50,7 @@ export function createDomHandlers({
 
         function resolveDomRoot(frameSelector) {
           if (!frameSelector) return document;
-          const frame = document.querySelector(frameSelector);
+          const frame = querySelectorDeep(document, frameSelector);
           if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
           try {
             if (!frame.contentDocument) throw new Error('Frame document is not accessible');
@@ -57,11 +59,33 @@ export function createDomHandlers({
             throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
           }
         }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
       },
-      args: [params.selector, limit, params.frameSelector || null],
+      args: [params.selector, limit, frameTarget.frameSelector],
       world: 'MAIN'
     });
-    return { elements: result || [] };
+    return { elements: result || [], frame: frameTarget.frame };
   }
 
   async function domClick(params) {
@@ -69,12 +93,13 @@ export function createDomHandlers({
     await assertTabAllowed(tabId, 'dom.click');
     assertString(params.selector, 'selector');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
-    const target = params.force === true ? await getDomClickTarget(tabId, params) : await waitForDomActionable(tabId, params, 'click');
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const target = params.force === true ? await getDomClickTarget(tabId, params, frameTarget) : await waitForDomActionable(tabId, params, 'click', frameTarget);
     if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point: ${params.selector} at index ${index}`);
-    await dispatchRealClick(tabId, target.element.clickPoint, params);
+    await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = target.element;
-    await recordAction(tabId, 'dom.click', { selector: params.selector, index, frameSelector: params.frameSelector || null }, result);
-    return { ok: true, element: result, ...(params.force === true ? {} : { actionability: target.actionability }) };
+    await recordAction(tabId, 'dom.click', { selector: params.selector, index, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
   }
 
   async function domType(params) {
@@ -84,49 +109,13 @@ export function createDomHandlers({
     assertString(params.text, 'text');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     const replace = params.replace !== false;
-    const readiness = params.force === true ? null : await waitForDomActionable(tabId, params, 'type');
-    const [{ result }] = await chromeApi.scripting.executeScript({
-      target: { tabId },
-      func: (selector, index, text, replace, scroll, frameSelector) => {
-        const root = resolveDomRoot(frameSelector);
-        const element = root.querySelectorAll(selector)[index];
-        if (!element) throw new Error(`Element not found: ${selector} at index ${index}`);
-        if (scroll !== false) element.scrollIntoView({ block: 'center', inline: 'center' });
-        if (typeof element.focus === 'function') element.focus({ preventScroll: true });
-        if (element.isContentEditable) {
-          if (replace) element.textContent = text;
-          else element.textContent = `${element.textContent || ''}${text}`;
-        } else if ('value' in element) {
-          element.value = replace ? text : `${element.value || ''}${text}`;
-        } else {
-          throw new Error('Element is not editable');
-        }
-        element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        const rect = element.getBoundingClientRect();
-        return {
-          tagName: element.tagName.toLowerCase(),
-          value: 'value' in element ? String(element.value) : element.textContent || '',
-          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-        };
-
-        function resolveDomRoot(frameSelector) {
-          if (!frameSelector) return document;
-          const frame = document.querySelector(frameSelector);
-          if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
-          try {
-            if (!frame.contentDocument) throw new Error('Frame document is not accessible');
-            return frame.contentDocument;
-          } catch {
-            throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
-          }
-        }
-      },
-      args: [params.selector, index, params.text, replace, params.scrollIntoView !== false, params.frameSelector || null],
-      world: 'MAIN'
-    });
-    await recordAction(tabId, 'dom.type', { selector: params.selector, index, text: params.text, replace, frameSelector: params.frameSelector || null }, result);
-    return { ok: true, element: result, ...(readiness ? { actionability: readiness.actionability } : {}) };
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const readiness = params.force === true ? null : await waitForDomActionable(tabId, params, 'type', frameTarget);
+    await prepareDomTextInput(tabId, params, frameTarget, replace);
+    await dispatchRealTextInput(tabId, params.text);
+    const result = await getDomElementSummary(tabId, params, frameTarget);
+    await recordAction(tabId, 'dom.type', { selector: params.selector, index, text: params.text, replace, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
   async function domSelect(params) {
@@ -135,14 +124,15 @@ export function createDomHandlers({
     assertString(params.selector, 'selector');
     assertString(params.value, 'value');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
-    const readiness = params.force === true ? null : await waitForDomActionable(tabId, params, 'select');
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const readiness = params.force === true ? null : await waitForDomActionable(tabId, params, 'select', frameTarget);
     const [{ result }] = await chromeApi.scripting.executeScript({
-      target: { tabId },
+      target: frameTarget.target,
       func: (selector, index, value, scroll, frameSelector) => {
         const root = resolveDomRoot(frameSelector);
-        const element = root.querySelectorAll(selector)[index];
+        const element = querySelectorAllDeep(root, selector)[index];
         if (!element) throw new Error(`Element not found: ${selector} at index ${index}`);
-        if (!(element instanceof HTMLSelectElement)) throw new Error('Element is not a select');
+        if (element.tagName.toLowerCase() !== 'select') throw new Error('Element is not a select');
         if (scroll !== false) element.scrollIntoView({ block: 'center', inline: 'center' });
         element.value = value;
         element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -158,7 +148,7 @@ export function createDomHandlers({
 
         function resolveDomRoot(frameSelector) {
           if (!frameSelector) return document;
-          const frame = document.querySelector(frameSelector);
+          const frame = querySelectorDeep(document, frameSelector);
           if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
           try {
             if (!frame.contentDocument) throw new Error('Frame document is not accessible');
@@ -167,12 +157,34 @@ export function createDomHandlers({
             throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
           }
         }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
       },
-      args: [params.selector, index, params.value, params.scrollIntoView !== false, params.frameSelector || null],
+      args: [params.selector, index, params.value, params.scrollIntoView !== false, frameTarget.frameSelector],
       world: 'MAIN'
     });
-    await recordAction(tabId, 'dom.select', { selector: params.selector, index, value: params.value, frameSelector: params.frameSelector || null }, result);
-    return { ok: true, element: result, ...(readiness ? { actionability: readiness.actionability } : {}) };
+    await recordAction(tabId, 'dom.select', { selector: params.selector, index, value: params.value, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
   async function domHover(params) {
@@ -180,12 +192,13 @@ export function createDomHandlers({
     await assertTabAllowed(tabId, 'dom.hover');
     assertString(params.selector, 'selector');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
-    const readiness = params.force === true ? null : await waitForDomActionable(tabId, params, 'hover');
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const readiness = params.force === true ? null : await waitForDomActionable(tabId, params, 'hover', frameTarget);
     const [{ result }] = await chromeApi.scripting.executeScript({
-      target: { tabId },
+      target: frameTarget.target,
       func: (selector, index, scroll, frameSelector) => {
         const root = resolveDomRoot(frameSelector);
-        const element = root.querySelectorAll(selector)[index];
+        const element = querySelectorAllDeep(root, selector)[index];
         if (!element) throw new Error(`Element not found: ${selector} at index ${index}`);
         if (scroll !== false) element.scrollIntoView({ block: 'center', inline: 'center' });
       
@@ -202,7 +215,7 @@ export function createDomHandlers({
 
         function resolveDomRoot(frameSelector) {
           if (!frameSelector) return document;
-          const frame = document.querySelector(frameSelector);
+          const frame = querySelectorDeep(document, frameSelector);
           if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
           try {
             if (!frame.contentDocument) throw new Error('Frame document is not accessible');
@@ -211,12 +224,34 @@ export function createDomHandlers({
             throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
           }
         }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
       },
-      args: [params.selector, index, params.scrollIntoView !== false, params.frameSelector || null],
+      args: [params.selector, index, params.scrollIntoView !== false, frameTarget.frameSelector],
       world: 'MAIN'
     });
-    await recordAction(tabId, 'dom.hover', { selector: params.selector, index, frameSelector: params.frameSelector || null }, result);
-    return { ok: true, element: result, ...(readiness ? { actionability: readiness.actionability } : {}) };
+    await recordAction(tabId, 'dom.hover', { selector: params.selector, index, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
   async function domScroll(params) {
@@ -227,14 +262,15 @@ export function createDomHandlers({
     const y = typeof params.y === 'number' ? params.y : 0;
     const mode = params.mode === 'scrollTo' ? 'scrollTo' : 'scrollBy';
     const behavior = params.behavior === 'smooth' ? 'smooth' : 'auto';
+    const frameTarget = await resolveFrameTarget(tabId, params);
 
     const [{ result }] = await chromeApi.scripting.executeScript({
-      target: { tabId },
+      target: frameTarget.target,
       func: (selector, index, x, y, mode, behavior, frameSelector) => {
         const root = resolveDomRoot(frameSelector);
         let target;
         if (selector) {
-          target = root.querySelectorAll(selector)[index];
+          target = querySelectorAllDeep(root, selector)[index];
           if (!target) throw new Error(`Element not found: ${selector} at index ${index}`);
         } else {
           target = frameSelector ? root.defaultView || root : window;
@@ -267,7 +303,7 @@ export function createDomHandlers({
 
         function resolveDomRoot(frameSelector) {
           if (!frameSelector) return document;
-          const frame = document.querySelector(frameSelector);
+          const frame = querySelectorDeep(document, frameSelector);
           if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
           try {
             if (!frame.contentDocument) throw new Error('Frame document is not accessible');
@@ -276,16 +312,38 @@ export function createDomHandlers({
             throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
           }
         }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
       },
-      args: [params.selector || null, index, x, y, mode, behavior, params.frameSelector || null],
+      args: [params.selector || null, index, x, y, mode, behavior, frameTarget.frameSelector],
       world: 'MAIN'
     });
 
-    await recordAction(tabId, 'dom.scroll', { selector: params.selector || null, index, x, y, mode, behavior, frameSelector: params.frameSelector || null }, result);
-    return { ok: true, result };
+    await recordAction(tabId, 'dom.scroll', { selector: params.selector || null, index, x, y, mode, behavior, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, result, frame: frameTarget.frame };
   }
 
-  async function waitForDomActionable(tabId, params, actionKind) {
+  async function waitForDomActionable(tabId, params, actionKind, frameTarget) {
     const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
@@ -295,10 +353,10 @@ export function createDomHandlers({
 
     while (Date.now() - started <= timeoutMs) {
       const [{ result }] = await chromeApi.scripting.executeScript({
-        target: { tabId },
+        target: frameTarget.target,
         func: (selector, index, scroll, frameSelector, actionKind) => {
           const root = resolveDomRoot(frameSelector);
-          const matches = Array.from(root.querySelectorAll(selector));
+          const matches = querySelectorAllDeep(root, selector);
           const element = matches[index];
           if (!element) {
             return {
@@ -320,7 +378,7 @@ export function createDomHandlers({
             const visible = isVisible(element);
             const enabled = isEnabled(element);
             const editable = isEditable(element);
-            const selectable = element instanceof HTMLSelectElement;
+            const selectable = element.tagName.toLowerCase() === 'select';
             const pointerEvents = getComputedStyle(element).pointerEvents !== 'none';
             const clickPoint = clickablePoint(element, root);
             const hitTarget = actionKind === 'click' && clickPoint ? hitTestElement(element, root, clickPoint) : { receivesEvents: true };
@@ -395,7 +453,7 @@ export function createDomHandlers({
           }
 
           function frameForRoot(root) {
-            for (const frame of document.querySelectorAll('iframe,frame')) {
+            for (const frame of querySelectorAllDeep(document, 'iframe,frame')) {
               try {
                 if (frame.contentDocument === root) return frame;
               } catch {}
@@ -424,13 +482,20 @@ export function createDomHandlers({
 
           function isEditable(element) {
             if (element.isContentEditable) return true;
-            if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return false;
-            return !element.readOnly && !element.disabled;
+            return isTextInputElement(element) && !element.readOnly && !element.disabled;
+          }
+
+          function isTextInputElement(element) {
+            const tag = element.tagName.toLowerCase();
+            const type = (element.getAttribute('type') || '').toLowerCase();
+            if (tag === 'textarea') return true;
+            if (tag !== 'input') return false;
+            return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type);
           }
 
           function resolveDomRoot(frameSelector) {
             if (!frameSelector) return document;
-            const frame = document.querySelector(frameSelector);
+            const frame = querySelectorDeep(document, frameSelector);
             if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
             try {
               if (!frame.contentDocument) throw new Error('Frame document is not accessible');
@@ -439,8 +504,30 @@ export function createDomHandlers({
               throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
             }
           }
+
+          function querySelectorDeep(root, selector) {
+            return querySelectorAllDeep(root, selector)[0] || null;
+          }
+
+          function querySelectorAllDeep(root, selector) {
+            const results = [];
+            const visited = new Set();
+            visitRoot(root);
+            return results;
+
+            function visitRoot(currentRoot) {
+              if (!currentRoot || visited.has(currentRoot)) return;
+              visited.add(currentRoot);
+              if (typeof currentRoot.querySelectorAll === 'function') {
+                results.push(...currentRoot.querySelectorAll(selector));
+                for (const element of currentRoot.querySelectorAll('*')) {
+                  if (element.shadowRoot) visitRoot(element.shadowRoot);
+                }
+              }
+            }
+          }
         },
-        args: [params.selector, index, params.scrollIntoView !== false, params.frameSelector || null, actionKind],
+        args: [params.selector, index, params.scrollIntoView !== false, frameTarget.frameSelector, actionKind],
         world: 'MAIN'
       });
 
@@ -470,13 +557,13 @@ export function createDomHandlers({
     throw new Error(`Timed out waiting for selector ${params.selector} to be actionable for dom.${actionKind}: ${reasons.join(', ')}`);
   }
 
-  async function getDomClickTarget(tabId, params) {
+  async function getDomClickTarget(tabId, params, frameTarget) {
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     const [{ result }] = await chromeApi.scripting.executeScript({
-      target: { tabId },
+      target: frameTarget.target,
       func: (selector, index, scroll, frameSelector) => {
         const root = resolveDomRoot(frameSelector);
-        const matches = Array.from(root.querySelectorAll(selector));
+        const matches = querySelectorAllDeep(root, selector);
         const element = matches[index];
         if (!element) throw new Error(`Element not found: ${selector} at index ${index}`);
         if (scroll !== false) element.scrollIntoView({ block: 'center', inline: 'center' });
@@ -491,7 +578,7 @@ export function createDomHandlers({
           const visible = isVisible(element);
           const enabled = isEnabled(element);
           const editable = isEditable(element);
-          const selectable = element instanceof HTMLSelectElement;
+          const selectable = element.tagName.toLowerCase() === 'select';
           const pointerEvents = getComputedStyle(element).pointerEvents !== 'none';
           const clickPoint = clickablePoint(element, root);
           const hitTarget = actionKind === 'click' && clickPoint ? hitTestElement(element, root, clickPoint) : { receivesEvents: true };
@@ -566,7 +653,7 @@ export function createDomHandlers({
         }
 
         function frameForRoot(root) {
-          for (const frame of document.querySelectorAll('iframe,frame')) {
+          for (const frame of querySelectorAllDeep(document, 'iframe,frame')) {
             try {
               if (frame.contentDocument === root) return frame;
             } catch {}
@@ -595,13 +682,20 @@ export function createDomHandlers({
 
         function isEditable(element) {
           if (element.isContentEditable) return true;
-          if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return false;
-          return !element.readOnly && !element.disabled;
+          return isTextInputElement(element) && !element.readOnly && !element.disabled;
+        }
+
+        function isTextInputElement(element) {
+          const tag = element.tagName.toLowerCase();
+          const type = (element.getAttribute('type') || '').toLowerCase();
+          if (tag === 'textarea') return true;
+          if (tag !== 'input') return false;
+          return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type);
         }
 
         function resolveDomRoot(frameSelector) {
           if (!frameSelector) return document;
-          const frame = document.querySelector(frameSelector);
+          const frame = querySelectorDeep(document, frameSelector);
           if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
           try {
             if (!frame.contentDocument) throw new Error('Frame document is not accessible');
@@ -610,11 +704,188 @@ export function createDomHandlers({
             throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
           }
         }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
       },
-      args: [params.selector, index, params.scrollIntoView !== false, params.frameSelector || null],
+      args: [params.selector, index, params.scrollIntoView !== false, frameTarget.frameSelector],
       world: 'MAIN'
     });
     return result;
+  }
+
+  function applyFrameOffset(point, frameTarget) {
+    if (!frameTarget?.frameOffset) return point;
+    return {
+      x: point.x + frameTarget.frameOffset.x,
+      y: point.y + frameTarget.frameOffset.y
+    };
+  }
+
+  async function prepareDomTextInput(tabId, params, frameTarget, replace) {
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const [{ result }] = await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (selector, index, scroll, frameSelector, replace) => {
+        const root = resolveDomRoot(frameSelector);
+        const element = querySelectorAllDeep(root, selector)[index];
+        if (!element) throw new Error(`Element not found: ${selector} at index ${index}`);
+        if (scroll !== false) element.scrollIntoView({ block: 'center', inline: 'center' });
+        if (typeof element.focus === 'function') element.focus({ preventScroll: true });
+        if (element.isContentEditable) {
+          const selection = element.ownerDocument.getSelection();
+          const range = element.ownerDocument.createRange();
+          range.selectNodeContents(element);
+          if (!replace) range.collapse(false);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          return summarizeElement(element);
+        }
+        if (isTextInputElement(element)) {
+          const length = String(element.value || '').length;
+          if (typeof element.setSelectionRange === 'function') {
+            element.setSelectionRange(replace ? 0 : length, length);
+          } else if (typeof element.select === 'function' && replace) {
+            element.select();
+          }
+          return summarizeElement(element);
+        }
+        throw new Error('Element is not editable');
+
+        function summarizeElement(element) {
+          const rect = element.getBoundingClientRect();
+          return {
+            tagName: element.tagName.toLowerCase(),
+            value: 'value' in element ? String(element.value) : element.textContent || '',
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          };
+        }
+
+        function isTextInputElement(element) {
+          const tag = element.tagName.toLowerCase();
+          const type = (element.getAttribute('type') || '').toLowerCase();
+          if (tag === 'textarea') return true;
+          if (tag !== 'input') return false;
+          return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type);
+        }
+
+        function resolveDomRoot(frameSelector) {
+          if (!frameSelector) return document;
+          const frame = querySelectorDeep(document, frameSelector);
+          if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
+          try {
+            if (!frame.contentDocument) throw new Error('Frame document is not accessible');
+            return frame.contentDocument;
+          } catch {
+            throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
+          }
+        }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
+      },
+      args: [params.selector, index, params.scrollIntoView !== false, frameTarget.frameSelector, replace],
+      world: 'MAIN'
+    });
+    return result;
+  }
+
+  async function getDomElementSummary(tabId, params, frameTarget) {
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const [{ result }] = await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (selector, index, frameSelector) => {
+        const root = resolveDomRoot(frameSelector);
+        const element = querySelectorAllDeep(root, selector)[index];
+        if (!element) throw new Error(`Element not found: ${selector} at index ${index}`);
+        const rect = element.getBoundingClientRect();
+        return {
+          tagName: element.tagName.toLowerCase(),
+          value: 'value' in element ? String(element.value) : element.textContent || '',
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        };
+
+        function resolveDomRoot(frameSelector) {
+          if (!frameSelector) return document;
+          const frame = querySelectorDeep(document, frameSelector);
+          if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
+          try {
+            if (!frame.contentDocument) throw new Error('Frame document is not accessible');
+            return frame.contentDocument;
+          } catch {
+            throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
+          }
+        }
+
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
+      },
+      args: [params.selector, index, frameTarget.frameSelector],
+      world: 'MAIN'
+    });
+    return result;
+  }
+
+  async function dispatchRealTextInput(tabId, text) {
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Input.insertText', { text });
   }
 
   async function dispatchRealClick(tabId, point, params) {

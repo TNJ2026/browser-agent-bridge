@@ -58,6 +58,26 @@ def run_smoke_test():
         aria_click_res = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "ARIA Controls Labelled Action"})
         print(f"ARIA labelled click result: {aria_click_res}")
         client.rpc("page.waitForText", {"tabId": tab_id, "text": "ARIA Done", "timeoutMs": 5000})
+        frames_res = client.rpc("page.frames", {"tabId": tab_id})
+        print(f"Frames result: {frames_res}")
+        child_frames = [frame for frame in frames_res.get("frames", []) if frame.get("frameId") != 0]
+        if not child_frames:
+            raise RuntimeError("Expected iframe to appear in page.frames")
+        frame_id = child_frames[0]["frameId"]
+        frame_heading = client.rpc("locator.count", {"tabId": tab_id, "frameId": frame_id, "role": "heading", "name": "Frame Area", "level": 2})
+        if frame_heading.get("count", 0) != 1:
+            raise RuntimeError("Locator frame role/name/level failed")
+        frame_click = client.rpc("locator.click", {"tabId": tab_id, "frameId": frame_id, "role": "button", "name": "Frame Action"})
+        print(f"Frame click result: {frame_click}")
+        client.rpc("page.waitForText", {"tabId": tab_id, "frameId": frame_id, "text": "Frame Done", "timeoutMs": 5000})
+        shadow_heading = client.rpc("locator.count", {"tabId": tab_id, "role": "heading", "name": "Shadow Area", "level": 2})
+        if shadow_heading.get("count", 0) != 1:
+            raise RuntimeError("Locator shadow heading failed")
+        shadow_fill = client.rpc("locator.fill", {"tabId": tab_id, "label": "Shadow Input", "text": "Shadow Typed"})
+        print(f"Shadow fill result: {shadow_fill}")
+        shadow_click = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "Shadow Action"})
+        print(f"Shadow click result: {shadow_click}")
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "Shadow Done", "timeoutMs": 5000})
         text_res = client.rpc("locator.textContent", {"tabId": tab_id, "text": "Bridge Smoke Test"})
         print(f"Locator text result: {text_res}")
         covered_res = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "Covered Action", "timeoutMs": 3000})
@@ -85,8 +105,18 @@ def run_smoke_test():
 
         # 4. Select from dropdown
         print("\n4. Selecting option B...")
-        select_res = client.rpc("dom.select", {"tabId": tab_id, "selector": "select#select-field", "value": "B"})
+        select_res = client.rpc("locator.selectOption", {"tabId": tab_id, "locator": {"label": "Dropdown Select"}, "option": {"label": "Option B", "exact": True}})
         print(f"Select result: {select_res}")
+        check_res = client.rpc("locator.check", {"tabId": tab_id, "label": "Agree Terms"})
+        print(f"Check result: {check_res}")
+        checked_count = client.rpc("locator.count", {"tabId": tab_id, "role": "checkbox", "name": "Agree Terms", "checked": True})
+        if checked_count.get("count", 0) != 1:
+            raise RuntimeError("Locator check failed")
+        uncheck_res = client.rpc("locator.uncheck", {"tabId": tab_id, "label": "Agree Terms"})
+        print(f"Uncheck result: {uncheck_res}")
+        unchecked_count = client.rpc("locator.count", {"tabId": tab_id, "role": "checkbox", "name": "Agree Terms", "checked": False})
+        if unchecked_count.get("count", 0) != 1:
+            raise RuntimeError("Locator uncheck failed")
 
         # 5. Click the submit button
         print("\n5. Clicking submit button...")

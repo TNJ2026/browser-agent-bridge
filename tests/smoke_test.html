@@ -8,8 +8,10 @@
     div { margin-bottom: 1rem; }
     label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
     input, select, button { width: 100%; padding: 0.5rem; font-size: 1rem; margin-bottom: 1rem; }
+    input[type="checkbox"] { width: auto; }
     .covered-wrap { position: relative; }
     .blocking-overlay { position: absolute; inset: 0 0 1rem; z-index: 2; background: rgba(220, 38, 38, 0.18); }
+    iframe { width: 100%; min-height: 120px; border: 1px solid #d0d7de; }
   </style>
 </head>
 <body>
@@ -24,6 +26,9 @@
       <option value="A">Option A</option>
       <option value="B">Option B</option>
     </select>
+  </div>
+  <div>
+    <label><input id="agree-box" type="checkbox" /> Agree Terms</label>
   </div>
   <button id="submit-btn" onclick="document.getElementById('result').innerText = document.getElementById('input-field').value">Submit Action</button>
   <h2 id="aria-heading">ARIA Controls</h2>
@@ -57,12 +62,44 @@
     <strong>Covered:</strong>
     <span id="covered-result">Waiting</span>
   </div>
+  <shadow-widget></shadow-widget>
+  <iframe
+    id="same-origin-frame"
+    title="Same Origin Frame"
+    srcdoc="
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <h2>Frame Area</h2>
+          <button id='frame-action' onclick=&quot;document.getElementById('frame-result').innerText = 'Frame Done'&quot;>Frame Action</button>
+          <span id='frame-result'>Frame Waiting</span>
+        </body>
+      </html>
+    "
+  ></iframe>
   <script>
     setTimeout(() => {
       document.getElementById('delayed-btn').disabled = false;
       document.getElementById('dom-delayed-btn').disabled = false;
       document.getElementById('blocking-overlay').style.display = 'none';
     }, 350);
+    customElements.define('shadow-widget', class extends HTMLElement {
+      connectedCallback() {
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+          <section>
+            <h2>Shadow Area</h2>
+            <label for="shadow-input">Shadow Input</label>
+            <input id="shadow-input" />
+            <button id="shadow-action">Shadow Action</button>
+            <span id="shadow-result">Shadow Waiting</span>
+          </section>
+        `;
+        root.getElementById('shadow-action').addEventListener('click', () => {
+          root.getElementById('shadow-result').innerText = 'Shadow Done';
+        });
+      }
+    });
   </script>
 </body>
 </html>

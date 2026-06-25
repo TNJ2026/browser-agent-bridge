@@ -142,6 +142,49 @@ started.
 {}
 ```
 
+### `trace.start`
+
+Starts a lightweight debug trace. While active, each JSON-RPC call records
+method, duration, status, selected params, compact result previews, and errors.
+Text-like fields are redacted by default; pass `includeText:true` to keep them.
+
+```json
+{ "name": "debug checkout", "includeText": false, "maxEvents": 1000 }
+```
+
+### `trace.stop`
+
+Stops the active trace, or a specific trace by `traceId`.
+
+```json
+{ "traceId": "uuid" }
+```
+
+### `trace.status`
+
+Lists traces, or returns one trace summary when `traceId` is supplied.
+
+```json
+{}
+```
+
+### `trace.export`
+
+Exports the active trace, or a specific trace by `traceId`. Pass
+`download:true` to save it through Chrome downloads.
+
+```json
+{ "traceId": "uuid", "download": false }
+```
+
+### `trace.clear`
+
+Clears one trace by `traceId`, or all traces when omitted.
+
+```json
+{}
+```
+
 ### `tabs.list`
 
 ```json
@@ -224,20 +267,32 @@ Waits until Chrome reports the tab load status as complete.
 { "tabId": 123, "timeoutMs": 30000 }
 ```
 
-### `page.waitForSelector`
+### `page.frames`
 
-Polls for a CSS selector. Set `visible` to require a visible box. Use `frameSelector` for a same-origin iframe.
+Lists frames in a tab. Use a returned `frameId` with `page.*`, `dom.*`, and
+`locator.*` methods to target same-origin or cross-origin frames. `frameUrl`
+can also be passed to those methods to resolve the first matching frame URL.
 
 ```json
-{ "tabId": 123, "selector": "main button", "visible": true, "timeoutMs": 30000, "frameSelector": "iframe[name=app]" }
+{ "tabId": 123 }
+```
+
+### `page.waitForSelector`
+
+Polls for a CSS selector. Set `visible` to require a visible box. Use
+`frameId`, `frameUrl`, or `frameSelector` to target a frame.
+
+```json
+{ "tabId": 123, "selector": "main button", "visible": true, "timeoutMs": 30000, "frameId": 7 }
 ```
 
 ### `page.waitForText`
 
-Polls the whole page, or a selector subtree, for text. Use `frameSelector` for a same-origin iframe.
+Polls the whole page, or a selector subtree, for text. Use `frameId`,
+`frameUrl`, or `frameSelector` to target a frame.
 
 ```json
-{ "tabId": 123, "text": "Signed in", "selector": "main", "timeoutMs": 30000, "frameSelector": "iframe[name=app]" }
+{ "tabId": 123, "text": "Signed in", "selector": "main", "timeoutMs": 30000, "frameId": 7 }
 ```
 
 ### `page.executeJavaScript`
@@ -266,10 +321,13 @@ To save a screenshot to disk, pass the returned `dataUrl` to `native.saveDataUrl
 
 ### `dom.query`
 
-Returns a bounded list of matching elements with text, value, visibility, and viewport rect. Use `frameSelector` for a same-origin iframe.
+Returns a bounded list of matching elements with text, value, visibility, and
+viewport rect. Use `frameId`, `frameUrl`, or `frameSelector` to target a frame.
+CSS selector matching pierces open shadow roots by default. Closed shadow roots
+remain inaccessible to browser automation.
 
 ```json
-{ "tabId": 123, "selector": "button, input, a", "limit": 50, "frameSelector": "iframe[name=app]" }
+{ "tabId": 123, "selector": "button, input, a", "limit": 50, "frameId": 7 }
 ```
 
 ### `dom.click`
@@ -289,7 +347,8 @@ bypass actionability checks.
 
 ### `dom.type`
 
-Types into an input, textarea, or contenteditable element. `replace` defaults to true.
+Types into an input, textarea, or contenteditable element using CDP text input.
+`replace` defaults to true.
 By default this auto-waits for the element to be visible, enabled, editable,
 and stable.
 
@@ -317,7 +376,10 @@ events, and be stable.
 { "tabId": 123, "selector": "button[type=submit]", "index": 0, "frameSelector": "iframe[name=app]" }
 ```
 
-`frameSelector` requires a same-origin iframe. Cross-origin frames are blocked by the browser and return an explicit accessibility error.
+`frameId` and `frameUrl` execute directly in the selected Chrome frame and can
+target cross-origin frames when extension host permissions allow it.
+`frameSelector` resolves an iframe element from the current DOM and is useful
+for same-origin nested DOM traversal.
 
 ### `locator.count`
 
@@ -325,9 +387,10 @@ Finds elements using a Playwright-like locator shape. Locator fields can be
 passed directly or under `locator`. Supported fields are `selector`, `text`,
 `role`, `name`, `label`, `placeholder`, `exact`, `caseSensitive`, `visible`,
 `includeHidden`, `checked`, `disabled`, `expanded`, `pressed`, `selected`,
-`level`, and `frameSelector`. Role/name matching uses implicit HTML roles,
+`level`, `frameId`, `frameUrl`, and `frameSelector`. Role/name matching uses implicit HTML roles,
 explicit ARIA roles, `aria-label`, `aria-labelledby`, associated labels,
-heading levels, and common ARIA state filters.
+heading levels, and common ARIA state filters. Locator matching pierces open
+shadow roots by default. Closed shadow roots remain inaccessible.
 
 ```json
 { "tabId": 123, "role": "button", "name": "Submit", "visible": true }
@@ -372,7 +435,9 @@ checks.
 
 Fills an input, textarea, select-like value field, or contenteditable element.
 By default this auto-waits for the element to be visible, enabled, editable,
-and have a stable bounding box.
+and have a stable bounding box. Text fields and contenteditable elements are
+focused and filled through CDP text input; native selects use value assignment
+plus input/change events.
 For flat params, `text` is the value to fill. To locate by text and fill a
 different value, use the nested form.
 
@@ -382,6 +447,35 @@ different value, use the nested form.
 
 ```json
 { "tabId": 123, "locator": { "text": "Search" }, "value": "browser bridge" }
+```
+
+### `locator.check`
+
+Checks a checkbox, switch, or radio-like element by locator. If already checked,
+the call returns without clicking. The click path uses the same actionability
+wait and CDP mouse input as `locator.click`.
+
+```json
+{ "tabId": 123, "role": "checkbox", "name": "Agree Terms" }
+```
+
+### `locator.uncheck`
+
+Unchecks a checkbox or switch-like element by locator. Radios cannot be
+unchecked.
+
+```json
+{ "tabId": 123, "role": "checkbox", "name": "Agree Terms" }
+```
+
+### `locator.selectOption`
+
+Selects one or more native `<select>` options. Options can be matched by
+`value`, `label`, or zero-based `index`. Use the nested `locator` form when the
+select locator itself also needs a `label`.
+
+```json
+{ "tabId": 123, "locator": { "label": "Country" }, "option": { "label": "United States", "exact": true } }
 ```
 
 ### `computer.click`

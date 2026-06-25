@@ -13,6 +13,7 @@ export function createPageHandlers({
   captureTabScreenshot,
   attachDebugger,
   cdp,
+  resolveFrameTarget,
   defaultTimeoutMs,
   chromeApi = chrome
 }) {
@@ -37,6 +38,23 @@ export function createPageHandlers({
     return { tab: normalizeTab(await chromeApi.tabs.get(tabId)) };
   }
 
+  async function pageFrames(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.frames');
+    const frames = await chromeApi.webNavigation.getAllFrames({ tabId });
+    return {
+      frames: frames
+        .sort((a, b) => a.frameId - b.frameId)
+        .map(frame => ({
+          frameId: frame.frameId,
+          parentFrameId: frame.parentFrameId,
+          processId: frame.processId,
+          url: frame.url || '',
+          errorOccurred: frame.errorOccurred === true
+        }))
+    };
+  }
+
   async function pageWaitForSelector(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'page.waitForSelector');
@@ -46,13 +64,14 @@ export function createPageHandlers({
     const visible = params.visible === true;
     const started = Date.now();
     let last = null;
+    const frameTarget = await resolveFrameTarget(tabId, params);
 
     while (Date.now() - started <= timeoutMs) {
       const [{ result }] = await chromeApi.scripting.executeScript({
-        target: { tabId },
+        target: frameTarget.target,
         func: (selector, visible, frameSelector) => {
           const root = resolveDomRoot(frameSelector);
-          const element = root.querySelector(selector);
+          const element = querySelectorDeep(root, selector);
           if (!element) return { found: false };
           const rect = element.getBoundingClientRect();
           const style = getComputedStyle(element);
@@ -67,7 +86,7 @@ export function createPageHandlers({
 
           function resolveDomRoot(frameSelector) {
             if (!frameSelector) return document;
-            const frame = document.querySelector(frameSelector);
+            const frame = querySelectorDeep(document, frameSelector);
             if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
             try {
               if (!frame.contentDocument) throw new Error('Frame document is not accessible');
@@ -76,12 +95,34 @@ export function createPageHandlers({
               throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
             }
           }
+
+          function querySelectorDeep(root, selector) {
+            return querySelectorAllDeep(root, selector)[0] || null;
+          }
+
+          function querySelectorAllDeep(root, selector) {
+            const results = [];
+            const visited = new Set();
+            visitRoot(root);
+            return results;
+
+            function visitRoot(currentRoot) {
+              if (!currentRoot || visited.has(currentRoot)) return;
+              visited.add(currentRoot);
+              if (typeof currentRoot.querySelectorAll === 'function') {
+                results.push(...currentRoot.querySelectorAll(selector));
+                for (const element of currentRoot.querySelectorAll('*')) {
+                  if (element.shadowRoot) visitRoot(element.shadowRoot);
+                }
+              }
+            }
+          }
         },
-        args: [params.selector, visible, params.frameSelector || null],
+        args: [params.selector, visible, frameTarget.frameSelector],
         world: 'MAIN'
       });
       last = result;
-      if (result?.found) return { ok: true, element: result, elapsedMs: Date.now() - started };
+      if (result?.found) return { ok: true, element: result, frame: frameTarget.frame, elapsedMs: Date.now() - started };
       await sleep(intervalMs);
     }
     throw new Error(`Timed out waiting for selector: ${params.selector}${last?.visible === false ? ' (found but not visible)' : ''}`);
@@ -97,15 +138,16 @@ export function createPageHandlers({
     const exact = params.exact === true;
     const caseSensitive = params.caseSensitive === true;
     const started = Date.now();
+    const frameTarget = await resolveFrameTarget(tabId, params);
 
     while (Date.now() - started <= timeoutMs) {
       const [{ result }] = await chromeApi.scripting.executeScript({
-        target: { tabId },
+        target: frameTarget.target,
         func: (text, selector, exact, caseSensitive, frameSelector) => {
           const doc = resolveDomRoot(frameSelector);
-          const root = selector ? doc.querySelector(selector) : doc.body;
+          const root = selector ? querySelectorDeep(doc, selector) : doc.body;
           if (!root) return { found: false, selectorFound: false };
-          const source = root.innerText || root.textContent || '';
+          const source = composedText(root);
           const haystack = caseSensitive ? source : source.toLowerCase();
           const needle = caseSensitive ? text : text.toLowerCase();
           const found = exact ? haystack.trim() === needle : haystack.includes(needle);
@@ -118,7 +160,7 @@ export function createPageHandlers({
 
           function resolveDomRoot(frameSelector) {
             if (!frameSelector) return document;
-            const frame = document.querySelector(frameSelector);
+            const frame = querySelectorDeep(document, frameSelector);
             if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
             try {
               if (!frame.contentDocument) throw new Error('Frame document is not accessible');
@@ -127,11 +169,51 @@ export function createPageHandlers({
               throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
             }
           }
+
+          function composedText(root) {
+            const parts = [];
+            visit(root);
+            return parts.join(' ');
+
+            function visit(node) {
+              if (!node) return;
+              if (node.nodeType === Node.TEXT_NODE) {
+                const value = node.textContent.trim();
+                if (value) parts.push(value);
+                return;
+              }
+              if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+              if (node.nodeType === Node.ELEMENT_NODE && node.shadowRoot) visit(node.shadowRoot);
+              for (const child of node.childNodes || []) visit(child);
+            }
+          }
+
+          function querySelectorDeep(root, selector) {
+            return querySelectorAllDeep(root, selector)[0] || null;
+          }
+
+          function querySelectorAllDeep(root, selector) {
+            const results = [];
+            const visited = new Set();
+            visitRoot(root);
+            return results;
+
+            function visitRoot(currentRoot) {
+              if (!currentRoot || visited.has(currentRoot)) return;
+              visited.add(currentRoot);
+              if (typeof currentRoot.querySelectorAll === 'function') {
+                results.push(...currentRoot.querySelectorAll(selector));
+                for (const element of currentRoot.querySelectorAll('*')) {
+                  if (element.shadowRoot) visitRoot(element.shadowRoot);
+                }
+              }
+            }
+          }
         },
-        args: [params.text, selector, exact, caseSensitive, params.frameSelector || null],
+        args: [params.text, selector, exact, caseSensitive, frameTarget.frameSelector],
         world: 'MAIN'
       });
-      if (result?.found) return { ok: true, match: result, elapsedMs: Date.now() - started };
+      if (result?.found) return { ok: true, match: result, frame: frameTarget.frame, elapsedMs: Date.now() - started };
       await sleep(intervalMs);
     }
     throw new Error(`Timed out waiting for text: ${params.text}`);
@@ -140,16 +222,38 @@ export function createPageHandlers({
   async function pageReadText(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'page.readText');
+    const frameTarget = await resolveFrameTarget(tabId, params);
     const [{ result }] = await chromeApi.scripting.executeScript({
-      target: { tabId },
-      func: () => ({
-        url: location.href,
-        title: document.title,
-        text: document.body?.innerText || '',
-        selection: String(getSelection?.() || '')
-      })
+      target: frameTarget.target,
+      func: () => {
+        return {
+          url: location.href,
+          title: document.title,
+          text: composedText(document.body || document.documentElement),
+          selection: String(getSelection?.() || '')
+        };
+
+        function composedText(root) {
+          const parts = [];
+          visit(root);
+          return parts.join(' ');
+
+          function visit(node) {
+            if (!node) return;
+            if (node.nodeType === Node.TEXT_NODE) {
+              const value = node.textContent.trim();
+              if (value) parts.push(value);
+              return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+            if (node.nodeType === Node.ELEMENT_NODE && node.shadowRoot) visit(node.shadowRoot);
+            for (const child of node.childNodes || []) visit(child);
+          }
+        }
+      },
+      world: 'MAIN'
     });
-    return result;
+    return { ...result, frame: frameTarget.frame };
   }
 
   async function pageAccessibilityTree(params) {
@@ -222,15 +326,16 @@ export function createPageHandlers({
     await assertTabAllowed(tabId, 'page.executeJavaScript');
     await maybeEnableTemporaryCspBypass(tabId, params);
     assertString(params.script, 'script');
+    const frameTarget = await resolveFrameTarget(tabId, params);
     const [{ result }] = await chromeApi.scripting.executeScript({
-      target: { tabId },
+      target: frameTarget.target,
       func: script => {
         return Promise.resolve((0, eval)(script));
       },
       args: [params.script],
       world: params.world === 'isolated' ? 'ISOLATED' : 'MAIN'
     });
-    return { value: result };
+    return { value: result, frame: frameTarget.frame };
   }
 
   async function pageDomSnapshot(params) {
@@ -248,6 +353,7 @@ export function createPageHandlers({
   return {
     pageNavigate,
     pageWaitForLoad,
+    pageFrames,
     pageWaitForSelector,
     pageWaitForText,
     pageReadText,

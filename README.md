@@ -313,6 +313,9 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Page | `page.domSnapshot` | Get a CDP DOM snapshot. |
 | Interactive | `locator.click` | Click by selector, text, role/name, label, or placeholder. |
 | Interactive | `locator.fill` | Fill fields by selector, label, or other locator fields. |
+| Interactive | `locator.check` | Check checkbox, radio, or switch-like controls. |
+| Interactive | `locator.uncheck` | Uncheck checkbox or switch-like controls. |
+| Interactive | `locator.selectOption` | Select native `<select>` options. |
 | Interactive | `dom.click` | Click by CSS selector. |
 | Interactive | `dom.type` | Type into a selector. |
 | Interactive | `computer.click` | Click at viewport coordinates. |
@@ -320,6 +323,8 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Interactive | `computer.scroll` | Scroll by pixel offsets. |
 | Recording | `recording.start` | Start workflow recording. |
 | Recording | `recording.stop` | Stop workflow recording. |
+| Trace | `trace.start` | Start lightweight RPC debug tracing. |
+| Trace | `trace.export` | Export a captured trace. |
 
 ## Repository Paths
 

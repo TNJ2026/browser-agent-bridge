@@ -5,6 +5,7 @@ export function createLocatorHandlers({
   recordAction,
   attachDebugger,
   cdp,
+  resolveFrameTarget,
   sleep,
   defaultTimeoutMs,
   chromeApi = chrome
@@ -12,16 +13,18 @@ export function createLocatorHandlers({
   async function locatorCount(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.count');
-    const result = await runLocatorScript(tabId, params, 'query');
-    return { count: result.count, visibleCount: result.visibleCount, elements: result.elements };
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const result = await runLocatorScript(tabId, params, 'query', frameTarget);
+    return { count: result.count, visibleCount: result.visibleCount, elements: result.elements, frame: frameTarget.frame };
   }
 
   async function locatorTextContent(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.textContent');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
-    const result = await runLocatorScript(tabId, { ...params, index }, 'textContent');
-    return { text: result.text, element: result.element };
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const result = await runLocatorScript(tabId, { ...params, index }, 'textContent', frameTarget);
+    return { text: result.text, element: result.element, frame: frameTarget.frame };
   }
 
   async function locatorWaitFor(params) {
@@ -32,9 +35,10 @@ export function createLocatorHandlers({
     const state = ['attached', 'visible', 'hidden', 'detached'].includes(params.state) ? params.state : 'visible';
     const started = Date.now();
     let last = null;
+    const frameTarget = await resolveFrameTarget(tabId, params);
 
     while (Date.now() - started <= timeoutMs) {
-      const result = await runLocatorScript(tabId, params, 'query');
+      const result = await runLocatorScript(tabId, params, 'query', frameTarget);
       last = result;
       const visibleCount = result.visibleCount || 0;
       const found = result.count > 0;
@@ -44,7 +48,7 @@ export function createLocatorHandlers({
         (state === 'hidden' && (!found || visibleCount === 0)) ||
         (state === 'detached' && !found)
       ) {
-        return { ok: true, state, elapsedMs: Date.now() - started, count: result.count, visibleCount: result.visibleCount, elements: result.elements };
+        return { ok: true, state, elapsedMs: Date.now() - started, count: result.count, visibleCount: result.visibleCount, elements: result.elements, frame: frameTarget.frame };
       }
       await sleep(intervalMs);
     }
@@ -56,14 +60,15 @@ export function createLocatorHandlers({
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.click');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
     const target = params.force === true
-      ? await runLocatorScript(tabId, { ...params, index, actionKind: 'click' }, 'actionability')
-      : await waitForLocatorActionable(tabId, { ...params, index }, 'click');
+      ? await runLocatorScript(tabId, { ...params, index, actionKind: 'click' }, 'actionability', frameTarget)
+      : await waitForLocatorActionable(tabId, { ...params, index }, 'click', frameTarget);
     if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for locator ${describeLocator(params)}`);
-    await dispatchRealClick(tabId, target.element.clickPoint, params);
+    await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = { element: target.element };
-    await recordAction(tabId, 'locator.click', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null }, result);
-    return { ok: true, element: result.element, ...(params.force === true ? {} : { actionability: target.actionability }) };
+    await recordAction(tabId, 'locator.click', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result.element, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
   }
 
   async function locatorFill(params) {
@@ -72,13 +77,62 @@ export function createLocatorHandlers({
     const text = typeof params.text === 'string' ? params.text : params.value;
     assertString(text, 'text');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
-    const readiness = params.force === true ? null : await waitForLocatorActionable(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'fill');
-    const result = await runLocatorScript(tabId, { ...params, fillText: text, index, _ignoreTopLevelTextLocator: true }, 'fill');
-    await recordAction(tabId, 'locator.fill', { locator: locatorSpecForRecording({ ...params, _ignoreTopLevelTextLocator: true }), index, text, frameSelector: params.frameSelector || params.locator?.frameSelector || null }, result);
-    return { ok: true, element: result.element, ...(readiness ? { actionability: readiness.actionability } : {}) };
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const readiness = params.force === true ? null : await waitForLocatorActionable(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'fill', frameTarget);
+    const prepared = await runLocatorScript(tabId, { ...params, index, replace: params.replace !== false, _ignoreTopLevelTextLocator: true }, 'prepareTextInput', frameTarget);
+    const result = prepared.inputMode === 'select'
+      ? await runLocatorScript(tabId, { ...params, fillText: text, index, _ignoreTopLevelTextLocator: true }, 'fill', frameTarget)
+      : await dispatchRealTextInput(tabId, text, params).then(() => runLocatorScript(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'summarize', frameTarget));
+    await recordAction(tabId, 'locator.fill', { locator: locatorSpecForRecording({ ...params, _ignoreTopLevelTextLocator: true }), index, text, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result.element, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
-  async function waitForLocatorActionable(tabId, params, actionKind) {
+  async function locatorCheck(params) {
+    return locatorSetChecked(params, true, 'locator.check');
+  }
+
+  async function locatorUncheck(params) {
+    return locatorSetChecked(params, false, 'locator.uncheck');
+  }
+
+  async function locatorSetChecked(params, desiredChecked, actionName) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, actionName);
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const target = params.force === true
+      ? await runLocatorScript(tabId, { ...params, index, actionKind: 'click' }, 'actionability', frameTarget)
+      : await waitForLocatorActionable(tabId, { ...params, index }, 'click', frameTarget);
+    const before = await runLocatorScript(tabId, { ...params, index }, 'checkState', frameTarget);
+    if (!before.checkable) throw new Error(`${actionName} requires a checkbox or radio-like element`);
+    if (!desiredChecked && before.radio) throw new Error('locator.uncheck does not support radio buttons');
+    if (before.checked === desiredChecked) {
+      const result = { element: before.element, changed: false };
+      await recordAction(tabId, actionName, { locator: locatorSpecForRecording(params), index, checked: desiredChecked, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+      return { ok: true, changed: false, element: before.element, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
+    }
+    if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for locator ${describeLocator(params)}`);
+    await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
+    const after = await runLocatorScript(tabId, { ...params, index }, 'checkState', frameTarget);
+    if (after.checked !== desiredChecked) throw new Error(`${actionName} failed to set checked=${desiredChecked}`);
+    const result = { element: after.element, changed: true };
+    await recordAction(tabId, actionName, { locator: locatorSpecForRecording(params), index, checked: desiredChecked, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, changed: true, element: after.element, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
+  }
+
+  async function locatorSelectOption(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.selectOption');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const values = normalizeSelectOptionValues(params);
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const readiness = params.force === true ? null : await waitForLocatorActionable(tabId, { ...params, index }, 'select', frameTarget);
+    const result = await runLocatorScript(tabId, { ...params, index, selectOptions: values }, 'selectOption', frameTarget);
+    await recordAction(tabId, 'locator.selectOption', { locator: locatorSpecForRecording(params), index, options: values, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result.element, selected: result.selected, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
+  }
+
+  async function waitForLocatorActionable(tabId, params, actionKind, frameTarget) {
     const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
     const started = Date.now();
@@ -86,7 +140,7 @@ export function createLocatorHandlers({
     let last = null;
 
     while (Date.now() - started <= timeoutMs) {
-      const result = await runLocatorScript(tabId, { ...params, actionKind }, 'actionability');
+      const result = await runLocatorScript(tabId, { ...params, actionKind }, 'actionability', frameTarget);
       last = result;
 
       if (params.strict === true && result.count !== 1) {
@@ -102,7 +156,8 @@ export function createLocatorHandlers({
         checks.enabled === true &&
         (actionKind !== 'click' || checks.receivesEvents === true) &&
         stable === true &&
-        (actionKind !== 'fill' || checks.editable === true);
+        (actionKind !== 'fill' || checks.editable === true) &&
+        (actionKind !== 'select' || checks.selectable === true);
 
       if (ready) {
         return {
@@ -119,6 +174,14 @@ export function createLocatorHandlers({
 
     const reasons = last?.actionability?.reasons || ['not found'];
     throw new Error(`Timed out waiting for locator ${describeLocator(params)} to be actionable for ${actionKind}: ${reasons.join(', ')}`);
+  }
+
+  function applyFrameOffset(point, frameTarget) {
+    if (!frameTarget?.frameOffset) return point;
+    return {
+      x: point.x + frameTarget.frameOffset.x,
+      y: point.y + frameTarget.frameOffset.y
+    };
   }
 
   function rectsAlmostEqual(a, b) {
@@ -154,8 +217,14 @@ export function createLocatorHandlers({
     });
   }
 
-  async function runLocatorScript(tabId, params, action) {
+  async function dispatchRealTextInput(tabId, text) {
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Input.insertText', { text });
+  }
+
+  async function runLocatorScript(tabId, params, action, frameTarget) {
     const locator = normalizeLocatorParams(params);
+    if (frameTarget?.frameSelector === null) locator.frameSelector = null;
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     const limit = Number.isInteger(params.limit) && params.limit > 0 ? Math.min(params.limit, 200) : 50;
     const options = {
@@ -164,13 +233,15 @@ export function createLocatorHandlers({
       index,
       limit,
       text: typeof params.fillText === 'string' ? params.fillText : (typeof params.text === 'string' ? params.text : ''),
+      selectOptions: Array.isArray(params.selectOptions) ? params.selectOptions : [],
+      replace: params.replace !== false,
       scrollIntoView: params.scrollIntoView !== false,
       force: params.force === true,
       actionKind: params.actionKind || null
     };
 
     const [{ result }] = await chromeApi.scripting.executeScript({
-      target: { tabId },
+      target: frameTarget?.target || { tabId },
       func: options => {
         const root = resolveDomRoot(options.locator.frameSelector);
         const matches = findLocatorMatches(root, options.locator);
@@ -213,15 +284,33 @@ export function createLocatorHandlers({
           };
         }
 
+        if (options.action === 'summarize') {
+          return { element: summarizeElement(element, options.index) };
+        }
+
+        if (options.action === 'checkState') {
+          const state = checkState(element);
+          return { ...state, element: summarizeElement(element, options.index) };
+        }
+
         if (!options.force && !actionability.actionable) {
           throw new Error(`Element is not actionable: ${actionability.reasons.join(', ')}`);
         }
 
         if (typeof element.focus === 'function') element.focus({ preventScroll: true });
 
+        if (options.action === 'prepareTextInput') {
+          return prepareTextInput(element, options.index, options.replace !== false);
+        }
+
         if (options.action === 'fill') {
           fillElement(element, options.text);
           return { element: summarizeElement(element, options.index) };
+        }
+
+        if (options.action === 'selectOption') {
+          const selected = selectOptions(element, options.selectOptions);
+          return { element: summarizeElement(element, options.index), selected };
         }
 
         throw new Error(`Unsupported locator action: ${options.action}`);
@@ -229,8 +318,8 @@ export function createLocatorHandlers({
         function findLocatorMatches(root, locator) {
           if (locator.label) return findByLabel(root, locator).filter(element => matchesLocator(element, locator, true));
           const candidates = locator.selector
-            ? Array.from(root.querySelectorAll(locator.selector))
-            : Array.from(root.querySelectorAll(candidateSelector()));
+            ? querySelectorAllDeep(root, locator.selector)
+            : querySelectorAllDeep(root, candidateSelector());
           return candidates.filter(element => matchesLocator(element, locator, false));
         }
 
@@ -254,16 +343,16 @@ export function createLocatorHandlers({
 
         function findByLabel(root, locator) {
           const controls = [];
-          for (const label of root.querySelectorAll('label')) {
+          for (const label of querySelectorAllDeep(root, 'label')) {
             const text = visibleText(label);
             if (!matchesText(text, locator.label, locator)) continue;
             let control = null;
             const forId = label.getAttribute('for');
-            if (forId) control = root.getElementById(forId);
-            if (!control) control = label.querySelector('input, textarea, select, [contenteditable="true"], [contenteditable=""]');
+            if (forId) control = getElementByIdDeep(root, forId);
+            if (!control) control = querySelectorDeep(label, 'input, textarea, select, [contenteditable="true"], [contenteditable=""]');
             if (control) controls.push(control);
           }
-          for (const element of root.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""]')) {
+          for (const element of querySelectorAllDeep(root, 'input, textarea, select, [contenteditable="true"], [contenteditable=""]')) {
             const aria = element.getAttribute('aria-label') || '';
             const placeholder = element.getAttribute('placeholder') || '';
             if (matchesText(aria, locator.label, locator) || matchesText(placeholder, locator.label, locator)) controls.push(element);
@@ -272,21 +361,94 @@ export function createLocatorHandlers({
         }
 
         function fillElement(element, text) {
-          if (element.isContentEditable) {
-            element.textContent = text;
-          } else if ('value' in element) {
+          if (element.tagName.toLowerCase() === 'select' && 'value' in element) {
             element.value = text;
           } else {
             throw new Error('Element is not editable');
           }
-          element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+          element.dispatchEvent(new Event('input', { bubbles: true }));
           element.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        function prepareTextInput(element, index, replace) {
+          if (element.tagName.toLowerCase() === 'select') {
+            return { element: summarizeElement(element, index), inputMode: 'select' };
+          }
+          if (typeof element.focus === 'function') element.focus({ preventScroll: true });
+          if (element.isContentEditable) {
+            const selection = element.ownerDocument.getSelection();
+            const range = element.ownerDocument.createRange();
+            range.selectNodeContents(element);
+            if (!replace) range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            return { element: summarizeElement(element, index), inputMode: 'text' };
+          }
+          if (isTextInputElement(element)) {
+            const length = String(element.value || '').length;
+            if (typeof element.setSelectionRange === 'function') {
+              element.setSelectionRange(replace ? 0 : length, length);
+            } else if (typeof element.select === 'function' && replace) {
+              element.select();
+            }
+            return { element: summarizeElement(element, index), inputMode: 'text' };
+          }
+          throw new Error('Element is not editable');
+        }
+
+        function checkState(element) {
+          const tag = element.tagName.toLowerCase();
+          const type = (element.getAttribute('type') || '').toLowerCase();
+          const role = inferredRole(element);
+          const nativeCheckable = tag === 'input' && ['checkbox', 'radio'].includes(type);
+          const ariaCheckable = role === 'checkbox' || role === 'radio' || role === 'switch';
+          if (!nativeCheckable && !ariaCheckable) return { checkable: false, checked: null, radio: false };
+          return {
+            checkable: true,
+            checked: nativeCheckable ? element.checked : element.getAttribute('aria-checked') === 'true',
+            radio: type === 'radio' || role === 'radio'
+          };
+        }
+
+        function selectOptions(element, requested) {
+          if (element.tagName.toLowerCase() !== 'select') throw new Error('Element is not a select');
+          const multiple = element.multiple === true;
+          const selected = [];
+          const optionsToSelect = [];
+          for (const request of requested) {
+            const option = findOption(element, request);
+            if (!option) throw new Error(`Option not found: ${JSON.stringify(request)}`);
+            optionsToSelect.push(option);
+            if (!multiple) break;
+          }
+          for (const option of element.options) option.selected = false;
+          for (const option of optionsToSelect) {
+            option.selected = true;
+            selected.push({ value: option.value, label: option.label || option.textContent || '', index: option.index });
+          }
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+          return selected;
+        }
+
+        function findOption(select, request) {
+          const options = Array.from(select.options);
+          if (Number.isInteger(request.index)) return options[request.index] || null;
+          if (typeof request.value === 'string') return options.find(option => option.value === request.value) || null;
+          if (typeof request.label === 'string') {
+            return options.find(option => matchesText(option.label || option.textContent || '', request.label, {
+              exact: request.exact === true,
+              caseSensitive: request.caseSensitive === true
+            })) || null;
+          }
+          return null;
         }
 
         function getActionability(element, actionKind) {
           const visible = isVisible(element);
           const enabled = isEnabled(element);
           const editable = isEditable(element);
+          const selectable = element.tagName.toLowerCase() === 'select';
           const pointerEvents = getComputedStyle(element).pointerEvents !== 'none';
           const clickPoint = clickablePoint(element, root);
           const hitTarget = actionKind === 'click' && clickPoint ? hitTestElement(element, root, clickPoint) : { receivesEvents: true };
@@ -296,10 +458,12 @@ export function createLocatorHandlers({
           if (actionKind === 'click' && !pointerEvents) reasons.push('pointer-events none');
           if (actionKind === 'click' && !hitTarget.receivesEvents) reasons.push(`covered by ${hitTarget.description || 'another element'}`);
           if (actionKind === 'fill' && !editable) reasons.push('not editable');
+          if (actionKind === 'select' && element.tagName.toLowerCase() !== 'select') reasons.push('not a select');
           return {
             visible,
             enabled,
             editable,
+            selectable,
             pointerEvents,
             receivesEvents: hitTarget.receivesEvents,
             hitTarget: hitTarget.description || null,
@@ -381,7 +545,7 @@ export function createLocatorHandlers({
         }
 
         function frameForRoot(root) {
-          for (const frame of document.querySelectorAll('iframe,frame')) {
+          for (const frame of querySelectorAllDeep(document, 'iframe,frame')) {
             try {
               if (frame.contentDocument === root) return frame;
             } catch {}
@@ -409,7 +573,7 @@ export function createLocatorHandlers({
           const labelledBy = element.getAttribute('aria-labelledby');
           if (labelledBy) {
             const value = labelledBy.split(/\s+/)
-              .map(id => root.getElementById(id))
+              .map(id => getElementByIdDeep(root, id))
               .filter(Boolean)
               .map(label => accessibleNameInternal(label, root, visited) || visibleText(label))
               .join(' ')
@@ -421,7 +585,7 @@ export function createLocatorHandlers({
           const tag = element.tagName.toLowerCase();
           const type = (element.getAttribute('type') || '').toLowerCase();
           if (element.id) {
-            const label = root.querySelector(`label[for="${cssEscape(element.id)}"]`);
+            const label = querySelectorDeep(root, `label[for="${cssEscape(element.id)}"]`);
             if (label) return visibleText(label);
           }
           const wrappingLabel = element.closest('label');
@@ -434,7 +598,7 @@ export function createLocatorHandlers({
             if (legend) return visibleText(legend);
           }
           if (tag === 'table') {
-            const caption = element.querySelector(':scope > caption');
+            const caption = querySelectorDeep(element, ':scope > caption');
             if (caption) return visibleText(caption);
           }
           return [
@@ -555,10 +719,16 @@ export function createLocatorHandlers({
           if (!isEnabled(element)) return false;
           if (element.isContentEditable) return true;
           const tag = element.tagName.toLowerCase();
-          const type = (element.getAttribute('type') || '').toLowerCase();
-          if (!['input', 'textarea', 'select'].includes(tag)) return false;
+          if (tag === 'select') return true;
+          if (!isTextInputElement(element)) return false;
           if (element.readOnly) return false;
-          if (tag === 'textarea' || tag === 'select') return true;
+          return true;
+        }
+
+        function isTextInputElement(element) {
+          const tag = element.tagName.toLowerCase();
+          const type = (element.getAttribute('type') || '').toLowerCase();
+          if (tag === 'textarea') return true;
           if (tag !== 'input') return false;
           return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type);
         }
@@ -626,6 +796,33 @@ export function createLocatorHandlers({
           return String(value).replace(/["\\]/g, '\\$&');
         }
 
+        function querySelectorDeep(root, selector) {
+          return querySelectorAllDeep(root, selector)[0] || null;
+        }
+
+        function querySelectorAllDeep(root, selector) {
+          const results = [];
+          const visited = new Set();
+          visitRoot(root);
+          return results;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            if (typeof currentRoot.querySelectorAll === 'function') {
+              results.push(...currentRoot.querySelectorAll(selector));
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
+        }
+
+        function getElementByIdDeep(root, id) {
+          const escaped = cssEscape(id);
+          return querySelectorDeep(root, `#${escaped}`);
+        }
+
         function describeLocator(locator) {
           return ['selector', 'role', 'name', 'text', 'label', 'placeholder']
             .filter(key => locator[key])
@@ -635,7 +832,7 @@ export function createLocatorHandlers({
 
         function resolveDomRoot(frameSelector) {
           if (!frameSelector) return document;
-          const frame = document.querySelector(frameSelector);
+          const frame = querySelectorDeep(document, frameSelector);
           if (!frame) throw new Error(`Frame not found: ${frameSelector}`);
           try {
             if (!frame.contentDocument) throw new Error('Frame document is not accessible');
@@ -695,6 +892,27 @@ export function createLocatorHandlers({
     return null;
   }
 
+  function normalizeSelectOptionValues(params) {
+    const source = params.options ?? params.values ?? params.value ?? params.label ?? params.option;
+    const values = Array.isArray(source) ? source : [source];
+    const normalized = values.map(item => {
+      if (typeof item === 'string') return { value: item };
+      if (Number.isInteger(item)) return { index: item };
+      if (item && typeof item === 'object') {
+        return {
+          ...(typeof item.value === 'string' ? { value: item.value } : {}),
+          ...(typeof item.label === 'string' ? { label: item.label } : {}),
+          ...(Number.isInteger(item.index) ? { index: item.index } : {}),
+          ...(item.exact === true ? { exact: true } : {}),
+          ...(item.caseSensitive === true ? { caseSensitive: true } : {})
+        };
+      }
+      return {};
+    }).filter(item => typeof item.value === 'string' || typeof item.label === 'string' || Number.isInteger(item.index));
+    if (normalized.length === 0) throw new Error('locator.selectOption requires value, label, index, option, options, or values');
+    return normalized;
+  }
+
   function describeLocator(params) {
     const locator = normalizeLocatorParams(params);
     return ['selector', 'role', 'name', 'text', 'label', 'placeholder']
@@ -713,6 +931,9 @@ export function createLocatorHandlers({
     locatorTextContent,
     locatorWaitFor,
     locatorClick,
-    locatorFill
+    locatorFill,
+    locatorCheck,
+    locatorUncheck,
+    locatorSelectOption
   };
 }
