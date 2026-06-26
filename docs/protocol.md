@@ -345,12 +345,26 @@ Waits for a CDP `Network.responseReceived` event. Supports `url`,
 `responseHeaderContains`/`headerContains`, and
 `responseHeaderRegex`/`headerRegex` filters. Pass `includeHeaders:true` to
 include redacted response headers in the result.
+
+Content filters wait for the response body to finish loading and match against
+it: `mimeType` (substring of the response MIME type, no body fetch), `minSize`
+/ `maxSize` (wire size in bytes from `loadingFinished`), `bodyContains`,
+`bodyRegex`, and JSON matching via `jsonPath` (dot/bracket path, e.g.
+`data.items[0].id`) optionally constrained by `jsonEquals` (deep equality) or
+`jsonContains` (substring of the stringified value). When a body filter is used
+the result includes `bodyMatched` and `bodyBytes`; pass `includeBody:true` to
+also return a bounded `bodyPreview` (off by default for privacy).
+
 On timeout, the JSON-RPC error includes
 `data.code: "PAGE_WAIT_FOR_RESPONSE_TIMEOUT"` and `data.diagnostic` with
 filters, observed event count, and recent response candidates.
 
 ```json
 { "tabId": 123, "urlContains": "/api/items", "status": 200, "method": "GET", "timeoutMs": 30000 }
+```
+
+```json
+{ "tabId": 123, "urlContains": "/api/items", "jsonPath": "data.items[0].id", "jsonEquals": 7 }
 ```
 
 ### `page.waitForNetworkIdle`
