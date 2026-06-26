@@ -307,6 +307,17 @@ def run_smoke_test():
             "script": "setTimeout(async () => { await fetch('data:application/json,%7B%22ok%22%3Atrue%7D'); document.getElementById('network-result').innerText = 'Network Done'; }, 250)"
         })
         client.rpc("page.waitForResponse", {"tabId": tab_id, "urlContains": "application/json", "timeoutMs": 5000})
+        client.rpc("page.executeJavaScript", {
+            "tabId": tab_id,
+            "script": "setTimeout(async () => { await fetch('data:application/json,%7B%22ok%22%3Atrue%7D'); }, 250)"
+        })
+        try:
+            client.rpc("page.waitForResponse", {"tabId": tab_id, "urlContains": "application/json", "status": 599, "timeoutMs": 1000})
+            raise RuntimeError("page.waitForResponse should have timed out with diagnostics")
+        except BrowserBridgeError as error:
+            diagnostic = (error.data or {}).get("diagnostic", {})
+            if (error.data or {}).get("code") != "PAGE_WAIT_FOR_RESPONSE_TIMEOUT" or not diagnostic.get("recent"):
+                raise RuntimeError(f"page.waitForResponse diagnostics missing: {error} data={error.data}")
         client.rpc("page.waitForNetworkIdle", {"tabId": tab_id, "idleMs": 250, "timeoutMs": 5000})
         client.rpc("page.waitForText", {"tabId": tab_id, "text": "Network Done", "timeoutMs": 5000})
 

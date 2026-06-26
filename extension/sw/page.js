@@ -75,16 +75,17 @@ export function createPageHandlers({
     const responseHeaderContains = normalizeHeaderMatcher(params.responseHeaderContains ?? params.headerContains, 'page.waitForResponse headerContains');
     const responseHeaderRegex = normalizeHeaderMatcher(params.responseHeaderRegex ?? params.headerRegex, 'page.waitForResponse headerRegex', { regex: true });
     const started = Date.now();
+    const waitOptions = { ...params, status, method, resourceType, responseHeaderContains, responseHeaderRegex, started };
     await attachDebugger(tabId);
     await cdp(tabId, 'Network.enable').catch(() => {});
 
     while (Date.now() - started <= timeoutMs) {
       const events = networkEventsByTab?.get(tabId) || [];
-      const match = findMatchingResponse(events, { ...params, status, method, resourceType, responseHeaderContains, responseHeaderRegex, started });
+      const match = findMatchingResponse(events, waitOptions);
       if (match) return { ok: true, response: match, elapsedMs: Date.now() - started };
       await sleep(intervalMs);
     }
-    throw new Error(`Timed out waiting for response${describeUrlPattern(params)}`);
+    throw createNetworkWaitTimeoutError('response', params, waitOptions, networkEventsByTab?.get(tabId) || [], Date.now() - started);
   }
 
   async function pageWaitForRequest(params) {
@@ -99,16 +100,17 @@ export function createPageHandlers({
     const postDataContains = normalizeOptionalNonEmptyString(params.postDataContains, 'page.waitForRequest postDataContains');
     const postDataRegex = normalizeOptionalRegexString(params.postDataRegex, 'page.waitForRequest postDataRegex');
     const started = Date.now();
+    const waitOptions = { ...params, method, resourceType, requestHeaderContains, requestHeaderRegex, postDataContains, postDataRegex, started };
     await attachDebugger(tabId);
     await cdp(tabId, 'Network.enable').catch(() => {});
 
     while (Date.now() - started <= timeoutMs) {
       const events = networkEventsByTab?.get(tabId) || [];
-      const match = findMatchingRequest(events, { ...params, method, resourceType, requestHeaderContains, requestHeaderRegex, postDataContains, postDataRegex, started });
+      const match = findMatchingRequest(events, waitOptions);
       if (match) return { ok: true, request: match, elapsedMs: Date.now() - started };
       await sleep(intervalMs);
     }
-    throw new Error(`Timed out waiting for request${describeUrlPattern(params)}`);
+    throw createNetworkWaitTimeoutError('request', params, waitOptions, networkEventsByTab?.get(tabId) || [], Date.now() - started);
   }
 
   async function pageWaitForURL(params) {
@@ -588,6 +590,92 @@ function findMatchingRequest(events, options) {
     };
   }
   return null;
+}
+
+function createNetworkWaitTimeoutError(kind, params, options, events, elapsedMs) {
+  const methodName = kind === 'response' ? 'page.waitForResponse' : 'page.waitForRequest';
+  const relevantEvents = recentNetworkWaitCandidates(events, kind, options);
+  const diagnostic = {
+    type: 'NetworkWaitTimeout',
+    waitFor: kind,
+    method: methodName,
+    elapsedMs,
+    filters: networkWaitFilters(params, options),
+    observedCount: relevantEvents.length,
+    recent: relevantEvents.slice(-5),
+    urlPattern: describeUrlPattern(params) || null
+  };
+  const error = new Error(formatNetworkWaitTimeoutMessage(diagnostic));
+  error.name = 'NetworkWaitTimeout';
+  error.code = kind === 'response' ? 'PAGE_WAIT_FOR_RESPONSE_TIMEOUT' : 'PAGE_WAIT_FOR_REQUEST_TIMEOUT';
+  error.diagnostic = diagnostic;
+  return error;
+}
+
+function recentNetworkWaitCandidates(events, kind, options) {
+  const method = kind === 'response' ? 'Network.responseReceived' : 'Network.requestWillBeSent';
+  return events
+    .filter(event => event.timestamp >= options.started && event.method === method)
+    .map(event => summarizeNetworkEvent(event, kind))
+    .filter(Boolean);
+}
+
+function summarizeNetworkEvent(event, kind) {
+  const params = event.params || {};
+  if (kind === 'response') {
+    const response = params.response || {};
+    return {
+      requestId: params.requestId || '',
+      url: response.url || '',
+      status: response.status ?? null,
+      resourceType: params.type || '',
+      mimeType: response.mimeType || '',
+      timestamp: event.timestamp
+    };
+  }
+  const request = params.request || {};
+  return {
+    requestId: params.requestId || '',
+    url: request.url || '',
+    method: request.method || '',
+    resourceType: params.type || '',
+    hasPostData: request.hasPostData === true,
+    timestamp: event.timestamp
+  };
+}
+
+function networkWaitFilters(params, options) {
+  return {
+    ...(params.url ? { url: params.url } : {}),
+    ...(params.urlContains ? { urlContains: params.urlContains } : {}),
+    ...(params.urlRegex ? { urlRegex: params.urlRegex } : {}),
+    ...(options.method ? { method: options.method } : {}),
+    ...(Number.isInteger(options.status) ? { status: options.status } : {}),
+    ...(options.resourceType ? { resourceType: options.resourceType } : {}),
+    ...(options.requestHeaderContains ? { requestHeaderContains: Object.keys(options.requestHeaderContains) } : {}),
+    ...(options.requestHeaderRegex ? { requestHeaderRegex: Object.keys(options.requestHeaderRegex) } : {}),
+    ...(options.responseHeaderContains ? { responseHeaderContains: Object.keys(options.responseHeaderContains) } : {}),
+    ...(options.responseHeaderRegex ? { responseHeaderRegex: Object.keys(options.responseHeaderRegex) } : {}),
+    ...(options.postDataContains != null ? { postDataContains: true } : {}),
+    ...(options.postDataRegex != null ? { postDataRegex: options.postDataRegex } : {})
+  };
+}
+
+function formatNetworkWaitTimeoutMessage(diagnostic) {
+  const filters = Object.keys(diagnostic.filters).length > 0
+    ? ` filters=${JSON.stringify(diagnostic.filters)}`
+    : '';
+  const recent = diagnostic.recent.length > 0
+    ? ` recent=${diagnostic.recent.map(formatNetworkWaitCandidate).join(' | ')}`
+    : ' recent=<none>';
+  return `Timed out after ${diagnostic.elapsedMs}ms waiting for ${diagnostic.waitFor}${filters}; observed ${diagnostic.observedCount} matching event type(s);${recent}`;
+}
+
+function formatNetworkWaitCandidate(candidate) {
+  const status = candidate.status != null ? ` ${candidate.status}` : '';
+  const method = candidate.method ? ` ${candidate.method}` : '';
+  const type = candidate.resourceType ? ` ${candidate.resourceType}` : '';
+  return `${candidate.requestId}${method}${status}${type} ${candidate.url}`;
 }
 
 function postDataMatches(postData, options) {

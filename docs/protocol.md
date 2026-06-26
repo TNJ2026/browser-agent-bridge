@@ -304,6 +304,9 @@ Waits for a CDP `Network.requestWillBeSent` event. Supports `url`,
 `requestHeaderRegex`/`headerRegex`, `postDataContains`, and `postDataRegex`
 filters. Pass `includeHeaders:true` to include redacted request headers in the
 result.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_REQUEST_TIMEOUT"` and `data.diagnostic` with
+filters, observed event count, and recent request candidates.
 
 ```json
 { "tabId": 123, "urlContains": "/api/items", "method": "POST", "headerContains": { "Content-Type": "json" }, "timeoutMs": 30000 }
@@ -316,6 +319,9 @@ Waits for a CDP `Network.responseReceived` event. Supports `url`,
 `responseHeaderContains`/`headerContains`, and
 `responseHeaderRegex`/`headerRegex` filters. Pass `includeHeaders:true` to
 include redacted response headers in the result.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_RESPONSE_TIMEOUT"` and `data.diagnostic` with
+filters, observed event count, and recent response candidates.
 
 ```json
 { "tabId": 123, "urlContains": "/api/items", "status": 200, "method": "GET", "timeoutMs": 30000 }
