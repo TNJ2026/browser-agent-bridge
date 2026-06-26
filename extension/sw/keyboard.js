@@ -22,7 +22,7 @@ export function createKeyboardDispatcher({ cdp, sleep = async () => {} }) {
       : chars.map((_, index) => chars.slice(0, index + 1).join(''));
 
     for (const segment of segments) {
-      const caret = Array.from(segment).length;
+      const caret = segment.length;
       await cdp(tabId, 'Input.imeSetComposition', {
         text: segment,
         selectionStart: caret,

@@ -35,6 +35,16 @@ test('compose drives incremental IME composition then commits', async () => {
   assert.ok(calls.indexOf(commit) > calls.indexOf(composition[1]));
 });
 
+test('compose uses UTF-16 code unit length for selection start/end of surrogate pairs', async () => {
+  const { calls, dispatcher } = await makeDispatcher();
+  await dispatcher.compose(1, '𠮷');
+
+  const composition = calls.filter(c => c.method === 'Input.imeSetComposition');
+  assert.deepEqual(composition.map(c => c.params.text), ['𠮷']);
+  assert.equal(composition[0].params.selectionStart, 2);
+  assert.equal(composition[0].params.selectionEnd, 2);
+});
+
 test('compose with commit:false leaves the composition pending', async () => {
   const { calls, dispatcher } = await makeDispatcher();
   await dispatcher.compose(1, 'abc', { commit: false });
