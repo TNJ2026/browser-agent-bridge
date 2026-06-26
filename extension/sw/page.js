@@ -49,10 +49,14 @@ export function createPageHandlers({
     const initialTab = await chromeApi.tabs.get(tabId);
     const initialUrl = initialTab.url || '';
     const started = Date.now();
+    let lastUrl = initialUrl;
+    let lastStatus = initialTab.status || null;
 
     while (Date.now() - started <= timeoutMs) {
       const tab = await chromeApi.tabs.get(tabId);
       const url = tab.url || '';
+      lastUrl = url;
+      lastStatus = tab.status || null;
       const changed = url !== initialUrl;
       const urlMatched = matchesUrlPattern(url, params);
       const reachedState = waitUntil === 'commit' ? changed : tab.status === 'complete';
@@ -61,7 +65,20 @@ export function createPageHandlers({
       }
       await sleep(intervalMs);
     }
-    throw new Error(`Timed out waiting for navigation${describeUrlPattern(params)}`);
+    throw createPageWaitTimeoutError({
+      type: 'PageWaitForNavigationTimeout',
+      code: 'PAGE_WAIT_FOR_NAVIGATION_TIMEOUT',
+      method: 'page.waitForNavigation',
+      elapsedMs: Date.now() - started,
+      timeoutMs,
+      waitUntil,
+      initialUrl,
+      currentUrl: lastUrl,
+      currentStatus: lastStatus,
+      urlChanged: lastUrl !== initialUrl,
+      urlPattern: describeUrlPattern(params) || null,
+      summary: `no matching navigation${describeUrlPattern(params)} (current=${lastUrl || '<empty>'})`
+    });
   }
 
   async function pageWaitForResponse(params) {
@@ -120,16 +137,27 @@ export function createPageHandlers({
     const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
     const started = Date.now();
+    let lastUrl = '';
 
     while (Date.now() - started <= timeoutMs) {
       const tab = await chromeApi.tabs.get(tabId);
       const url = tab.url || '';
+      lastUrl = url;
       if (matchesUrlPattern(url, params)) {
         return { ok: true, tab: normalizeTab(tab), url, elapsedMs: Date.now() - started };
       }
       await sleep(intervalMs);
     }
-    throw new Error(`Timed out waiting for URL${describeUrlPattern(params)}`);
+    throw createPageWaitTimeoutError({
+      type: 'PageWaitForURLTimeout',
+      code: 'PAGE_WAIT_FOR_URL_TIMEOUT',
+      method: 'page.waitForURL',
+      elapsedMs: Date.now() - started,
+      timeoutMs,
+      currentUrl: lastUrl,
+      urlPattern: describeUrlPattern(params) || null,
+      summary: `url did not match${describeUrlPattern(params)} (current=${lastUrl || '<empty>'})`
+    });
   }
 
   async function pageWaitForNetworkIdle(params) {
@@ -152,7 +180,18 @@ export function createPageHandlers({
       await sleep(intervalMs);
     }
     const state = computeNetworkIdleState(networkEventsByTab?.get(tabId) || [], { started, now: Date.now() });
-    throw new Error(`Timed out waiting for network idle (inflight: ${state.inflight})`);
+    throw createPageWaitTimeoutError({
+      type: 'PageWaitForNetworkIdleTimeout',
+      code: 'PAGE_WAIT_FOR_NETWORK_IDLE_TIMEOUT',
+      method: 'page.waitForNetworkIdle',
+      elapsedMs: Date.now() - started,
+      timeoutMs,
+      idleMs,
+      maxInflight,
+      inflight: state.inflight,
+      msSinceLastActivity: Math.max(0, Date.now() - state.lastActivityAt),
+      summary: `network still busy (inflight=${state.inflight}, need <=${maxInflight})`
+    });
   }
 
   async function pageWaitForDialog(params) {
@@ -171,7 +210,14 @@ export function createPageHandlers({
       }
       await sleep(intervalMs);
     }
-    throw new Error(`Timed out waiting for dialog${describeDialogPattern(params)}`);
+    throw createPageWaitTimeoutError({
+      type: 'PageWaitForDialogTimeout',
+      code: 'PAGE_WAIT_FOR_DIALOG_TIMEOUT',
+      method: 'page.waitForDialog',
+      elapsedMs: Date.now() - started,
+      timeoutMs,
+      summary: `no matching dialog${describeDialogPattern(params)}`
+    });
   }
 
   async function pageAcceptDialog(params) {
@@ -283,7 +329,23 @@ export function createPageHandlers({
       if (result?.found) return { ok: true, element: result, frame: frameTarget.frame, elapsedMs: Date.now() - started };
       await sleep(intervalMs);
     }
-    throw new Error(`Timed out waiting for selector: ${params.selector}${last?.visible === false ? ' (found but not visible)' : ''}`);
+    const foundInDom = !!(last && last.tagName);
+    throw createPageWaitTimeoutError({
+      type: 'PageWaitForSelectorTimeout',
+      code: 'PAGE_WAIT_FOR_SELECTOR_TIMEOUT',
+      method: 'page.waitForSelector',
+      elapsedMs: Date.now() - started,
+      timeoutMs,
+      selector: params.selector,
+      requireVisible: visible,
+      foundInDom,
+      visible: last?.visible ?? null,
+      tagName: last?.tagName ?? null,
+      frame: frameTarget?.frame || null,
+      summary: foundInDom && last.visible === false
+        ? `selector "${params.selector}" found but not visible`
+        : `selector "${params.selector}" not found`
+    });
   }
 
   async function pageWaitForText(params) {
@@ -297,6 +359,7 @@ export function createPageHandlers({
     const caseSensitive = params.caseSensitive === true;
     const started = Date.now();
     const frameTarget = await resolveFrameTarget(tabId, params);
+    let last = null;
 
     while (Date.now() - started <= timeoutMs) {
       const [{ result }] = await chromeApi.scripting.executeScript({
@@ -371,10 +434,29 @@ export function createPageHandlers({
         args: [params.text, selector, exact, caseSensitive, frameTarget.frameSelector],
         world: 'MAIN'
       });
+      last = result;
       if (result?.found) return { ok: true, match: result, frame: frameTarget.frame, elapsedMs: Date.now() - started };
       await sleep(intervalMs);
     }
-    throw new Error(`Timed out waiting for text: ${params.text}`);
+    const scopeMissing = !!(selector && last && last.selectorFound === false);
+    throw createPageWaitTimeoutError({
+      type: 'PageWaitForTextTimeout',
+      code: 'PAGE_WAIT_FOR_TEXT_TIMEOUT',
+      method: 'page.waitForText',
+      elapsedMs: Date.now() - started,
+      timeoutMs,
+      text: params.text,
+      exact,
+      caseSensitive,
+      selector: selector || null,
+      selectorFound: last ? last.selectorFound === true : null,
+      observedTextLength: last?.textLength ?? null,
+      preview: last?.preview ?? null,
+      frame: frameTarget?.frame || null,
+      summary: scopeMissing
+        ? `scope selector "${selector}" not found`
+        : `text not found: ${String(params.text).slice(0, 80)}`
+    });
   }
 
   async function pageReadText(params) {
@@ -676,6 +758,24 @@ function formatNetworkWaitCandidate(candidate) {
   const method = candidate.method ? ` ${candidate.method}` : '';
   const type = candidate.resourceType ? ` ${candidate.resourceType}` : '';
   return `${candidate.requestId}${method}${status}${type} ${candidate.url}`;
+}
+
+// Unified timeout error for the non-network page waits (selector, text, URL,
+// navigation, network idle, dialog). Mirrors the locator/network diagnostics so
+// every wait surfaces a stable `error.code` plus a structured `error.diagnostic`
+// that callers (and trace tooling) can consume the same way.
+function createPageWaitTimeoutError({ type, code, method, summary, ...context }) {
+  const diagnostic = { type, method, ...context };
+  const error = new Error(formatPageWaitTimeoutMessage(method, summary, diagnostic.elapsedMs));
+  error.name = type;
+  error.code = code;
+  error.diagnostic = diagnostic;
+  return error;
+}
+
+function formatPageWaitTimeoutMessage(method, summary, elapsedMs) {
+  const tail = summary ? `: ${summary}` : '';
+  return `${method} timed out after ${elapsedMs}ms${tail}`;
 }
 
 function postDataMatches(postData, options) {

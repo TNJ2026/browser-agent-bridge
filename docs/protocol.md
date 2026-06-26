@@ -154,8 +154,14 @@ Starts a lightweight debug trace. While active, each JSON-RPC call records
 method, duration, status, selected params, compact result previews, and errors.
 Text-like fields are redacted by default; pass `includeText:true` to keep them.
 
+When a traced call fails on a tab, a lightweight page snapshot is attached to
+the error event as `context` (target `url`, `title`, accessibility element
+counts, and a visible-text preview). The text preview follows the same
+redaction as `includeText`; `url`, `title`, and counts are always kept. Pass
+`includeContext:false` to disable capture.
+
 ```json
-{ "name": "debug checkout", "includeText": false, "maxEvents": 1000 }
+{ "name": "debug checkout", "includeText": false, "includeContext": true, "maxEvents": 1000 }
 ```
 
 ### `trace.stop`
@@ -168,7 +174,9 @@ Stops the active trace, or a specific trace by `traceId`.
 
 ### `trace.status`
 
-Lists traces, or returns one trace summary when `traceId` is supplied.
+Lists traces, or returns one trace summary when `traceId` is supplied. Each
+summary includes `eventCount` and `errorCount` so a failing trace is
+identifiable without exporting it.
 
 ```json
 {}
@@ -177,7 +185,10 @@ Lists traces, or returns one trace summary when `traceId` is supplied.
 ### `trace.export`
 
 Exports the active trace, or a specific trace by `traceId`. Pass
-`download:true` to save it through Chrome downloads.
+`download:true` to save it through Chrome downloads. Each error event carries
+`error` (message) plus `errorData` with the structured `code` and `diagnostic`
+of waits/locator/network failures, so the trace is a self-contained failure
+postmortem.
 
 ```json
 { "traceId": "uuid", "download": false }
@@ -186,7 +197,10 @@ Exports the active trace, or a specific trace by `traceId`. Pass
 ### `trace.exportHtml`
 
 Exports the active trace, or a specific trace by `traceId`, as a standalone
-HTML timeline. Pass `download:true` to save it through Chrome downloads.
+HTML timeline. Pass `download:true` to save it through Chrome downloads. When a
+trace has errors the HTML opens with a Failures section listing each failing
+method and its error `code`, and every error event shows its structured
+`errorData` diagnostic inline.
 
 ```json
 { "traceId": "uuid", "download": true, "filename": "trace.html" }
@@ -293,10 +307,16 @@ wait until Chrome reports the tab load status as complete.
 ```
 
 URL filters can be `url` for exact match, `urlContains`, or `urlRegex`.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_NAVIGATION_TIMEOUT"` and `data.diagnostic` with
+`currentUrl`, `urlChanged`, `waitUntil`, and `elapsedMs`.
 
 ### `page.waitForURL`
 
 Polls the active tab URL until it matches `url`, `urlContains`, or `urlRegex`.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_URL_TIMEOUT"` and `data.diagnostic` with the
+`currentUrl` and `urlPattern`.
 
 ```json
 { "tabId": 123, "urlRegex": "/dashboard(\\?|$)", "timeoutMs": 30000 }
@@ -337,6 +357,9 @@ filters, observed event count, and recent response candidates.
 
 Waits until new network activity has been idle for `idleMs` (default `500`).
 Set `maxInflight` to allow a small number of still-open requests.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_NETWORK_IDLE_TIMEOUT"` and `data.diagnostic` with
+`inflight`, `maxInflight`, `idleMs`, and `msSinceLastActivity`.
 
 ```json
 { "tabId": 123, "idleMs": 500, "maxInflight": 0, "timeoutMs": 30000 }
@@ -347,6 +370,8 @@ Set `maxInflight` to allow a small number of still-open requests.
 Waits for a JavaScript dialog (`alert`, `confirm`, `prompt`, or
 `beforeunload`). Supports `type`, `message`, `messageContains`, and
 `messageRegex` filters.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_DIALOG_TIMEOUT"` and `data.diagnostic`.
 
 ```json
 { "tabId": 123, "type": "confirm", "messageContains": "Delete", "timeoutMs": 30000 }
@@ -375,6 +400,10 @@ can also be passed to those methods to resolve the first matching frame URL.
 
 Polls for a CSS selector. Set `visible` to require a visible box. Use
 `frameId`, `frameUrl`, or `frameSelector` to target a frame.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_SELECTOR_TIMEOUT"` and `data.diagnostic` with
+`selector`, `foundInDom`, `visible`, `tagName`, and `frame`. `foundInDom` with
+`visible:false` distinguishes a hidden element from a missing one.
 
 ```json
 { "tabId": 123, "selector": "main button", "visible": true, "timeoutMs": 30000, "frameId": 7 }
@@ -384,6 +413,9 @@ Polls for a CSS selector. Set `visible` to require a visible box. Use
 
 Polls the whole page, or a selector subtree, for text. Use `frameId`,
 `frameUrl`, or `frameSelector` to target a frame.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_TEXT_TIMEOUT"` and `data.diagnostic` with `text`,
+`selectorFound`, `observedTextLength`, `preview`, and `frame`.
 
 ```json
 { "tabId": 123, "text": "Signed in", "selector": "main", "timeoutMs": 30000, "frameId": 7 }
@@ -628,6 +660,12 @@ On actionability timeout, the JSON-RPC error includes
 `data.code: "LOCATOR_ACTIONABILITY_TIMEOUT"` and `data.diagnostic` with the
 last match counts, reasons, frame, target element, and nearby candidate
 summaries.
+When `strict:true` and the locator resolves to more than one element, the error
+instead uses `data.code: "LOCATOR_STRICT_MODE_VIOLATION"` and `data.diagnostic`
+lists `count` and every conflicting candidate (`candidates`, capped by the
+in-page collection limit, with `candidatesTruncated` when `count` exceeds it).
+This applies to all auto-waiting locator actions (`locator.click`,
+`locator.fill`, `locator.check`, `locator.selectOption`, drag, etc.).
 
 ```json
 { "tabId": 123, "role": "button", "name": "Submit", "timeoutMs": 30000 }
@@ -649,6 +687,29 @@ different value, use the nested form.
 
 ```json
 { "tabId": 123, "locator": { "text": "Search" }, "value": "browser bridge" }
+```
+
+### `locator.press`
+
+Focuses the matched element and presses a single key or shortcut (for example
+`Enter`, `Tab`, `Control+a`). Auto-waits for the element to be visible, enabled,
+and stable (no editable or hit-test requirement, so it works on buttons too).
+Pass `force:true` to skip the wait, `delayMs` to hold the key.
+
+```json
+{ "tabId": 123, "selector": "input[name=q]", "key": "Enter" }
+```
+
+### `locator.pressSequentially`
+
+Focuses the matched element and types `text` (alias `value`) character by
+character, optionally with `delayMs` between keys. Auto-waits like `locator.fill`
+(requires editable). Prefer `locator.fill` for setting a value directly; use this
+when a field reacts to individual keystrokes. Typed text is redacted from
+recordings unless `includeText:true`.
+
+```json
+{ "tabId": 123, "selector": "input[name=q]", "text": "brow", "delayMs": 50 }
 ```
 
 ### `locator.dragTo`

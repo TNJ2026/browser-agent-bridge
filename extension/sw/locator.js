@@ -7,6 +7,7 @@ export function createLocatorHandlers({
   cdp,
   captureElementScreenshot,
   resolveFrameTarget,
+  keyboardDispatcher,
   sleep,
   defaultTimeoutMs,
   chromeApi = chrome
@@ -328,6 +329,37 @@ export function createLocatorHandlers({
     return { ok: true, element: result.element, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
+  async function locatorPress(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.press');
+    assertString(params.key, 'key');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    // 'press' actionability gate requires visible+enabled+stable (no editable /
+    // hit-test), so it works on buttons and inputs alike.
+    const readiness = params.force === true ? null : await waitForLocatorActionable(tabId, { ...params, index }, 'press', frameTarget);
+    const result = await runLocatorScript(tabId, { ...params, index, force: true }, 'focus', frameTarget);
+    await attachDebugger(tabId);
+    await keyboardDispatcher.press(tabId, params.key, params);
+    await recordAction(tabId, 'locator.press', { locator: locatorSpecForRecording(params), index, key: params.key, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result.element, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
+  }
+
+  async function locatorPressSequentially(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.pressSequentially');
+    const text = typeof params.text === 'string' ? params.text : params.value;
+    assertString(text, 'text');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const readiness = params.force === true ? null : await waitForLocatorActionable(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'fill', frameTarget);
+    const result = await runLocatorScript(tabId, { ...params, index, force: true, _ignoreTopLevelTextLocator: true }, 'focus', frameTarget);
+    await attachDebugger(tabId);
+    await keyboardDispatcher.typeText(tabId, text, params);
+    await recordAction(tabId, 'locator.pressSequentially', { locator: locatorSpecForRecording({ ...params, _ignoreTopLevelTextLocator: true }), index, text, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result.element, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
+  }
+
   async function locatorCheck(params) {
     return locatorSetChecked(params, true, 'locator.check');
   }
@@ -448,6 +480,9 @@ export function createLocatorHandlers({
       await sleep(intervalMs);
     }
 
+    if (params.strict === true && (last?.count ?? 0) > 1) {
+      throw createLocatorStrictModeError(params, actionKind, frameTarget, last, Date.now() - started);
+    }
     throw createLocatorTimeoutError(params, actionKind, frameTarget, last, Date.now() - started);
   }
 
@@ -474,6 +509,45 @@ export function createLocatorHandlers({
     error.code = 'LOCATOR_ACTIONABILITY_TIMEOUT';
     error.diagnostic = diagnostic;
     return error;
+  }
+
+  function createLocatorStrictModeError(params, actionKind, frameTarget, last, elapsedMs) {
+    // List every observed candidate (capped only by the in-page collection
+    // limit) so "matched too many" is diagnosable without re-querying.
+    const candidates = (last?.elements || []).map(compactLocatorElement).filter(Boolean);
+    const count = Number.isInteger(last?.count) ? last.count : candidates.length;
+    const diagnostic = {
+      type: 'LocatorStrictModeViolation',
+      locator: describeLocator(params),
+      action: actionKind,
+      elapsedMs,
+      count,
+      visibleCount: last?.visibleCount ?? null,
+      strict: true,
+      candidates,
+      candidatesTruncated: count > candidates.length,
+      frame: frameTarget?.frame || null
+    };
+    const error = new Error(formatLocatorStrictModeMessage(diagnostic));
+    error.name = 'LocatorStrictModeViolation';
+    error.code = 'LOCATOR_STRICT_MODE_VIOLATION';
+    error.diagnostic = diagnostic;
+    return error;
+  }
+
+  function formatLocatorStrictModeMessage(diagnostic) {
+    const parts = [
+      `Strict mode violation: locator ${diagnostic.locator} resolved to ${diagnostic.count} elements for ${diagnostic.action}`
+    ];
+    if (diagnostic.frame?.frameId != null) {
+      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}`);
+    }
+    if (diagnostic.candidates.length > 0) {
+      const shown = diagnostic.candidates.slice(0, 10).map(formatCompactLocatorElement).join(' | ');
+      const hidden = diagnostic.count - Math.min(10, diagnostic.candidates.length);
+      parts.push(`candidates: ${shown}${hidden > 0 ? ` (+${hidden} more)` : ''}`);
+    }
+    return parts.join('; ');
   }
 
   function createLocatorExpectTimeoutError(params, assertion, frameTarget, details) {
@@ -816,6 +890,10 @@ export function createLocatorHandlers({
         }
 
         if (typeof element.focus === 'function') element.focus({ preventScroll: true });
+
+        if (options.action === 'focus') {
+          return { element: summarizeElement(element, options.index) };
+        }
 
         if (options.action === 'prepareTextInput') {
           return prepareTextInput(element, options.index, options.replace !== false);
@@ -1640,6 +1718,8 @@ export function createLocatorHandlers({
     locatorScreenshot,
     locatorDispatchDragDrop,
     locatorFill,
+    locatorPress,
+    locatorPressSequentially,
     locatorCheck,
     locatorUncheck,
     locatorSelectOption,
