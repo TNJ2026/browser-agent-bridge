@@ -592,6 +592,9 @@ directly or under `locator`. Text and attribute assertions support
 Supported methods are `expect.locator.toBeVisible`,
 `expect.locator.toHaveCount`, `expect.locator.toHaveText`, and
 `expect.locator.toHaveAttribute`.
+On assertion timeout, the JSON-RPC error includes
+`data.code: "LOCATOR_EXPECT_TIMEOUT"` and `data.diagnostic` with the assertion,
+expected value, actual value, frame, match counts, and candidate summaries.
 
 ### `locator.click`
 

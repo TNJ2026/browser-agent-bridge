@@ -137,7 +137,12 @@ export function createLocatorHandlers({
       }
       await sleep(intervalMs);
     }
-    throw new Error(`Expected locator ${describeLocator(params)} to have count ${expected}, got ${last?.count ?? 0}`);
+    throw createLocatorExpectTimeoutError(params, 'toHaveCount', frameTarget, {
+      expected,
+      actual: last?.count ?? 0,
+      elapsedMs: Date.now() - started,
+      last
+    });
   }
 
   async function expectLocatorToHaveText(params) {
@@ -149,16 +154,23 @@ export function createLocatorHandlers({
     const started = Date.now();
     const frameTarget = await resolveFrameTarget(tabId, params);
     let last = null;
+    let lastResult = null;
 
     while (Date.now() - started <= timeoutMs) {
       const result = await runLocatorScript(tabId, params, Array.isArray(expected) ? 'allInnerTexts' : 'textContent', frameTarget);
+      lastResult = result;
       last = Array.isArray(expected) ? result.texts : result.text;
       if (matchesExpectedText(last, expected, params)) {
         return { ok: true, assertion: 'toHaveText', expected, actual: last, elapsedMs: Date.now() - started, frame: frameTarget.frame };
       }
       await sleep(intervalMs);
     }
-    throw new Error(`Expected locator ${describeLocator(params)} to have text ${JSON.stringify(expected)}, got ${JSON.stringify(last)}`);
+    throw createLocatorExpectTimeoutError(params, 'toHaveText', frameTarget, {
+      expected,
+      actual: last,
+      elapsedMs: Date.now() - started,
+      last: lastResult
+    });
   }
 
   async function expectLocatorToHaveAttribute(params) {
@@ -174,16 +186,24 @@ export function createLocatorHandlers({
     const started = Date.now();
     const frameTarget = await resolveFrameTarget(tabId, params);
     let last = null;
+    let lastResult = null;
 
     while (Date.now() - started <= timeoutMs) {
       const result = await runLocatorScript(tabId, { ...params, index, attributeName }, 'getAttribute', frameTarget);
+      lastResult = result;
       last = result.value;
       if (matchesExpectedText(last || '', expected, params)) {
         return { ok: true, assertion: 'toHaveAttribute', attribute: attributeName, expected, actual: last, elapsedMs: Date.now() - started, frame: frameTarget.frame };
       }
       await sleep(intervalMs);
     }
-    throw new Error(`Expected locator ${describeLocator(params)} attribute ${attributeName} to be ${JSON.stringify(expected)}, got ${JSON.stringify(last)}`);
+    throw createLocatorExpectTimeoutError(params, 'toHaveAttribute', frameTarget, {
+      attribute: attributeName,
+      expected,
+      actual: last,
+      elapsedMs: Date.now() - started,
+      last: lastResult
+    });
   }
 
   async function locatorClick(params) {
@@ -454,6 +474,54 @@ export function createLocatorHandlers({
     error.code = 'LOCATOR_ACTIONABILITY_TIMEOUT';
     error.diagnostic = diagnostic;
     return error;
+  }
+
+  function createLocatorExpectTimeoutError(params, assertion, frameTarget, details) {
+    const diagnostic = {
+      type: 'LocatorExpectationTimeout',
+      locator: describeLocator(params),
+      assertion,
+      elapsedMs: details.elapsedMs,
+      expected: details.expected,
+      actual: details.actual,
+      ...(details.attribute ? { attribute: details.attribute } : {}),
+      count: details.last?.count ?? null,
+      visibleCount: details.last?.visibleCount ?? null,
+      candidates: locatorDiagnosticCandidates(details.last),
+      frame: frameTarget?.frame || null
+    };
+    const error = new Error(formatLocatorExpectTimeoutMessage(diagnostic));
+    error.name = 'LocatorExpectationTimeout';
+    error.code = 'LOCATOR_EXPECT_TIMEOUT';
+    error.diagnostic = diagnostic;
+    return error;
+  }
+
+  function formatLocatorExpectTimeoutMessage(diagnostic) {
+    const subject = diagnostic.attribute
+      ? ` attribute ${diagnostic.attribute}`
+      : '';
+    const parts = [
+      `Timed out after ${diagnostic.elapsedMs}ms expecting locator ${diagnostic.locator}${subject} ${diagnostic.assertion}`,
+      `expected: ${JSON.stringify(diagnostic.expected)}`,
+      `actual: ${JSON.stringify(diagnostic.actual)}`
+    ];
+    if (Number.isInteger(diagnostic.count)) {
+      parts.push(`matches: ${diagnostic.count}, visible: ${diagnostic.visibleCount ?? 0}`);
+    }
+    if (diagnostic.frame?.frameId != null) {
+      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}`);
+    }
+    if (diagnostic.candidates.length > 0) {
+      parts.push(`candidates: ${diagnostic.candidates.map(formatCompactLocatorElement).join(' | ')}`);
+    }
+    return parts.join('; ');
+  }
+
+  function locatorDiagnosticCandidates(last) {
+    if (Array.isArray(last?.elements)) return last.elements.slice(0, 5).map(compactLocatorElement).filter(Boolean);
+    const element = compactLocatorElement(last?.element);
+    return element ? [element] : [];
   }
 
   function diagnosticReasons(last, checks, params) {

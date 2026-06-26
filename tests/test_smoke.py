@@ -146,6 +146,13 @@ def run_smoke_test():
         client.rpc("expect.locator.toHaveCount", {"tabId": tab_id, "selector": "body > button", "count": 7, "timeoutMs": 5000})
         client.rpc("expect.locator.toHaveText", {"tabId": tab_id, "locator": {"selector": "#screenshot-target"}, "expectedText": "Screenshot Target"})
         client.rpc("expect.locator.toHaveAttribute", {"tabId": tab_id, "locator": {"selector": "a#download-link"}, "attribute": "download", "expectedValue": "browser-agent-bridge-smoke.txt"})
+        try:
+            client.rpc("expect.locator.toHaveText", {"tabId": tab_id, "selector": "#screenshot-target", "expectedText": "Wrong Text", "timeoutMs": 250})
+            raise RuntimeError("expect.locator.toHaveText should have timed out with diagnostics")
+        except BrowserBridgeError as error:
+            diagnostic = (error.data or {}).get("diagnostic", {})
+            if (error.data or {}).get("code") != "LOCATOR_EXPECT_TIMEOUT" or diagnostic.get("assertion") != "toHaveText":
+                raise RuntimeError(f"expect locator diagnostics missing: {error} data={error.data}")
 
         screenshot_res = client.rpc("locator.screenshot", {"tabId": tab_id, "selector": "#screenshot-target", "format": "png"})
         if not screenshot_res.get("dataUrl", "").startswith("data:image/png;base64,"):
