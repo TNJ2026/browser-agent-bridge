@@ -198,7 +198,7 @@ chrome.notifications.onClicked.addListener(notificationId => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleRuntimeMessage(message, sender).then(sendResponse, error => {
-    sendResponse({ ok: false, error: errorMessage(error) });
+    sendResponse({ ok: false, error: errorMessage(error), ...(errorData(error) ? { data: errorData(error) } : {}) });
   });
   return true;
 });
@@ -318,7 +318,7 @@ async function connectNative() {
         error => nativePort?.postMessage({
           jsonrpc: '2.0',
           id: message.id,
-          error: { code: -32000, message: errorMessage(error) }
+          error: { code: -32000, message: errorMessage(error), ...(errorData(error) ? { data: errorData(error) } : {}) }
         })
       );
     }
@@ -1111,6 +1111,14 @@ function assertNumber(value, name) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function errorData(error) {
+  if (!error || typeof error !== 'object') return null;
+  const data = {};
+  if (typeof error.code === 'string' && error.code) data.code = error.code;
+  if (error.diagnostic && typeof error.diagnostic === 'object') data.diagnostic = error.diagnostic;
+  return Object.keys(data).length > 0 ? data : null;
 }
 
 function optionalPermissionsForMethod(method, params = {}) {

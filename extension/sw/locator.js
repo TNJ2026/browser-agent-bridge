@@ -391,6 +391,14 @@ export function createLocatorHandlers({
       last = result;
 
       if (params.strict === true && result.count !== 1) {
+        last = {
+          ...result,
+          actionability: {
+            ...(result.actionability || {}),
+            stable: false,
+            reasons: [`strict mode expected 1 match, got ${result.count}`]
+          }
+        };
         await sleep(intervalMs);
         continue;
       }
@@ -398,6 +406,7 @@ export function createLocatorHandlers({
       const rect = result.element?.rect || null;
       const stable = params.stable === false || (rect && previousRect && rectsAlmostEqual(rect, previousRect));
       const checks = result.actionability || {};
+      last = { ...result, actionability: { ...checks, stable: stable === true } };
       const ready = result.found &&
         checks.visible === true &&
         (actionKind === 'screenshot' || checks.enabled === true) &&
@@ -419,8 +428,85 @@ export function createLocatorHandlers({
       await sleep(intervalMs);
     }
 
-    const reasons = last?.actionability?.reasons || ['not found'];
-    throw new Error(`Timed out waiting for locator ${describeLocator(params)} to be actionable for ${actionKind}: ${reasons.join(', ')}`);
+    throw createLocatorTimeoutError(params, actionKind, frameTarget, last, Date.now() - started);
+  }
+
+  function createLocatorTimeoutError(params, actionKind, frameTarget, last, elapsedMs) {
+    const checks = last?.actionability || {};
+    const reasons = diagnosticReasons(last, checks, params);
+    const diagnostic = {
+      type: 'LocatorActionabilityTimeout',
+      locator: describeLocator(params),
+      action: actionKind,
+      elapsedMs,
+      count: last?.count ?? 0,
+      visibleCount: last?.visibleCount ?? 0,
+      index: Number.isInteger(params.index) && params.index >= 0 ? params.index : 0,
+      strict: params.strict === true,
+      reasons,
+      actionability: { ...checks, stable: checks.stable === true },
+      element: compactLocatorElement(last?.element),
+      candidates: (last?.elements || []).slice(0, 5).map(compactLocatorElement).filter(Boolean),
+      frame: frameTarget?.frame || null
+    };
+    const error = new Error(formatLocatorTimeoutMessage(diagnostic));
+    error.name = 'LocatorActionabilityTimeout';
+    error.code = 'LOCATOR_ACTIONABILITY_TIMEOUT';
+    error.diagnostic = diagnostic;
+    return error;
+  }
+
+  function diagnosticReasons(last, checks, params) {
+    const reasons = Array.isArray(checks.reasons) && checks.reasons.length > 0 ? [...checks.reasons] : [];
+    if (params.strict === true && Number.isInteger(last?.count) && last.count !== 1) {
+      reasons.unshift(`strict mode expected 1 match, got ${last.count}`);
+    }
+    if (last?.found && checks.stable !== true && params.stable !== false) reasons.push('not stable');
+    if (reasons.length === 0) reasons.push(last?.found ? 'not actionable' : 'not found');
+    return Array.from(new Set(reasons));
+  }
+
+  function formatLocatorTimeoutMessage(diagnostic) {
+    const parts = [
+      `Timed out after ${diagnostic.elapsedMs}ms waiting for locator ${diagnostic.locator} to be actionable for ${diagnostic.action}`,
+      `matches: ${diagnostic.count}, visible: ${diagnostic.visibleCount}, index: ${diagnostic.index}`,
+      `reasons: ${diagnostic.reasons.join(', ')}`
+    ];
+    if (diagnostic.frame?.frameId != null) {
+      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}`);
+    }
+    if (diagnostic.element) {
+      parts.push(`target: ${formatCompactLocatorElement(diagnostic.element)}`);
+    } else if (diagnostic.candidates.length > 0) {
+      parts.push(`candidates: ${diagnostic.candidates.map(formatCompactLocatorElement).join(' | ')}`);
+    }
+    if (diagnostic.actionability?.hitTarget) parts.push(`hit target: ${diagnostic.actionability.hitTarget}`);
+    return parts.join('; ');
+  }
+
+  function compactLocatorElement(element) {
+    if (!element || typeof element !== 'object') return null;
+    return {
+      index: element.index,
+      tagName: element.tagName,
+      id: element.id || '',
+      role: element.role || '',
+      accessibleName: element.accessibleName || '',
+      text: element.text || '',
+      visible: element.visible === true,
+      disabled: element.disabled === true,
+      rect: element.rect || null,
+      clickPoint: element.clickPoint || null
+    };
+  }
+
+  function formatCompactLocatorElement(element) {
+    const name = element.accessibleName ? ` name=${JSON.stringify(element.accessibleName)}` : '';
+    const text = !name && element.text ? ` text=${JSON.stringify(element.text.slice(0, 80))}` : '';
+    const id = element.id ? `#${element.id}` : '';
+    const role = element.role ? ` role=${element.role}` : '';
+    const rect = element.rect ? ` rect=${Math.round(element.rect.x)},${Math.round(element.rect.y)} ${Math.round(element.rect.width)}x${Math.round(element.rect.height)}` : '';
+    return `${element.tagName || 'element'}${id}${role}${name}${text}${rect}`;
   }
 
   function applyFrameOffset(point, frameTarget) {
@@ -565,6 +651,7 @@ export function createLocatorHandlers({
               found: false,
               count: matches.length,
               visibleCount: matches.filter(isVisible).length,
+              elements,
               actionability: { visible: false, enabled: false, editable: false, reasons: ['not found'] }
             };
           }

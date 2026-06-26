@@ -153,6 +153,8 @@ export function createTraceHandlers({
     }
     if (!outcome.ok) {
       event.error = errorMessage(outcome.error);
+      const data = errorData(outcome.error);
+      if (data) event.errorData = compactForTrace(data, trace);
     }
     pushTraceEvent(trace, event);
     await saveTracesNow();
@@ -289,6 +291,14 @@ export function createTraceHandlers({
     } catch {
       return { unserializable: true };
     }
+  }
+
+  function errorData(error) {
+    if (!error || typeof error !== 'object') return null;
+    const data = {};
+    if (typeof error.code === 'string' && error.code) data.code = error.code;
+    if (error.diagnostic && typeof error.diagnostic === 'object') data.diagnostic = error.diagnostic;
+    return Object.keys(data).length > 0 ? data : null;
   }
 
   function normalizeRetention(value) {

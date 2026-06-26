@@ -12,7 +12,9 @@ DEFAULT_PORT = 8765
 
 
 class BrowserBridgeError(RuntimeError):
-    pass
+    def __init__(self, message, data=None):
+        super().__init__(message)
+        self.data = data
 
 
 class BrowserBridgeClient:
@@ -58,7 +60,7 @@ class BrowserBridgeClient:
         response = self._request("POST", "/rpc", body, auth=True)
         if "error" in response:
             error = response["error"]
-            raise BrowserBridgeError(error.get("message", "JSON-RPC error"))
+            raise BrowserBridgeError(error.get("message", "JSON-RPC error"), error.get("data"))
         return response.get("result")
 
     def save_data_url(self, data_url, filename=None, directory=None):

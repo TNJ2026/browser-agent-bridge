@@ -92,6 +92,13 @@ def run_smoke_test():
         delayed_res = client.rpc("locator.click", {"tabId": tab_id, "role": "button", "name": "Delayed Action", "timeoutMs": 3000})
         print(f"Locator delayed click result: {delayed_res}")
         client.rpc("page.waitForText", {"tabId": tab_id, "text": "Delayed Done", "timeoutMs": 5000})
+        try:
+            client.rpc("locator.click", {"tabId": tab_id, "selector": "button", "index": 99, "timeoutMs": 250})
+            raise RuntimeError("locator.click should have timed out with diagnostics")
+        except BrowserBridgeError as error:
+            diagnostic = (error.data or {}).get("diagnostic", {})
+            if "LOCATOR_ACTIONABILITY_TIMEOUT" not in str(error.data) or not diagnostic.get("candidates"):
+                raise RuntimeError(f"locator timeout diagnostics missing: {error} data={error.data}")
         dom_delayed_res = client.rpc("dom.click", {"tabId": tab_id, "selector": "button#dom-delayed-btn", "timeoutMs": 3000})
         print(f"DOM delayed click result: {dom_delayed_res}")
         client.rpc("page.waitForText", {"tabId": tab_id, "text": "DOM Delayed Done", "timeoutMs": 5000})

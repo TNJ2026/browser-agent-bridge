@@ -602,6 +602,10 @@ without being covered by another element. Use `timeoutMs` and `intervalMs` to
 tune the wait, `strict:true` to require exactly one match, `stable:false` to
 skip the bounding-box stability check, or `force:true` to bypass actionability
 checks.
+On actionability timeout, the JSON-RPC error includes
+`data.code: "LOCATOR_ACTIONABILITY_TIMEOUT"` and `data.diagnostic` with the
+last match counts, reasons, frame, target element, and nearby candidate
+summaries.
 
 ```json
 { "tabId": 123, "role": "button", "name": "Submit", "timeoutMs": 30000 }
