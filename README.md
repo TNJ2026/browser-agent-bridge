@@ -340,6 +340,7 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Interactive | `computer.key` | Send key combinations. |
 | Interactive | `computer.scroll` | Scroll by pixel offsets. |
 | Interactive | `keyboard.type` | Type focused text with optional per-character delay. |
+| Interactive | `keyboard.compose` | Type focused text as IME composition (CJK/accents). |
 | Interactive | `keyboard.press` | Send realistic key presses and shortcuts. |
 | Downloads | `downloads.waitFor` | Wait for a matching download to finish. |
 | Recording | `recording.start` | Start workflow recording. |

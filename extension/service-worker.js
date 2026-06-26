@@ -632,6 +632,8 @@ async function dispatchRpc(request) {
       return computerHandlers.computerHover(params);
     case 'keyboard.type':
       return keyboardHandlers.keyboardType(params);
+    case 'keyboard.compose':
+      return keyboardHandlers.keyboardCompose(params);
     case 'keyboard.press':
       return keyboardHandlers.keyboardPress(params);
     case 'keyboard.down':
@@ -777,6 +779,7 @@ async function extensionInfo() {
       'computer.scroll',
       'computer.hover',
       'keyboard.type',
+      'keyboard.compose',
       'keyboard.press',
       'keyboard.down',
       'keyboard.up',
@@ -1237,6 +1240,7 @@ function getMethodCategory(method, params = {}) {
     method === 'computer.type' ||
     method === 'computer.key' ||
     method === 'keyboard.type' ||
+    method === 'keyboard.compose' ||
     method === 'keyboard.press' ||
     method === 'keyboard.down' ||
     method === 'keyboard.up'
