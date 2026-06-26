@@ -8,3 +8,7 @@ dist/
 key.pem
 .browser-agent-bridge.env
 *.crx
+
+# Agent runtime-generated site knowledge (keep the dir, ignore its contents)
+runtime/site-patterns/*
+!runtime/site-patterns/.gitkeep
