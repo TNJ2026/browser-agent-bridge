@@ -1002,6 +1002,26 @@ Returns the active interceptor rules for the specified tab, including remaining 
 { "tabId": 123 }
 ```
 
+### `network.routeFromHAR`
+
+Replays a HAR archive: converts `har.log.entries` into `mock` interceptor rules
+so each recorded request URL + method is fulfilled with its recorded status,
+headers, and body. This installs the rules like `network.setInterceptors` (and
+replaces any existing rules for the tab). Transfer headers
+(`content-encoding`/`content-length`/`transfer-encoding`) and HTTP/2 pseudo
+headers are dropped; base64 entry bodies are replayed as-is.
+
+Options: `urlFilter` (substring — only replay matching entries), `methods`
+(array — only replay these request methods), `sequential` (serve each entry once
+in order instead of repeatedly), and `notFound` — `fallback` (default, unmatched
+requests go to the network) or `abort` (unmatched requests are blocked via a
+trailing catch-all rule). Entries with no captured response (status 0) are
+skipped. Returns `rulesCount`, `entriesRouted`, and the effective `notFound`.
+
+```json
+{ "tabId": 123, "har": { "log": { "entries": [] } }, "notFound": "abort" }
+```
+
 ### `network.interceptors.clear`
 
 Clears active interceptor rules for the specified tab and disables CDP Fetch interception.

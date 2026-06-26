@@ -640,6 +640,8 @@ async function dispatchRpc(request) {
       return devtoolsHandlers.networkSetBlockedUrls(params);
     case 'network.setInterceptors':
       return devtoolsHandlers.networkSetInterceptors(params);
+    case 'network.routeFromHAR':
+      return devtoolsHandlers.networkRouteFromHAR(params);
     case 'network.interceptors.clear':
       return devtoolsHandlers.networkInterceptorsClear(params);
     case 'network.interceptors.events':
@@ -776,6 +778,7 @@ async function extensionInfo() {
       'network.read',
       'network.setBlockedUrls',
       'network.setInterceptors',
+      'network.routeFromHAR',
       'network.interceptors.clear',
       'network.interceptors.events',
       'network.interceptors.clearEvents',
@@ -997,6 +1000,7 @@ async function assertRpcTabIsolation(method, params = {}) {
     method === 'network.read' ||
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
+    method === 'network.routeFromHAR' ||
     method === 'network.interceptors.clear' ||
     method === 'network.interceptors.events' ||
     method === 'network.interceptors.clearEvents' ||
@@ -1179,6 +1183,7 @@ function optionalPermissionsForMethod(method, params = {}) {
     method === 'network.read' ||
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
+    method === 'network.routeFromHAR' ||
     method === 'network.interceptors.clear' ||
     method === 'network.interceptors.events' ||
     method === 'network.interceptors.clearEvents' ||
@@ -1252,7 +1257,7 @@ function getMethodCategory(method, params = {}) {
   ) {
     return 'page_action';
   }
-  if (method === 'network.setBlockedUrls' || method === 'network.setInterceptors' || method === 'network.interceptors.clear') {
+  if (method === 'network.setBlockedUrls' || method === 'network.setInterceptors' || method === 'network.routeFromHAR' || method === 'network.interceptors.clear') {
     return 'page_action';
   }
   if (
@@ -1309,6 +1314,7 @@ async function isAgentTabGroupOperation(method, params = {}) {
     method === 'network.read' ||
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
+    method === 'network.routeFromHAR' ||
     method === 'network.interceptors.clear' ||
     method === 'network.interceptors.events' ||
     method === 'network.interceptors.clearEvents' ||
