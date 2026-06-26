@@ -47,8 +47,8 @@ async function makeHandlers() {
       fetchInterceptorsByTab.delete(tabId);
       return { ok: true, tabId, rulesCount: 0 };
     },
-    interceptorEvents(tabId, limit) {
-      interceptorEventsCalls.push({ tabId, limit });
+    interceptorEvents(tabId, options) {
+      interceptorEventsCalls.push({ tabId, options });
       return { tabId, events: [{ ruleId: 'rule-1' }] };
     },
     clearInterceptorEvents(tabId) {
@@ -287,10 +287,36 @@ test('network.interceptors.events returns recent match events', async () => {
 
   const result = await context.handlers.networkInterceptorsEvents({ tabId: 7, limit: 5 });
 
-  assert.deepEqual(context.interceptorEventsCalls, [{ tabId: 7, limit: 5 }]);
+  assert.deepEqual(context.interceptorEventsCalls, [{ tabId: 7, options: { limit: 5 } }]);
   assert.deepEqual(result, { tabId: 7, events: [{ ruleId: 'rule-1' }] });
   assert.equal(context.attachCount, 0);
   assert.equal(context.calls.length, 0);
+});
+
+test('network.interceptors.events normalizes filters', async () => {
+  const context = await makeHandlers();
+
+  await context.handlers.networkInterceptorsEvents({
+    tabId: 7,
+    limit: 999,
+    ruleId: 'route-1',
+    action: 'mock',
+    method: 'post',
+    urlContains: '/api/',
+    since: 123
+  });
+
+  assert.deepEqual(context.interceptorEventsCalls, [{
+    tabId: 7,
+    options: {
+      limit: 500,
+      ruleId: 'route-1',
+      action: 'mock',
+      method: 'POST',
+      urlContains: '/api/',
+      since: 123
+    }
+  }]);
 });
 
 test('network.interceptors.clearEvents clears recent match events', async () => {

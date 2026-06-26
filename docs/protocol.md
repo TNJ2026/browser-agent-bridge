@@ -925,10 +925,12 @@ Clears active interceptor rules for the specified tab and disables CDP Fetch int
 
 ### `network.interceptors.events`
 
-Returns recent interceptor match events for the specified tab.
+Returns recent interceptor match events for the specified tab. Optional filters
+include `ruleId`, `action`, `method`, `urlContains`, and `since` (event
+timestamp in milliseconds). `limit` defaults to 100 and is capped at 500.
 
 ```json
-{ "tabId": 123, "limit": 50 }
+{ "tabId": 123, "limit": 50, "ruleId": "mock-user-once", "action": "mock" }
 ```
 
 ### `network.interceptors.clearEvents`

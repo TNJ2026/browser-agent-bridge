@@ -71,8 +71,7 @@ export function createDevtoolsHandlers({
   async function networkInterceptorsEvents(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'network.interceptors.events');
-    const limit = Number.isInteger(params.limit) && params.limit > 0 ? Math.min(params.limit, 500) : 100;
-    return interceptorEvents(tabId, limit);
+    return interceptorEvents(tabId, normalizeInterceptorEventFilter(params));
   }
 
   async function networkInterceptorsClearEvents(params) {
@@ -242,6 +241,43 @@ function normalizeOptionalHeaderMatcherMap(headers, label, { regex = false } = {
     }
     return [name, value];
   }));
+}
+
+function normalizeInterceptorEventFilter(params = {}) {
+  const filter = {
+    limit: Number.isInteger(params.limit) && params.limit > 0 ? Math.min(params.limit, 500) : 100
+  };
+  if (params.ruleId != null) {
+    if (typeof params.ruleId !== 'string' || params.ruleId.length === 0) {
+      throw new Error('network.interceptors.events ruleId must be a non-empty string');
+    }
+    filter.ruleId = params.ruleId;
+  }
+  if (params.action != null) {
+    if (!['block', 'redirect', 'mock', 'modifyHeaders'].includes(params.action)) {
+      throw new Error('network.interceptors.events action is invalid');
+    }
+    filter.action = params.action;
+  }
+  if (params.method != null) {
+    if (typeof params.method !== 'string' || params.method.length === 0) {
+      throw new Error('network.interceptors.events method must be a non-empty string');
+    }
+    filter.method = params.method.toUpperCase();
+  }
+  if (params.urlContains != null) {
+    if (typeof params.urlContains !== 'string' || params.urlContains.length === 0) {
+      throw new Error('network.interceptors.events urlContains must be a non-empty string');
+    }
+    filter.urlContains = params.urlContains;
+  }
+  if (params.since != null) {
+    if (!Number.isFinite(params.since) || params.since < 0) {
+      throw new Error('network.interceptors.events since must be a non-negative number');
+    }
+    filter.since = params.since;
+  }
+  return filter;
 }
 
 function isBase64String(value) {

@@ -274,3 +274,35 @@ test('network interceptor events can be read and cleared independently', async (
   assert.deepEqual(context.controller.events(7).events, []);
   assert.equal(context.fetchInterceptorsByTab.get(7).length, 1);
 });
+
+test('network interceptor events support filters', async () => {
+  const context = await makeController([
+    { id: 'block-route', urlPattern: '*api.example.test/block*', action: 'block' },
+    { id: 'mock-route', urlPattern: '*api.example.test/mock*', action: 'mock', responseBody: '{}' }
+  ]);
+  const before = Date.now();
+
+  await context.controller.handleRequestPaused(7, {
+    requestId: 'request-block',
+    resourceType: 'Fetch',
+    request: { url: 'https://api.example.test/block/1', method: 'GET', headers: {} }
+  });
+  await context.controller.handleRequestPaused(7, {
+    requestId: 'request-mock',
+    resourceType: 'Fetch',
+    request: { url: 'https://api.example.test/mock/1', method: 'POST', headers: {} }
+  });
+
+  const filtered = context.controller.events(7, {
+    action: 'mock',
+    method: 'POST',
+    ruleId: 'mock-route',
+    urlContains: '/mock/',
+    since: before,
+    limit: 10
+  });
+
+  assert.deepEqual(filtered.events.map(event => event.ruleId), ['mock-route']);
+  assert.equal(filtered.events[0].method, 'POST');
+  assert.equal(context.controller.events(7, { action: 'redirect' }).events.length, 0);
+});

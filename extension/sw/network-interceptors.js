@@ -72,9 +72,11 @@ export function createNetworkInterceptorController({
     };
   }
 
-  function events(tabId, limit = 100) {
+  function events(tabId, options = {}) {
+    const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : 100;
     const allEvents = interceptorEventsByTab.get(tabId) || [];
-    return { tabId, events: cloneEvents(allEvents.slice(-limit)) };
+    const filtered = allEvents.filter(event => eventMatchesFilter(event, options));
+    return { tabId, events: cloneEvents(filtered.slice(-limit)) };
   }
 
   function clearEvents(tabId) {
@@ -247,6 +249,15 @@ function cloneRules(rules) {
 
 function cloneEvents(events) {
   return events.map(event => ({ ...event }));
+}
+
+function eventMatchesFilter(event, options) {
+  if (options.ruleId != null && event.ruleId !== options.ruleId) return false;
+  if (options.action != null && event.action !== options.action) return false;
+  if (options.method != null && event.method !== options.method) return false;
+  if (options.urlContains != null && !String(event.url || '').includes(options.urlContains)) return false;
+  if (options.since != null && Number(event.timestamp || 0) < options.since) return false;
+  return true;
 }
 
 function redactHeaderMap(headers) {
