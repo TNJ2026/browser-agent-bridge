@@ -19,6 +19,11 @@ HOST = os.environ.get('BROWSER_AGENT_BRIDGE_HOST', '127.0.0.1')
 AUTH_TOKEN = os.environ.get('BROWSER_AGENT_BRIDGE_TOKEN', '')
 ALLOW_NO_AUTH = os.environ.get('BROWSER_AGENT_BRIDGE_ALLOW_NO_AUTH', '').lower() in ('1', 'true', 'yes')
 EXTENSION_ID = os.environ.get('BROWSER_AGENT_BRIDGE_EXTENSION_ID', '').strip()
+# Whether the id was pinned by the operator via env. Env always wins; an id
+# learned at runtime from the (trusted) native-messaging channel only fills in
+# when no env pin exists.
+EXTENSION_ID_FROM_ENV = bool(EXTENSION_ID)
+EXTENSION_ID_RE = re.compile(r'^[a-p]{32}$')
 SAVE_DIR = Path(os.environ.get('BROWSER_AGENT_BRIDGE_SAVE_DIR', str(Path.home() / 'Downloads' / 'browser-agent-bridge')))
 ALLOW_CUSTOM_SAVE_DIR = os.environ.get('BROWSER_AGENT_BRIDGE_ALLOW_CUSTOM_SAVE_DIR', '').lower() in ('1', 'true', 'yes')
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
@@ -67,7 +72,7 @@ def write_native_message(message):
         log(f"Failed to write native message: {e}")
 
 def handle_native_notification(message):
-    global extension_ready, extension_version, configured_port, allow_read_tabs, enable_runtime_approval
+    global extension_ready, extension_version, configured_port, allow_read_tabs, enable_runtime_approval, EXTENSION_ID
     method = message.get("method")
     params = message.get("params", {})
     if method == "extension.ready":
@@ -78,6 +83,13 @@ def handle_native_notification(message):
                 configured_port = int(params["port"])
             except Exception:
                 pass
+        # Chrome only connects the extension named in the native-messaging
+        # manifest's allowed_origins, so the id reported over this channel is
+        # authoritative. Adopt it to pin origin checks when no env pin exists.
+        if not EXTENSION_ID_FROM_ENV:
+            reported_id = params.get("extensionId")
+            if isinstance(reported_id, str) and EXTENSION_ID_RE.match(reported_id.strip().lower()):
+                EXTENSION_ID = reported_id.strip().lower()
         config_ready.set()
     elif method == "extension.settings":
         allow_read_tabs = params.get("allowReadTabs", True)
@@ -199,17 +211,18 @@ def call_extension(request):
             "error": {"code": -32000, "message": "Chrome extension is not connected to the native host"}
         }
 
-    req_id = request.get("id")
-    if req_id is None:
-        with rpc_id_lock:
-            req_id = f"native-{next_rpc_id}"
-            next_rpc_id += 1
-    else:
-        req_id = str(req_id)
+    # The id used to correlate the forwarded request with its response must be
+    # globally unique. Client-supplied ids are untrusted and may collide across
+    # concurrent clients (multiple WebSocket connections + HTTP), so we always
+    # mint an internal id for matching and restore the client's id on the way out.
+    client_id = request.get("id")
+    with rpc_id_lock:
+        internal_id = f"rpc-{next_rpc_id}"
+        next_rpc_id += 1
 
     forwarded = {
         "jsonrpc": "2.0",
-        "id": req_id,
+        "id": internal_id,
         "method": request["method"],
         "params": request.get("params", {})
     }
@@ -218,7 +231,7 @@ def call_extension(request):
     waiter = {"event": event, "response": None}
 
     with pending_lock:
-        pending_requests[req_id] = waiter
+        pending_requests[internal_id] = waiter
 
     write_native_message(forwarded)
 
@@ -227,15 +240,23 @@ def call_extension(request):
     finished = event.wait(timeout=timeout_sec)
 
     with pending_lock:
-        pending_requests.pop(req_id, None)
+        pending_requests.pop(internal_id, None)
+
+    # Echo back the id the client sent (preserving its original type), falling
+    # back to the internal id when the client omitted one.
+    response_id = client_id if client_id is not None else internal_id
 
     if not finished:
         return {
             "jsonrpc": "2.0",
-            "id": req_id,
+            "id": response_id,
             "error": {"code": -32000, "message": f"Request timed out: {request['method']}"}
         }
-    return waiter["response"]
+
+    response = waiter["response"]
+    if isinstance(response, dict):
+        response["id"] = response_id
+    return response
 
 def handle_save_data_url(request):
     try:
@@ -401,6 +422,13 @@ def websocket_recv(sock):
         length = struct.unpack("!H", websocket_read_exact(sock, 2))[0]
     elif length == 127:
         length = struct.unpack("!Q", websocket_read_exact(sock, 8))[0]
+    if length > MAX_MESSAGE_BYTES:
+        # Reject before allocating/reading the payload to avoid memory exhaustion.
+        try:
+            websocket_send(sock, struct.pack("!H", 1009) + b"message too big", opcode=0x8)
+        except Exception:
+            pass
+        raise ConnectionError(f"WebSocket frame exceeds max size ({length} > {MAX_MESSAGE_BYTES})")
     mask = websocket_read_exact(sock, 4) if masked else b""
     payload = websocket_read_exact(sock, length) if length else b""
     if masked:
@@ -433,25 +461,65 @@ def websocket_send_json(sock, value):
     websocket_send(sock, json.dumps(value))
 
 def register_websocket(sock):
-    lock = threading.Lock()
+    # Each client carries its own send lock and an optional tab filter. tabs is
+    # None by default (receive every event); a set restricts delivery to events
+    # for those tab ids. The recv thread mutates tabs; the broadcaster reads it.
+    client = {"lock": threading.Lock(), "tabs": None}
     with websocket_clients_lock:
-        websocket_clients[sock] = lock
-    return lock
+        websocket_clients[sock] = client
+    return client
 
 def unregister_websocket(sock):
     with websocket_clients_lock:
         websocket_clients.pop(sock, None)
 
+def event_tab_id(value):
+    """Best-effort tab id for an outbound event, or None for global events."""
+    params = value.get("params") if isinstance(value, dict) else None
+    if not isinstance(params, dict):
+        return None
+    source = params.get("source")
+    if isinstance(source, dict) and isinstance(source.get("tabId"), int):
+        return source["tabId"]
+    if isinstance(params.get("tabId"), int):
+        return params["tabId"]
+    return None
+
 def broadcast_websocket(value):
     payload = json.dumps(value)
+    tab_id = event_tab_id(value)
     with websocket_clients_lock:
         clients = list(websocket_clients.items())
-    for sock, lock in clients:
+    for sock, client in clients:
+        tabs = client["tabs"]
+        # A subscribed client only gets tab-scoped events for its tabs; events
+        # with no tab id (e.g. extension.ready) always go to everyone.
+        if tabs is not None and tab_id is not None and tab_id not in tabs:
+            continue
         try:
-            with lock:
+            with client["lock"]:
                 websocket_send(sock, payload)
         except Exception:
             unregister_websocket(sock)
+
+def apply_ws_subscription(client, request):
+    params = request.get("params") or {}
+    tab_ids = params.get("tabIds")
+    if tab_ids is None:
+        client["tabs"] = None
+    elif isinstance(tab_ids, list):
+        client["tabs"] = {t for t in tab_ids if isinstance(t, int) and not isinstance(t, bool)}
+    else:
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "error": {"code": -32602, "message": "tabIds must be an array of integers or null"}
+        }
+    return {
+        "jsonrpc": "2.0",
+        "id": request.get("id"),
+        "result": {"subscribed": sorted(client["tabs"]) if client["tabs"] is not None else None}
+    }
 
 def websocket_send_client_json(sock, lock, value):
     with lock:
@@ -486,7 +554,9 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
             return True
         if origin_lower.startswith("chrome-extension://"):
             if not EXTENSION_ID:
-                return True
+                # Fail closed: with no pinned id we cannot tell which extension
+                # this is, so reject rather than trust every extension origin.
+                return False
             allowed = f"chrome-extension://{EXTENSION_ID.lower()}"
             return origin_lower == allowed or origin_lower == f"{allowed}/"
         return False
@@ -560,7 +630,8 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         sock = self.connection
-        client_lock = register_websocket(sock)
+        client = register_websocket(sock)
+        client_lock = client["lock"]
         try:
             websocket_send_client_json(sock, client_lock, {
                 "jsonrpc": "2.0",
@@ -581,7 +652,16 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
                     continue
                 try:
                     request = json.loads(text)
-                    response = call_extension(request)
+                    method = request.get("method") if isinstance(request, dict) else None
+                    if method == "bridge.subscribe":
+                        # Host-local control: restrict which tab events this
+                        # connection receives. Not forwarded to the extension.
+                        response = apply_ws_subscription(client, request)
+                    elif method == "bridge.unsubscribe":
+                        client["tabs"] = None
+                        response = {"jsonrpc": "2.0", "id": request.get("id"), "result": {"subscribed": None}}
+                    else:
+                        response = call_extension(request)
                 except Exception as e:
                     response = {
                         "jsonrpc": "2.0",
