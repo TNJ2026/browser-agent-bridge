@@ -324,6 +324,8 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Interactive | `locator.screenshot` | Capture a screenshot of one matched element. |
 | Interactive | `locator.click` | Click by selector, text, role/name, label, or placeholder. |
 | Interactive | `locator.fill` | Fill fields by selector, label, or other locator fields. |
+| Interactive | `locator.press` | Focus a located element and press a key or shortcut. |
+| Interactive | `locator.pressSequentially` | Focus a located element and type text key by key. |
 | Interactive | `locator.check` | Check checkbox, radio, or switch-like controls. |
 | Interactive | `locator.uncheck` | Uncheck checkbox or switch-like controls. |
 | Interactive | `locator.selectOption` | Select native `<select>` options. |

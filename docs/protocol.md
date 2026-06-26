@@ -683,6 +683,29 @@ different value, use the nested form.
 { "tabId": 123, "locator": { "text": "Search" }, "value": "browser bridge" }
 ```
 
+### `locator.press`
+
+Focuses the matched element and presses a single key or shortcut (for example
+`Enter`, `Tab`, `Control+a`). Auto-waits for the element to be visible, enabled,
+and stable (no editable or hit-test requirement, so it works on buttons too).
+Pass `force:true` to skip the wait, `delayMs` to hold the key.
+
+```json
+{ "tabId": 123, "selector": "input[name=q]", "key": "Enter" }
+```
+
+### `locator.pressSequentially`
+
+Focuses the matched element and types `text` (alias `value`) character by
+character, optionally with `delayMs` between keys. Auto-waits like `locator.fill`
+(requires editable). Prefer `locator.fill` for setting a value directly; use this
+when a field reacts to individual keystrokes. Typed text is redacted from
+recordings unless `includeText:true`.
+
+```json
+{ "tabId": 123, "selector": "input[name=q]", "text": "brow", "delayMs": 50 }
+```
+
 ### `locator.dragTo`
 
 Drags from one locator to another. Pass the destination as `targetLocator`,

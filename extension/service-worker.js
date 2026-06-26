@@ -78,6 +78,7 @@ const locatorHandlers = createLocatorHandlers({
   cdp,
   captureElementScreenshot,
   resolveFrameTarget: frameTargetResolver.resolveFrameTarget,
+  keyboardDispatcher,
   sleep,
   defaultTimeoutMs: DEFAULT_TIMEOUT_MS
 });
@@ -598,6 +599,10 @@ async function dispatchRpc(request) {
       return locatorHandlers.locatorScreenshot(params);
     case 'locator.fill':
       return locatorHandlers.locatorFill(params);
+    case 'locator.press':
+      return locatorHandlers.locatorPress(params);
+    case 'locator.pressSequentially':
+      return locatorHandlers.locatorPressSequentially(params);
     case 'locator.check':
       return locatorHandlers.locatorCheck(params);
     case 'locator.uncheck':
@@ -750,6 +755,8 @@ async function extensionInfo() {
       'locator.dispatchDragDrop',
       'locator.screenshot',
       'locator.fill',
+      'locator.press',
+      'locator.pressSequentially',
       'locator.check',
       'locator.uncheck',
       'locator.selectOption',
@@ -1213,6 +1220,8 @@ function getMethodCategory(method, params = {}) {
   if (
     method === 'dom.type' ||
     method === 'locator.fill' ||
+    method === 'locator.press' ||
+    method === 'locator.pressSequentially' ||
     method === 'computer.type' ||
     method === 'computer.key' ||
     method === 'keyboard.type' ||

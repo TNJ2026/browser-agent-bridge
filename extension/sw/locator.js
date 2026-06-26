@@ -7,6 +7,7 @@ export function createLocatorHandlers({
   cdp,
   captureElementScreenshot,
   resolveFrameTarget,
+  keyboardDispatcher,
   sleep,
   defaultTimeoutMs,
   chromeApi = chrome
@@ -325,6 +326,37 @@ export function createLocatorHandlers({
       ? await runLocatorScript(tabId, { ...params, fillText: text, index, _ignoreTopLevelTextLocator: true }, 'fill', frameTarget)
       : await dispatchRealTextInput(tabId, text, params).then(() => runLocatorScript(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'summarize', frameTarget));
     await recordAction(tabId, 'locator.fill', { locator: locatorSpecForRecording({ ...params, _ignoreTopLevelTextLocator: true }), index, text, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result.element, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
+  }
+
+  async function locatorPress(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.press');
+    assertString(params.key, 'key');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    // 'press' actionability gate requires visible+enabled+stable (no editable /
+    // hit-test), so it works on buttons and inputs alike.
+    const readiness = params.force === true ? null : await waitForLocatorActionable(tabId, { ...params, index }, 'press', frameTarget);
+    const result = await runLocatorScript(tabId, { ...params, index, force: true }, 'focus', frameTarget);
+    await attachDebugger(tabId);
+    await keyboardDispatcher.press(tabId, params.key, params);
+    await recordAction(tabId, 'locator.press', { locator: locatorSpecForRecording(params), index, key: params.key, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result.element, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
+  }
+
+  async function locatorPressSequentially(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.pressSequentially');
+    const text = typeof params.text === 'string' ? params.text : params.value;
+    assertString(text, 'text');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const readiness = params.force === true ? null : await waitForLocatorActionable(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'fill', frameTarget);
+    const result = await runLocatorScript(tabId, { ...params, index, force: true, _ignoreTopLevelTextLocator: true }, 'focus', frameTarget);
+    await attachDebugger(tabId);
+    await keyboardDispatcher.typeText(tabId, text, params);
+    await recordAction(tabId, 'locator.pressSequentially', { locator: locatorSpecForRecording({ ...params, _ignoreTopLevelTextLocator: true }), index, text, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
     return { ok: true, element: result.element, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
@@ -858,6 +890,10 @@ export function createLocatorHandlers({
         }
 
         if (typeof element.focus === 'function') element.focus({ preventScroll: true });
+
+        if (options.action === 'focus') {
+          return { element: summarizeElement(element, options.index) };
+        }
 
         if (options.action === 'prepareTextInput') {
           return prepareTextInput(element, options.index, options.replace !== false);
@@ -1682,6 +1718,8 @@ export function createLocatorHandlers({
     locatorScreenshot,
     locatorDispatchDragDrop,
     locatorFill,
+    locatorPress,
+    locatorPressSequentially,
     locatorCheck,
     locatorUncheck,
     locatorSelectOption,
