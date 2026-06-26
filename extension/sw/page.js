@@ -91,18 +91,65 @@ export function createPageHandlers({
     const resourceType = typeof params.resourceType === 'string' && params.resourceType ? params.resourceType.toLowerCase() : null;
     const responseHeaderContains = normalizeHeaderMatcher(params.responseHeaderContains ?? params.headerContains, 'page.waitForResponse headerContains');
     const responseHeaderRegex = normalizeHeaderMatcher(params.responseHeaderRegex ?? params.headerRegex, 'page.waitForResponse headerRegex', { regex: true });
+    const mimeType = typeof params.mimeType === 'string' && params.mimeType ? params.mimeType.toLowerCase() : null;
+    const minSize = Number.isInteger(params.minSize) && params.minSize >= 0 ? params.minSize : null;
+    const maxSize = Number.isInteger(params.maxSize) && params.maxSize >= 0 ? params.maxSize : null;
+    const bodyContains = normalizeOptionalNonEmptyString(params.bodyContains, 'page.waitForResponse bodyContains');
+    const bodyRegex = normalizeOptionalRegexString(params.bodyRegex, 'page.waitForResponse bodyRegex');
+    const jsonPath = normalizeOptionalNonEmptyString(params.jsonPath, 'page.waitForResponse jsonPath');
+    const jsonContains = normalizeOptionalNonEmptyString(params.jsonContains, 'page.waitForResponse jsonContains');
+    const jsonEquals = 'jsonEquals' in params ? params.jsonEquals : undefined;
     const started = Date.now();
-    const waitOptions = { ...params, status, method, resourceType, responseHeaderContains, responseHeaderRegex, started };
+    const waitOptions = { ...params, status, method, resourceType, responseHeaderContains, responseHeaderRegex, mimeType, minSize, maxSize, bodyContains, bodyRegex, jsonPath, jsonContains, jsonEquals, started };
+    const needsBody = !!(bodyContains || bodyRegex || jsonPath);
+    const needsFinished = needsBody || minSize !== null || maxSize !== null;
+    const bodyCache = new Map();
     await attachDebugger(tabId);
     await cdp(tabId, 'Network.enable').catch(() => {});
 
     while (Date.now() - started <= timeoutMs) {
       const events = networkEventsByTab?.get(tabId) || [];
-      const match = findMatchingResponse(events, waitOptions);
-      if (match) return { ok: true, response: match, elapsedMs: Date.now() - started };
+      for (const candidate of collectMatchingResponses(events, waitOptions)) {
+        // size and body filters need the response body to have finished loading.
+        const finished = needsFinished ? findLoadingFinished(events, candidate.requestId, candidate.index) : null;
+        if (needsFinished && !finished) continue;
+        if (minSize !== null && finished.encodedDataLength < minSize) continue;
+        if (maxSize !== null && finished.encodedDataLength > maxSize) continue;
+
+        let bodyText = null;
+        if (needsBody) {
+          bodyText = await fetchResponseBodyText(tabId, candidate.requestId, bodyCache);
+          if (!responseBodyMatches(bodyText, waitOptions)) continue;
+        }
+
+        const response = { ...candidate.summary };
+        if (finished) response.encodedDataLength = finished.encodedDataLength;
+        if (needsBody) {
+          response.bodyMatched = true;
+          response.bodyBytes = bodyText.length;
+          if (params.includeBody === true) response.bodyPreview = bodyText.slice(0, 2000);
+        }
+        return { ok: true, response, elapsedMs: Date.now() - started };
+      }
       await sleep(intervalMs);
     }
     throw createNetworkWaitTimeoutError('response', params, waitOptions, networkEventsByTab?.get(tabId) || [], Date.now() - started);
+  }
+
+  async function fetchResponseBodyText(tabId, requestId, cache) {
+    if (!requestId) return null;
+    if (cache.has(requestId)) return cache.get(requestId);
+    let text = null;
+    try {
+      const result = await cdp(tabId, 'Network.getResponseBody', { requestId });
+      if (result && typeof result.body === 'string') {
+        text = result.base64Encoded ? decodeBase64ToText(result.body) : result.body;
+      }
+    } catch {
+      text = null;
+    }
+    cache.set(requestId, text);
+    return text;
   }
 
   async function pageWaitForRequest(params) {
@@ -612,38 +659,119 @@ export function createPageHandlers({
   };
 }
 
-function findMatchingResponse(events, options) {
+function responseMetadataMatches(event, events, options, index) {
+  if (event.method !== 'Network.responseReceived') return false;
+  const params = event.params || {};
+  const response = params.response || {};
+  const url = response.url || '';
+  if (!matchesUrlPattern(url, options)) return false;
+  if (options.status !== null && response.status !== options.status) return false;
+  if (options.resourceType && String(params.type || '').toLowerCase() !== options.resourceType) return false;
+  if (options.mimeType && !String(response.mimeType || '').toLowerCase().includes(options.mimeType)) return false;
+  if (!headersMatch(response.headers || {}, options.responseHeaderContains, 'contains')) return false;
+  if (!headersMatch(response.headers || {}, options.responseHeaderRegex, 'regex')) return false;
+  if (options.method) {
+    const requestMethod = findRequestMethod(events, params.requestId, index);
+    if (requestMethod !== options.method) return false;
+  }
+  return true;
+}
+
+function summarizeResponseMatch(event, events, options, index) {
+  const params = event.params || {};
+  const response = params.response || {};
+  return {
+    requestId: params.requestId || '',
+    url: response.url || '',
+    status: response.status,
+    statusText: response.statusText || '',
+    mimeType: response.mimeType || '',
+    resourceType: params.type || '',
+    method: findRequestMethod(events, params.requestId, index) || null,
+    fromDiskCache: response.fromDiskCache === true,
+    fromServiceWorker: response.fromServiceWorker === true,
+    ...(options.includeHeaders === true ? { headers: redactHeaderMap(response.headers || {}) } : {}),
+    timestamp: event.timestamp
+  };
+}
+
+// Newest-first list of metadata-matched responses. Callers that also filter on
+// body/size walk this list and apply the async checks per candidate.
+function collectMatchingResponses(events, options) {
+  const matches = [];
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i];
     if (event.timestamp < options.started) break;
-    if (event.method !== 'Network.responseReceived') continue;
-    const params = event.params || {};
-    const response = params.response || {};
-    const url = response.url || '';
-    if (!matchesUrlPattern(url, options)) continue;
-    if (options.status !== null && response.status !== options.status) continue;
-    if (options.resourceType && String(params.type || '').toLowerCase() !== options.resourceType) continue;
-    if (!headersMatch(response.headers || {}, options.responseHeaderContains, 'contains')) continue;
-    if (!headersMatch(response.headers || {}, options.responseHeaderRegex, 'regex')) continue;
-    if (options.method) {
-      const requestMethod = findRequestMethod(events, params.requestId, i);
-      if (requestMethod !== options.method) continue;
+    if (!responseMetadataMatches(event, events, options, i)) continue;
+    matches.push({
+      requestId: event.params?.requestId || '',
+      index: i,
+      summary: summarizeResponseMatch(event, events, options, i)
+    });
+  }
+  return matches;
+}
+
+function findLoadingFinished(events, requestId, fromIndex) {
+  if (!requestId) return null;
+  for (let i = fromIndex; i < events.length; i += 1) {
+    const event = events[i];
+    if (event.method === 'Network.loadingFinished' && event.params?.requestId === requestId) {
+      return { encodedDataLength: Number(event.params?.encodedDataLength) || 0, timestamp: event.timestamp };
     }
-    return {
-      requestId: params.requestId || '',
-      url,
-      status: response.status,
-      statusText: response.statusText || '',
-      mimeType: response.mimeType || '',
-      resourceType: params.type || '',
-      method: findRequestMethod(events, params.requestId, i) || null,
-      fromDiskCache: response.fromDiskCache === true,
-      fromServiceWorker: response.fromServiceWorker === true,
-      ...(options.includeHeaders === true ? { headers: redactHeaderMap(response.headers || {}) } : {}),
-      timestamp: event.timestamp
-    };
   }
   return null;
+}
+
+function responseBodyMatches(bodyText, options) {
+  if (typeof bodyText !== 'string') return false;
+  if (options.bodyContains && !bodyText.includes(options.bodyContains)) return false;
+  if (options.bodyRegex && !new RegExp(options.bodyRegex).test(bodyText)) return false;
+  if (options.jsonPath) {
+    let parsed;
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch {
+      return false;
+    }
+    const value = resolveJsonPath(parsed, options.jsonPath);
+    if (value === undefined) return false;
+    if (options.jsonEquals !== undefined && !jsonDeepEqual(value, options.jsonEquals)) return false;
+    if (options.jsonContains != null && !String(value).includes(options.jsonContains)) return false;
+  }
+  return true;
+}
+
+function resolveJsonPath(root, path) {
+  const tokens = String(path).replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+  let current = root;
+  for (const token of tokens) {
+    if (current == null || typeof current !== 'object') return undefined;
+    current = current[token];
+  }
+  return current;
+}
+
+function jsonDeepEqual(a, b) {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return a === b;
+  }
+}
+
+function decodeBase64ToText(value) {
+  try {
+    const binString = atob(value);
+    const len = binString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binString.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch {
+    return null;
+  }
 }
 
 function findMatchingRequest(events, options) {
@@ -739,7 +867,15 @@ function networkWaitFilters(params, options) {
     ...(options.responseHeaderContains ? { responseHeaderContains: Object.keys(options.responseHeaderContains) } : {}),
     ...(options.responseHeaderRegex ? { responseHeaderRegex: Object.keys(options.responseHeaderRegex) } : {}),
     ...(options.postDataContains != null ? { postDataContains: true } : {}),
-    ...(options.postDataRegex != null ? { postDataRegex: options.postDataRegex } : {})
+    ...(options.postDataRegex != null ? { postDataRegex: options.postDataRegex } : {}),
+    ...(options.mimeType ? { mimeType: options.mimeType } : {}),
+    ...(options.minSize != null ? { minSize: options.minSize } : {}),
+    ...(options.maxSize != null ? { maxSize: options.maxSize } : {}),
+    ...(options.bodyContains != null ? { bodyContains: true } : {}),
+    ...(options.bodyRegex != null ? { bodyRegex: options.bodyRegex } : {}),
+    ...(options.jsonPath != null ? { jsonPath: options.jsonPath } : {}),
+    ...(options.jsonContains != null ? { jsonContains: true } : {}),
+    ...(options.jsonEquals !== undefined ? { jsonEquals: options.jsonEquals } : {})
   };
 }
 
