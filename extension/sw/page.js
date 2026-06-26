@@ -72,13 +72,15 @@ export function createPageHandlers({
     const status = Number.isInteger(params.status) ? params.status : null;
     const method = typeof params.method === 'string' && params.method ? params.method.toUpperCase() : null;
     const resourceType = typeof params.resourceType === 'string' && params.resourceType ? params.resourceType.toLowerCase() : null;
+    const responseHeaderContains = normalizeHeaderMatcher(params.responseHeaderContains ?? params.headerContains, 'page.waitForResponse headerContains');
+    const responseHeaderRegex = normalizeHeaderMatcher(params.responseHeaderRegex ?? params.headerRegex, 'page.waitForResponse headerRegex', { regex: true });
     const started = Date.now();
     await attachDebugger(tabId);
     await cdp(tabId, 'Network.enable').catch(() => {});
 
     while (Date.now() - started <= timeoutMs) {
       const events = networkEventsByTab?.get(tabId) || [];
-      const match = findMatchingResponse(events, { ...params, status, method, resourceType, started });
+      const match = findMatchingResponse(events, { ...params, status, method, resourceType, responseHeaderContains, responseHeaderRegex, started });
       if (match) return { ok: true, response: match, elapsedMs: Date.now() - started };
       await sleep(intervalMs);
     }
@@ -92,13 +94,15 @@ export function createPageHandlers({
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
     const method = typeof params.method === 'string' && params.method ? params.method.toUpperCase() : null;
     const resourceType = typeof params.resourceType === 'string' && params.resourceType ? params.resourceType.toLowerCase() : null;
+    const requestHeaderContains = normalizeHeaderMatcher(params.requestHeaderContains ?? params.headerContains, 'page.waitForRequest headerContains');
+    const requestHeaderRegex = normalizeHeaderMatcher(params.requestHeaderRegex ?? params.headerRegex, 'page.waitForRequest headerRegex', { regex: true });
     const started = Date.now();
     await attachDebugger(tabId);
     await cdp(tabId, 'Network.enable').catch(() => {});
 
     while (Date.now() - started <= timeoutMs) {
       const events = networkEventsByTab?.get(tabId) || [];
-      const match = findMatchingRequest(events, { ...params, method, resourceType, started });
+      const match = findMatchingRequest(events, { ...params, method, resourceType, requestHeaderContains, requestHeaderRegex, started });
       if (match) return { ok: true, request: match, elapsedMs: Date.now() - started };
       await sleep(intervalMs);
     }
@@ -533,6 +537,8 @@ function findMatchingResponse(events, options) {
     if (!matchesUrlPattern(url, options)) continue;
     if (options.status !== null && response.status !== options.status) continue;
     if (options.resourceType && String(params.type || '').toLowerCase() !== options.resourceType) continue;
+    if (!headersMatch(response.headers || {}, options.responseHeaderContains, 'contains')) continue;
+    if (!headersMatch(response.headers || {}, options.responseHeaderRegex, 'regex')) continue;
     if (options.method) {
       const requestMethod = findRequestMethod(events, params.requestId, i);
       if (requestMethod !== options.method) continue;
@@ -547,6 +553,7 @@ function findMatchingResponse(events, options) {
       method: findRequestMethod(events, params.requestId, i) || null,
       fromDiskCache: response.fromDiskCache === true,
       fromServiceWorker: response.fromServiceWorker === true,
+      ...(options.includeHeaders === true ? { headers: redactHeaderMap(response.headers || {}) } : {}),
       timestamp: event.timestamp
     };
   }
@@ -564,6 +571,8 @@ function findMatchingRequest(events, options) {
     if (!matchesUrlPattern(url, options)) continue;
     if (options.method && String(request.method || '').toUpperCase() !== options.method) continue;
     if (options.resourceType && String(params.type || '').toLowerCase() !== options.resourceType) continue;
+    if (!headersMatch(request.headers || {}, options.requestHeaderContains, 'contains')) continue;
+    if (!headersMatch(request.headers || {}, options.requestHeaderRegex, 'regex')) continue;
     return {
       requestId: params.requestId || '',
       url,
@@ -571,10 +580,62 @@ function findMatchingRequest(events, options) {
       resourceType: params.type || '',
       documentURL: params.documentURL || '',
       hasPostData: request.hasPostData === true,
+      ...(options.includeHeaders === true ? { headers: redactHeaderMap(request.headers || {}) } : {}),
       timestamp: event.timestamp
     };
   }
   return null;
+}
+
+function normalizeHeaderMatcher(headers, label, { regex = false } = {}) {
+  if (headers == null) return null;
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const entries = Object.entries(headers);
+  if (entries.length === 0) throw new Error(`${label} must not be empty`);
+  return Object.fromEntries(entries.map(([name, value]) => {
+    if (!name) throw new Error(`${label} contains an empty header name`);
+    if (typeof value !== 'string' || value.length === 0) throw new Error(`${label}.${name} must be a non-empty string`);
+    if (regex) {
+      try {
+        new RegExp(value);
+      } catch {
+        throw new Error(`${label}.${name} must be a valid regular expression`);
+      }
+    }
+    return [name, value];
+  }));
+}
+
+function headersMatch(headers, matchers, mode) {
+  if (!matchers) return true;
+  for (const [name, expected] of Object.entries(matchers)) {
+    const actual = headerValue(headers, name);
+    if (actual == null) return false;
+    if (mode === 'regex') {
+      if (!(new RegExp(expected)).test(actual)) return false;
+    } else if (!actual.includes(expected)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function headerValue(headers, name) {
+  const actualName = Object.keys(headers).find(item => item.toLowerCase() === name.toLowerCase());
+  return actualName ? String(headers[actualName]) : null;
+}
+
+function redactHeaderMap(headers) {
+  return Object.fromEntries(Object.entries(headers).map(([name, value]) => [
+    name,
+    isSensitiveHeaderName(name) && value !== null ? '[redacted]' : value
+  ]));
+}
+
+function isSensitiveHeaderName(name) {
+  return ['authorization', 'cookie', 'proxy-authorization', 'set-cookie', 'x-api-key', 'x-auth-token'].includes(String(name).toLowerCase());
 }
 
 function computeNetworkIdleState(events, options) {

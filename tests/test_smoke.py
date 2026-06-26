@@ -280,6 +280,28 @@ def run_smoke_test():
         client.rpc("page.waitForRequest", {"tabId": tab_id, "urlContains": "application/json", "timeoutMs": 5000})
         client.rpc("page.executeJavaScript", {
             "tabId": tab_id,
+            "script": """
+            setTimeout(async () => {
+                await fetch('https://header-smoke.test/request', {
+                    method: 'POST',
+                    headers: { 'X-Smoke-Header': 'bridge-header' },
+                    body: 'header smoke'
+                }).catch(() => {});
+            }, 250)
+            """
+        })
+        header_request = client.rpc("page.waitForRequest", {
+            "tabId": tab_id,
+            "urlContains": "header-smoke.test/request",
+            "method": "POST",
+            "requestHeaderContains": { "X-Smoke-Header": "bridge" },
+            "includeHeaders": True,
+            "timeoutMs": 5000
+        })
+        if header_request.get("request", {}).get("headers", {}).get("X-Smoke-Header") != "bridge-header":
+            raise RuntimeError("page.waitForRequest header filter failed")
+        client.rpc("page.executeJavaScript", {
+            "tabId": tab_id,
             "script": "setTimeout(async () => { await fetch('data:application/json,%7B%22ok%22%3Atrue%7D'); document.getElementById('network-result').innerText = 'Network Done'; }, 250)"
         })
         client.rpc("page.waitForResponse", {"tabId": tab_id, "urlContains": "application/json", "timeoutMs": 5000})
