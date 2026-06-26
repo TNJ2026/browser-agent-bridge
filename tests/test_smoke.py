@@ -167,7 +167,12 @@ def run_smoke_test():
             "tabId": tab_id,
             "rules": [
                 {
-                    "urlPattern": "*my-mock-api.com/user*",
+                    "id": "mock-user-post",
+                    "urlRegex": "^https://my-mock-api\\.com/user$",
+                    "method": "POST",
+                    "postDataContains": "BridgeSmoke",
+                    "headerContains": {"Content-Type": "text/plain"},
+                    "times": 1,
                     "action": "mock",
                     "responseCode": 200,
                     "responseHeaders": {
@@ -188,7 +193,11 @@ def run_smoke_test():
         client.rpc("page.executeJavaScript", {
             "tabId": tab_id,
             "script": """
-            fetch('https://my-mock-api.com/user')
+            fetch('https://my-mock-api.com/user', {
+                method: 'POST',
+                headers: {'Content-Type': 'text/plain'},
+                body: 'operationName=BridgeSmoke'
+            })
                 .then(r => r.json())
                 .then(data => {
                     document.getElementById('network-result').innerText = data.username;
@@ -198,6 +207,9 @@ def run_smoke_test():
             """
         })
         client.rpc("page.waitForText", {"tabId": tab_id, "text": "bridge-smoke-user", "timeoutMs": 5000})
+        intercept_status = client.rpc("network.interceptors.status", {"tabId": tab_id})
+        if intercept_status.get("rules") or not any(event.get("ruleId") == "mock-user-post" for event in intercept_status.get("events", [])):
+            raise RuntimeError("network.interceptors.status did not record consumed mock rule")
 
         clear_interceptors = client.rpc("network.interceptors.clear", {"tabId": tab_id})
         if not clear_interceptors.get("ok"):
@@ -205,6 +217,36 @@ def run_smoke_test():
         cleared_status = client.rpc("network.interceptors.status", {"tabId": tab_id})
         if cleared_status.get("rules"):
             raise RuntimeError("network.interceptors.clear did not clear rules")
+
+        block_intercept = client.rpc("network.setInterceptors", {
+            "tabId": tab_id,
+            "rules": [
+                {
+                    "id": "block-smoke",
+                    "urlPattern": "*blocked-smoke.test*",
+                    "action": "block",
+                    "times": 1
+                }
+            ]
+        })
+        if not block_intercept.get("ok") or block_intercept.get("rulesCount") != 1:
+            raise RuntimeError("network.setInterceptors block rule failed")
+        client.rpc("page.executeJavaScript", {
+            "tabId": tab_id,
+            "script": """
+            fetch('https://blocked-smoke.test/pixel')
+                .then(() => {
+                    document.getElementById('network-result').innerText = 'Block Fail';
+                }).catch(() => {
+                    document.getElementById('network-result').innerText = 'Blocked Done';
+                });
+            """
+        })
+        client.rpc("page.waitForText", {"tabId": tab_id, "text": "Blocked Done", "timeoutMs": 5000})
+        block_status = client.rpc("network.interceptors.status", {"tabId": tab_id})
+        if not any(event.get("ruleId") == "block-smoke" for event in block_status.get("events", [])):
+            raise RuntimeError("network.interceptors.status did not record block rule")
+        client.rpc("network.interceptors.clear", {"tabId": tab_id})
 
         client.rpc("page.executeJavaScript", {
             "tabId": tab_id,
