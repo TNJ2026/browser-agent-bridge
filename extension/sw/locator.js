@@ -535,12 +535,18 @@ export function createLocatorHandlers({
     return error;
   }
 
+  function formatFramePathSuffix(frame) {
+    const path = Array.isArray(frame?.framePath) ? frame.framePath : [];
+    if (path.length <= 1) return '';
+    return ` (path: ${path.map(item => item.frameId).join(' > ')})`;
+  }
+
   function formatLocatorStrictModeMessage(diagnostic) {
     const parts = [
       `Strict mode violation: locator ${diagnostic.locator} resolved to ${diagnostic.count} elements for ${diagnostic.action}`
     ];
     if (diagnostic.frame?.frameId != null) {
-      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}`);
+      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}${formatFramePathSuffix(diagnostic.frame)}`);
     }
     if (diagnostic.candidates.length > 0) {
       const shown = diagnostic.candidates.slice(0, 10).map(formatCompactLocatorElement).join(' | ');
@@ -584,7 +590,7 @@ export function createLocatorHandlers({
       parts.push(`matches: ${diagnostic.count}, visible: ${diagnostic.visibleCount ?? 0}`);
     }
     if (diagnostic.frame?.frameId != null) {
-      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}`);
+      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}${formatFramePathSuffix(diagnostic.frame)}`);
     }
     if (diagnostic.candidates.length > 0) {
       parts.push(`candidates: ${diagnostic.candidates.map(formatCompactLocatorElement).join(' | ')}`);
@@ -615,7 +621,7 @@ export function createLocatorHandlers({
       `reasons: ${diagnostic.reasons.join(', ')}`
     ];
     if (diagnostic.frame?.frameId != null) {
-      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}`);
+      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}${formatFramePathSuffix(diagnostic.frame)}`);
     }
     if (diagnostic.element) {
       parts.push(`target: ${formatCompactLocatorElement(diagnostic.element)}`);

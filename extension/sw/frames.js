@@ -8,7 +8,9 @@ export function createFrameTargetResolver({ chromeApi = chrome } = {}) {
       return {
         target: params.frameId === 0 ? { tabId } : { tabId, frameIds: [params.frameId] },
         frameId: params.frameId,
-        frame: frame ? normalizeFrame(frame) : { frameId: 0, parentFrameId: -1, url: '' },
+        frame: frame
+          ? { ...normalizeFrame(frame), framePath: buildFramePath(frame, frames) }
+          : { frameId: 0, parentFrameId: -1, url: '', name: '', framePath: rootFramePath() },
         frameOffset,
         frameSelector: null
       };
@@ -22,18 +24,26 @@ export function createFrameTargetResolver({ chromeApi = chrome } = {}) {
       return {
         target: frame.frameId === 0 ? { tabId } : { tabId, frameIds: [frame.frameId] },
         frameId: frame.frameId,
-        frame: normalizeFrame(frame),
+        frame: { ...normalizeFrame(frame), framePath: buildFramePath(frame, frames) },
         frameOffset,
         frameSelector: null
       };
     }
 
+    const frameSelector = typeof params.frameSelector === 'string' && params.frameSelector ? params.frameSelector : null;
     return {
       target: { tabId },
       frameId: 0,
-      frame: { frameId: 0, parentFrameId: -1, url: '' },
+      frame: {
+        frameId: 0,
+        parentFrameId: -1,
+        url: '',
+        name: '',
+        framePath: rootFramePath(),
+        ...(frameSelector ? { frameSelector } : {})
+      },
       frameOffset: null,
-      frameSelector: typeof params.frameSelector === 'string' && params.frameSelector ? params.frameSelector : null
+      frameSelector
     };
   }
 
@@ -110,4 +120,25 @@ function normalizeFrame(frame) {
     name: frame.name || '',
     errorOccurred: frame.errorOccurred === true
   };
+}
+
+function rootFramePath() {
+  return [{ frameId: 0, url: '', name: '' }];
+}
+
+// Ancestor chain from the root frame down to the target, e.g.
+// [{frameId:0,...}, {frameId:7,...}, {frameId:12,...}]. Useful in diagnostics
+// to see where in a nested-iframe page an operation was scoped.
+function buildFramePath(targetFrame, frames) {
+  const byId = new Map((frames || []).map(item => [item.frameId, item]));
+  const chain = [];
+  const seen = new Set();
+  let current = targetFrame;
+  while (current && !seen.has(current.frameId)) {
+    seen.add(current.frameId);
+    chain.unshift({ frameId: current.frameId, url: current.url || '', name: current.name || '' });
+    if (current.parentFrameId == null || current.parentFrameId < 0) break;
+    current = byId.get(current.parentFrameId) || null;
+  }
+  return chain;
 }

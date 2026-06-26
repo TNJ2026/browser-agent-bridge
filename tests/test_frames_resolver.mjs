@@ -74,3 +74,51 @@ test('resolveFrameTarget computes viewport offset for srcdoc frames', async () =
   assert.equal(result.frame.url, 'about:srcdoc');
 });
 
+function framesChromeApi(frames) {
+  return {
+    webNavigation: { async getAllFrames() { return frames; } },
+    scripting: { async executeScript() { return [{ result: null }]; } }
+  };
+}
+
+const NESTED_FRAMES = [
+  { frameId: 0, parentFrameId: -1, processId: 1, url: 'https://host.example/page', name: '' },
+  { frameId: 7, parentFrameId: 0, processId: 1, url: 'https://embed.example/a', name: 'outer' },
+  { frameId: 12, parentFrameId: 7, processId: 1, url: 'https://embed.example/b', name: 'inner' }
+];
+
+test('resolveFrameTarget by frameId attaches a root-to-target framePath', async () => {
+  const { createFrameTargetResolver } = await importFramesModule();
+  const resolver = createFrameTargetResolver({ chromeApi: framesChromeApi(NESTED_FRAMES) });
+  const result = await resolver.resolveFrameTarget(1, { frameId: 12 });
+
+  assert.deepEqual(result.frame.framePath.map(f => f.frameId), [0, 7, 12]);
+  assert.equal(result.frame.framePath[1].name, 'outer');
+  assert.equal(result.frame.framePath[2].url, 'https://embed.example/b');
+});
+
+test('resolveFrameTarget by frameUrl builds the framePath', async () => {
+  const { createFrameTargetResolver } = await importFramesModule();
+  const resolver = createFrameTargetResolver({ chromeApi: framesChromeApi(NESTED_FRAMES) });
+  const result = await resolver.resolveFrameTarget(1, { frameUrl: 'https://embed.example/b' });
+
+  assert.deepEqual(result.frame.framePath.map(f => f.frameId), [0, 7, 12]);
+});
+
+test('main frame resolves to a single-entry framePath', async () => {
+  const { createFrameTargetResolver } = await importFramesModule();
+  const resolver = createFrameTargetResolver({ chromeApi: framesChromeApi(NESTED_FRAMES) });
+  const result = await resolver.resolveFrameTarget(1, { frameId: 0 });
+
+  assert.deepEqual(result.frame.framePath, [{ frameId: 0, url: 'https://host.example/page', name: '' }]);
+});
+
+test('frameSelector targeting keeps a root framePath and records the selector', async () => {
+  const { createFrameTargetResolver } = await importFramesModule();
+  const resolver = createFrameTargetResolver({ chromeApi: framesChromeApi(NESTED_FRAMES) });
+  const result = await resolver.resolveFrameTarget(1, { frameSelector: '#editor' });
+
+  assert.deepEqual(result.frame.framePath, [{ frameId: 0, url: '', name: '' }]);
+  assert.equal(result.frame.frameSelector, '#editor');
+});
+
