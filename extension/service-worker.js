@@ -11,6 +11,7 @@ import { createPolicyHandlers } from './sw/policy.js';
 import { createTraceHandlers } from './sw/tracing.js';
 import { createFrameTargetResolver } from './sw/frames.js';
 import { createKeyboardDispatcher, createKeyboardHandlers } from './sw/keyboard.js';
+import { createNetworkInterceptorController } from './sw/network-interceptors.js';
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
@@ -135,6 +136,10 @@ const pageHandlers = createPageHandlers({
 });
 
 const fetchInterceptorsByTab = new Map();
+const networkInterceptorController = createNetworkInterceptorController({
+  cdp,
+  fetchInterceptorsByTab
+});
 
 const devtoolsHandlers = createDevtoolsHandlers({
   assertTabId,
@@ -143,7 +148,9 @@ const devtoolsHandlers = createDevtoolsHandlers({
   cdp,
   consoleEventsByTab,
   networkEventsByTab,
-  fetchInterceptorsByTab
+  fetchInterceptorsByTab,
+  interceptorStatus: networkInterceptorController.status,
+  clearInterceptors: networkInterceptorController.clear
 });
 
 const downloadsHandlers = createDownloadsHandlers({});
@@ -211,14 +218,20 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       dialogsByTab.delete(tabId);
     }
     if (method === 'Fetch.requestPaused') {
-      handleRequestPaused(tabId, params).catch(err => console.error('Error handling paused request:', err));
+      networkInterceptorController.handleRequestPaused(tabId, params).catch(async err => {
+        console.error('Error handling paused request:', err);
+        await cdp(tabId, 'Fetch.continueRequest', { requestId: params.requestId }).catch(() => {});
+      });
     }
   }
   sendNativeNotification('cdp.event', event);
 });
 
 chrome.debugger.onDetach.addListener(source => {
-  if (typeof source.tabId === 'number') attachedTabs.delete(source.tabId);
+  if (typeof source.tabId === 'number') {
+    attachedTabs.delete(source.tabId);
+    networkInterceptorController.onDebuggerDetached(source.tabId);
+  }
 });
 
 chrome.windows.onRemoved.addListener(windowId => {
@@ -231,7 +244,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
   networkEventsByTab.delete(tabId);
   consoleEventsByTab.delete(tabId);
   dialogsByTab.delete(tabId);
-  fetchInterceptorsByTab.delete(tabId);
+  networkInterceptorController.onTabRemoved(tabId);
   sessionsHandlers.onTabRemoved(tabId).catch(() => {});
   recordingHandlers.onTabRemoved(tabId).catch(() => {});
 });
@@ -618,6 +631,10 @@ async function dispatchRpc(request) {
       return devtoolsHandlers.networkSetBlockedUrls(params);
     case 'network.setInterceptors':
       return devtoolsHandlers.networkSetInterceptors(params);
+    case 'network.interceptors.clear':
+      return devtoolsHandlers.networkInterceptorsClear(params);
+    case 'network.interceptors.status':
+      return devtoolsHandlers.networkInterceptorsStatus(params);
     case 'downloads.list':
       return downloadsHandlers.downloadsList(params);
     case 'downloads.waitFor':
@@ -744,6 +761,8 @@ async function extensionInfo() {
       'network.read',
       'network.setBlockedUrls',
       'network.setInterceptors',
+      'network.interceptors.clear',
+      'network.interceptors.status',
       'downloads.list',
       'downloads.waitFor',
       'recording.start',
@@ -960,7 +979,9 @@ async function assertRpcTabIsolation(method, params = {}) {
     method === 'console.read' ||
     method === 'network.read' ||
     method === 'network.setBlockedUrls' ||
-    method === 'network.setInterceptors'
+    method === 'network.setInterceptors' ||
+    method === 'network.interceptors.clear' ||
+    method === 'network.interceptors.status'
   ) {
     await assertAgentManagedTabs([assertTabId(params.tabId)], method);
   }
@@ -1099,6 +1120,8 @@ function optionalPermissionsForMethod(method, params = {}) {
     method === 'network.read' ||
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
+    method === 'network.interceptors.clear' ||
+    method === 'network.interceptors.status' ||
     method === 'recording.start'
   ) {
     return ['tabs'];
@@ -1166,7 +1189,10 @@ function getMethodCategory(method, params = {}) {
   ) {
     return 'page_action';
   }
-  if (method === 'console.read' || method === 'network.read' || method === 'network.setBlockedUrls' || method === 'network.setInterceptors') {
+  if (method === 'network.setBlockedUrls' || method === 'network.setInterceptors' || method === 'network.interceptors.clear') {
+    return 'page_action';
+  }
+  if (method === 'console.read' || method === 'network.read' || method === 'network.interceptors.status') {
     return 'page_logs';
   }
   if (
@@ -1214,6 +1240,8 @@ async function isAgentTabGroupOperation(method, params = {}) {
     method === 'network.read' ||
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
+    method === 'network.interceptors.clear' ||
+    method === 'network.interceptors.status' ||
     method === 'indicator.set'
   ) {
     if (params.tabId == null) return false;
@@ -1348,70 +1376,4 @@ async function checkPermission(method, params) {
     await chrome.storage.local.set({ sessionPermissions });
     throw new Error(`Permission denied by user: ${category}`);
   }
-}
-
-async function handleRequestPaused(tabId, params) {
-  const rules = fetchInterceptorsByTab.get(tabId) || [];
-  const request = params.request;
-  const url = request.url;
-
-  for (const rule of rules) {
-    if (matchUrlPattern(url, rule.urlPattern)) {
-      if (rule.action === 'block') {
-        await cdp(tabId, 'Fetch.failRequest', {
-          requestId: params.requestId,
-          errorReason: rule.errorReason || 'Aborted'
-        });
-        return;
-      }
-      if (rule.action === 'redirect') {
-        await cdp(tabId, 'Fetch.continueRequest', {
-          requestId: params.requestId,
-          url: rule.targetUrl
-        });
-        return;
-      }
-      if (rule.action === 'mock') {
-        const responseHeaders = Object.entries(rule.responseHeaders || {}).map(([name, value]) => ({
-          name,
-          value: String(value)
-        }));
-        let bodyBase64 = '';
-        try {
-          bodyBase64 = btoa(unescape(encodeURIComponent(rule.responseBody || '')));
-        } catch (e) {
-          bodyBase64 = btoa(rule.responseBody || '');
-        }
-        await cdp(tabId, 'Fetch.fulfillRequest', {
-          requestId: params.requestId,
-          responseCode: rule.responseCode || 200,
-          responseHeaders,
-          body: bodyBase64
-        });
-        return;
-      }
-      if (rule.action === 'modifyHeaders') {
-        const mergedHeaders = { ...request.headers, ...(rule.requestHeaders || {}) };
-        const headersArray = Object.entries(mergedHeaders).map(([name, value]) => ({
-          name,
-          value: String(value)
-        }));
-        await cdp(tabId, 'Fetch.continueRequest', {
-          requestId: params.requestId,
-          headers: headersArray
-        });
-        return;
-      }
-    }
-  }
-
-  await cdp(tabId, 'Fetch.continueRequest', { requestId: params.requestId });
-}
-
-function matchUrlPattern(url, pattern) {
-  if (pattern === '*') return true;
-  const regexPattern = '^' + pattern
-    .replace(/[-/\\^$+?.()|[\]{}]/g, '\\$&')
-    .replace(/\*/g, '.*') + '$';
-  return new RegExp(regexPattern, 'i').test(url);
 }

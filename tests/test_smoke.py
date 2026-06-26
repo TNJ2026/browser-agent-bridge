@@ -181,6 +181,9 @@ def run_smoke_test():
         print(f"Intercept result: {intercept_res}")
         if not intercept_res.get("ok") or intercept_res.get("rulesCount") != 1:
             raise RuntimeError("network.setInterceptors failed")
+        intercept_status = client.rpc("network.interceptors.status", {"tabId": tab_id})
+        if len(intercept_status.get("rules", [])) != 1:
+            raise RuntimeError("network.interceptors.status failed")
 
         client.rpc("page.executeJavaScript", {
             "tabId": tab_id,
@@ -196,8 +199,12 @@ def run_smoke_test():
         })
         client.rpc("page.waitForText", {"tabId": tab_id, "text": "bridge-smoke-user", "timeoutMs": 5000})
 
-        # Clear interceptors
-        client.rpc("network.setInterceptors", {"tabId": tab_id, "rules": []})
+        clear_interceptors = client.rpc("network.interceptors.clear", {"tabId": tab_id})
+        if not clear_interceptors.get("ok"):
+            raise RuntimeError("network.interceptors.clear failed")
+        cleared_status = client.rpc("network.interceptors.status", {"tabId": tab_id})
+        if cleared_status.get("rules"):
+            raise RuntimeError("network.interceptors.clear did not clear rules")
 
         client.rpc("page.executeJavaScript", {
             "tabId": tab_id,

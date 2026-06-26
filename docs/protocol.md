@@ -857,7 +857,7 @@ Blocks network requests matching specified URL patterns for the target tab. Pass
 
 ### `network.setInterceptors`
 
-Registers request interceptors for the specified tab using the CDP `Fetch` domain. Supports block, redirect, mock response, and modify headers actions. Pass an empty array `[]` or omit `rules` to disable request interception.
+Registers request interceptors for the specified tab using the CDP `Fetch` domain. Supports block, redirect, mock response, and modify headers actions. Pass an empty array `[]` or omit `rules` to disable request interception. Rules may include `urlPattern` or `urlRegex`, `id`, `method`/`methods`, `resourceType`/`resourceTypes`, `postDataContains`/`postDataRegex`, and `headerContains`/`headerRegex` filters for narrower matching, plus `times` for one-shot or limited-use routes.
 
 ```json
 {
@@ -866,7 +866,8 @@ Registers request interceptors for the specified tab using the CDP `Fetch` domai
     {
       "urlPattern": "*google-analytics.com*",
       "action": "block",
-      "errorReason": "BlockedByClient"
+      "errorReason": "BlockedByClient",
+      "resourceType": "Script"
     },
     {
       "urlPattern": "*/old-api/*",
@@ -874,7 +875,12 @@ Registers request interceptors for the specified tab using the CDP `Fetch` domai
       "targetUrl": "https://example.com/new-api/v2"
     },
     {
-      "urlPattern": "*/api/mock-user",
+      "id": "mock-user-once",
+      "urlRegex": "^https://api\\.example\\.com/v\\d+/mock-user$",
+      "method": "GET",
+      "postDataContains": "\"operationName\":\"GetUser\"",
+      "headerRegex": { "X-Tenant": "^tenant-\\d+$" },
+      "times": 1,
       "action": "mock",
       "responseCode": 200,
       "responseHeaders": { "Content-Type": "application/json" },
@@ -883,10 +889,38 @@ Registers request interceptors for the specified tab using the CDP `Fetch` domai
     {
       "urlPattern": "*",
       "action": "modifyHeaders",
-      "requestHeaders": { "Authorization": "Bearer injected-token" }
+      "requestHeaders": {
+        "Authorization": "Bearer injected-token",
+        "X-Remove-Me": null
+      }
+    },
+    {
+      "urlPattern": "*/asset.bin",
+      "action": "mock",
+      "responseHeaders": { "Content-Type": "application/octet-stream" },
+      "responseBodyBase64": "AAECAw=="
     }
   ]
 }
+```
+
+For `modifyHeaders`, set a request header value to `null` to remove it case-insensitively.
+For `mock`, use either `responseBody` for text or `responseBodyBase64` for already-encoded binary payloads.
+
+### `network.interceptors.status`
+
+Returns the active interceptor rules for the specified tab, including remaining `times` counts and recent match events.
+
+```json
+{ "tabId": 123 }
+```
+
+### `network.interceptors.clear`
+
+Clears active interceptor rules for the specified tab and disables CDP Fetch interception.
+
+```json
+{ "tabId": 123 }
 ```
 
 ### `policy.get`
