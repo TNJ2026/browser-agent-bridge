@@ -210,6 +210,14 @@ def run_smoke_test():
         intercept_status = client.rpc("network.interceptors.status", {"tabId": tab_id})
         if intercept_status.get("rules") or not any(event.get("ruleId") == "mock-user-post" for event in intercept_status.get("events", [])):
             raise RuntimeError("network.interceptors.status did not record consumed mock rule")
+        intercept_events = client.rpc("network.interceptors.events", {"tabId": tab_id, "limit": 5})
+        if not any(event.get("ruleId") == "mock-user-post" for event in intercept_events.get("events", [])):
+            raise RuntimeError("network.interceptors.events did not record consumed mock rule")
+        clear_events = client.rpc("network.interceptors.clearEvents", {"tabId": tab_id})
+        if not clear_events.get("ok"):
+            raise RuntimeError("network.interceptors.clearEvents failed")
+        if client.rpc("network.interceptors.events", {"tabId": tab_id}).get("events"):
+            raise RuntimeError("network.interceptors.clearEvents did not clear events")
 
         clear_interceptors = client.rpc("network.interceptors.clear", {"tabId": tab_id})
         if not clear_interceptors.get("ok"):
@@ -246,6 +254,9 @@ def run_smoke_test():
         block_status = client.rpc("network.interceptors.status", {"tabId": tab_id})
         if not any(event.get("ruleId") == "block-smoke" for event in block_status.get("events", [])):
             raise RuntimeError("network.interceptors.status did not record block rule")
+        block_events = client.rpc("network.interceptors.events", {"tabId": tab_id})
+        if not any(event.get("ruleId") == "block-smoke" for event in block_events.get("events", [])):
+            raise RuntimeError("network.interceptors.events did not record block rule")
         client.rpc("network.interceptors.clear", {"tabId": tab_id})
 
         client.rpc("page.executeJavaScript", {

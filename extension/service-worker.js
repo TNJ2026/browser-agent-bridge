@@ -150,7 +150,9 @@ const devtoolsHandlers = createDevtoolsHandlers({
   networkEventsByTab,
   fetchInterceptorsByTab,
   interceptorStatus: networkInterceptorController.status,
-  clearInterceptors: networkInterceptorController.clear
+  clearInterceptors: networkInterceptorController.clear,
+  interceptorEvents: networkInterceptorController.events,
+  clearInterceptorEvents: networkInterceptorController.clearEvents
 });
 
 const downloadsHandlers = createDownloadsHandlers({});
@@ -633,6 +635,10 @@ async function dispatchRpc(request) {
       return devtoolsHandlers.networkSetInterceptors(params);
     case 'network.interceptors.clear':
       return devtoolsHandlers.networkInterceptorsClear(params);
+    case 'network.interceptors.events':
+      return devtoolsHandlers.networkInterceptorsEvents(params);
+    case 'network.interceptors.clearEvents':
+      return devtoolsHandlers.networkInterceptorsClearEvents(params);
     case 'network.interceptors.status':
       return devtoolsHandlers.networkInterceptorsStatus(params);
     case 'downloads.list':
@@ -762,6 +768,8 @@ async function extensionInfo() {
       'network.setBlockedUrls',
       'network.setInterceptors',
       'network.interceptors.clear',
+      'network.interceptors.events',
+      'network.interceptors.clearEvents',
       'network.interceptors.status',
       'downloads.list',
       'downloads.waitFor',
@@ -981,6 +989,8 @@ async function assertRpcTabIsolation(method, params = {}) {
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
     method === 'network.interceptors.clear' ||
+    method === 'network.interceptors.events' ||
+    method === 'network.interceptors.clearEvents' ||
     method === 'network.interceptors.status'
   ) {
     await assertAgentManagedTabs([assertTabId(params.tabId)], method);
@@ -1121,6 +1131,8 @@ function optionalPermissionsForMethod(method, params = {}) {
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
     method === 'network.interceptors.clear' ||
+    method === 'network.interceptors.events' ||
+    method === 'network.interceptors.clearEvents' ||
     method === 'network.interceptors.status' ||
     method === 'recording.start'
   ) {
@@ -1192,7 +1204,13 @@ function getMethodCategory(method, params = {}) {
   if (method === 'network.setBlockedUrls' || method === 'network.setInterceptors' || method === 'network.interceptors.clear') {
     return 'page_action';
   }
-  if (method === 'console.read' || method === 'network.read' || method === 'network.interceptors.status') {
+  if (
+    method === 'console.read' ||
+    method === 'network.read' ||
+    method === 'network.interceptors.status' ||
+    method === 'network.interceptors.events' ||
+    method === 'network.interceptors.clearEvents'
+  ) {
     return 'page_logs';
   }
   if (
@@ -1241,6 +1259,8 @@ async function isAgentTabGroupOperation(method, params = {}) {
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
     method === 'network.interceptors.clear' ||
+    method === 'network.interceptors.events' ||
+    method === 'network.interceptors.clearEvents' ||
     method === 'network.interceptors.status' ||
     method === 'indicator.set'
   ) {

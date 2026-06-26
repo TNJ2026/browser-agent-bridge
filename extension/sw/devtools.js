@@ -9,7 +9,9 @@ export function createDevtoolsHandlers({
   networkEventsByTab,
   fetchInterceptorsByTab,
   interceptorStatus = () => ({ tabs: [] }),
-  clearInterceptors = async tabId => ({ ok: true, tabId, rulesCount: 0 })
+  clearInterceptors = async tabId => ({ ok: true, tabId, rulesCount: 0 }),
+  interceptorEvents = (tabId, limit) => ({ tabId, events: [], limit }),
+  clearInterceptorEvents = tabId => ({ ok: true, tabId, eventsCount: 0 })
 }) {
   async function consoleRead(params) {
     const tabId = assertTabId(params.tabId);
@@ -66,12 +68,27 @@ export function createDevtoolsHandlers({
     return clearInterceptors(tabId);
   }
 
+  async function networkInterceptorsEvents(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'network.interceptors.events');
+    const limit = Number.isInteger(params.limit) && params.limit > 0 ? Math.min(params.limit, 500) : 100;
+    return interceptorEvents(tabId, limit);
+  }
+
+  async function networkInterceptorsClearEvents(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'network.interceptors.clearEvents');
+    return clearInterceptorEvents(tabId);
+  }
+
   return {
     consoleRead,
     networkRead,
     networkSetBlockedUrls,
     networkSetInterceptors,
     networkInterceptorsClear,
+    networkInterceptorsClearEvents,
+    networkInterceptorsEvents,
     networkInterceptorsStatus
   };
 }

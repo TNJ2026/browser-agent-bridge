@@ -72,6 +72,16 @@ export function createNetworkInterceptorController({
     };
   }
 
+  function events(tabId, limit = 100) {
+    const allEvents = interceptorEventsByTab.get(tabId) || [];
+    return { tabId, events: cloneEvents(allEvents.slice(-limit)) };
+  }
+
+  function clearEvents(tabId) {
+    interceptorEventsByTab.delete(tabId);
+    return { ok: true, tabId, eventsCount: 0 };
+  }
+
   async function clear(tabId) {
     fetchInterceptorsByTab.delete(tabId);
     interceptorEventsByTab.delete(tabId);
@@ -123,6 +133,8 @@ export function createNetworkInterceptorController({
 
   return {
     clear,
+    clearEvents,
+    events,
     handleRequestPaused,
     onDebuggerDetached,
     onTabRemoved,
@@ -225,9 +237,25 @@ function encodeBody(body) {
 }
 
 function cloneRules(rules) {
-  return rules.map(rule => ({ ...rule }));
+  return rules.map(rule => ({
+    ...rule,
+    ...(rule.requestHeaders ? { requestHeaders: redactHeaderMap(rule.requestHeaders) } : {}),
+    ...(rule.headerContains ? { headerContains: redactHeaderMap(rule.headerContains) } : {}),
+    ...(rule.headerRegex ? { headerRegex: redactHeaderMap(rule.headerRegex) } : {})
+  }));
 }
 
 function cloneEvents(events) {
   return events.map(event => ({ ...event }));
+}
+
+function redactHeaderMap(headers) {
+  return Object.fromEntries(Object.entries(headers).map(([name, value]) => [
+    name,
+    isSensitiveHeaderName(name) && value !== null ? '[redacted]' : value
+  ]));
+}
+
+function isSensitiveHeaderName(name) {
+  return ['authorization', 'cookie', 'proxy-authorization', 'x-api-key', 'x-auth-token'].includes(String(name).toLowerCase());
 }

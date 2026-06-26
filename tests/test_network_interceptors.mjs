@@ -224,13 +224,24 @@ test('network interceptor modifyHeaders can remove headers case-insensitively', 
 
 test('network interceptor status returns cloned rule snapshots', async () => {
   const context = await makeController([
-    { urlPattern: '*api*', action: 'block', times: 2 }
+    {
+      urlPattern: '*api*',
+      action: 'block',
+      times: 2,
+      requestHeaders: { Authorization: 'Bearer secret', 'X-Test': 'visible' },
+      headerContains: { Cookie: 'session=', 'X-Tenant': 'tenant-' },
+      headerRegex: { 'X-Api-Key': '^sk-', 'X-Trace': '^trace-' }
+    }
   ]);
 
   const result = context.controller.status(7);
   result.rules[0].times = 0;
 
   assert.equal(context.fetchInterceptorsByTab.get(7)[0].times, 2);
+  assert.deepEqual(result.rules[0].requestHeaders, { Authorization: '[redacted]', 'X-Test': 'visible' });
+  assert.deepEqual(result.rules[0].headerContains, { Cookie: '[redacted]', 'X-Tenant': 'tenant-' });
+  assert.deepEqual(result.rules[0].headerRegex, { 'X-Api-Key': '[redacted]', 'X-Trace': '^trace-' });
+  assert.equal(context.fetchInterceptorsByTab.get(7)[0].requestHeaders.Authorization, 'Bearer secret');
 });
 
 test('network interceptor clear disables Fetch and removes tab rules', async () => {
@@ -243,4 +254,23 @@ test('network interceptor clear disables Fetch and removes tab rules', async () 
   assert.deepEqual(result, { ok: true, tabId: 7, rulesCount: 0 });
   assert.equal(context.fetchInterceptorsByTab.has(7), false);
   assert.deepEqual(context.calls, [{ tabId: 7, method: 'Fetch.disable', params: undefined }]);
+});
+
+test('network interceptor events can be read and cleared independently', async () => {
+  const context = await makeController([
+    { id: 'event-route', urlPattern: '*api*', action: 'block' }
+  ]);
+
+  await context.controller.handleRequestPaused(7, {
+    requestId: 'request-event',
+    resourceType: 'Fetch',
+    request: { url: 'https://api.example.test/event', method: 'GET', headers: {} }
+  });
+
+  assert.equal(context.controller.events(7, 1).events[0].ruleId, 'event-route');
+  const clearResult = context.controller.clearEvents(7);
+
+  assert.deepEqual(clearResult, { ok: true, tabId: 7, eventsCount: 0 });
+  assert.deepEqual(context.controller.events(7).events, []);
+  assert.equal(context.fetchInterceptorsByTab.get(7).length, 1);
 });

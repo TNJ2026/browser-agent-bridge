@@ -20,6 +20,8 @@ async function makeHandlers() {
   const fetchInterceptorsByTab = new Map();
   const interceptorStatusCalls = [];
   const clearInterceptorCalls = [];
+  const interceptorEventsCalls = [];
+  const clearInterceptorEventsCalls = [];
   const handlers = createDevtoolsHandlers({
     assertTabId(value) {
       if (!Number.isInteger(value)) throw new Error('bad tabId');
@@ -44,12 +46,22 @@ async function makeHandlers() {
       clearInterceptorCalls.push(tabId);
       fetchInterceptorsByTab.delete(tabId);
       return { ok: true, tabId, rulesCount: 0 };
+    },
+    interceptorEvents(tabId, limit) {
+      interceptorEventsCalls.push({ tabId, limit });
+      return { tabId, events: [{ ruleId: 'rule-1' }] };
+    },
+    clearInterceptorEvents(tabId) {
+      clearInterceptorEventsCalls.push(tabId);
+      return { ok: true, tabId, eventsCount: 0 };
     }
   });
   return {
     handlers,
     calls,
     clearInterceptorCalls,
+    clearInterceptorEventsCalls,
+    interceptorEventsCalls,
     interceptorStatusCalls,
     fetchInterceptorsByTab,
     get attachCount() {
@@ -266,6 +278,28 @@ test('network.interceptors.clear removes current interceptor state', async () =>
   assert.deepEqual(context.clearInterceptorCalls, [7]);
   assert.deepEqual(result, { ok: true, tabId: 7, rulesCount: 0 });
   assert.equal(context.fetchInterceptorsByTab.has(7), false);
+  assert.equal(context.attachCount, 0);
+  assert.equal(context.calls.length, 0);
+});
+
+test('network.interceptors.events returns recent match events', async () => {
+  const context = await makeHandlers();
+
+  const result = await context.handlers.networkInterceptorsEvents({ tabId: 7, limit: 5 });
+
+  assert.deepEqual(context.interceptorEventsCalls, [{ tabId: 7, limit: 5 }]);
+  assert.deepEqual(result, { tabId: 7, events: [{ ruleId: 'rule-1' }] });
+  assert.equal(context.attachCount, 0);
+  assert.equal(context.calls.length, 0);
+});
+
+test('network.interceptors.clearEvents clears recent match events', async () => {
+  const context = await makeHandlers();
+
+  const result = await context.handlers.networkInterceptorsClearEvents({ tabId: 7 });
+
+  assert.deepEqual(context.clearInterceptorEventsCalls, [7]);
+  assert.deepEqual(result, { ok: true, tabId: 7, eventsCount: 0 });
   assert.equal(context.attachCount, 0);
   assert.equal(context.calls.length, 0);
 });

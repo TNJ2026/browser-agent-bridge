@@ -909,7 +909,7 @@ For `mock`, use either `responseBody` for text or `responseBodyBase64` for alrea
 
 ### `network.interceptors.status`
 
-Returns the active interceptor rules for the specified tab, including remaining `times` counts and recent match events.
+Returns the active interceptor rules for the specified tab, including remaining `times` counts and recent match events. Sensitive request header values in rule snapshots are redacted.
 
 ```json
 { "tabId": 123 }
@@ -918,6 +918,22 @@ Returns the active interceptor rules for the specified tab, including remaining 
 ### `network.interceptors.clear`
 
 Clears active interceptor rules for the specified tab and disables CDP Fetch interception.
+
+```json
+{ "tabId": 123 }
+```
+
+### `network.interceptors.events`
+
+Returns recent interceptor match events for the specified tab.
+
+```json
+{ "tabId": 123, "limit": 50 }
+```
+
+### `network.interceptors.clearEvents`
+
+Clears recent interceptor match events for the specified tab without changing active rules.
 
 ```json
 { "tabId": 123 }
