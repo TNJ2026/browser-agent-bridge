@@ -25,7 +25,7 @@ function makeElement(index, id) {
   };
 }
 
-async function makeHandlers(result) {
+async function makeHandlers(result, frame = { frameId: 0 }) {
   const { createLocatorHandlers } = await importLocatorModule();
   return createLocatorHandlers({
     assertTabId: (v) => v,
@@ -35,7 +35,7 @@ async function makeHandlers(result) {
     attachDebugger: async () => {},
     cdp: async () => ({}),
     captureElementScreenshot: async () => '',
-    resolveFrameTarget: async (tabId) => ({ target: { tabId }, frame: { frameId: 0 }, frameSelector: null }),
+    resolveFrameTarget: async (tabId) => ({ target: { tabId }, frame, frameSelector: null }),
     sleep,
     defaultTimeoutMs: 30,
     chromeApi: { scripting: { executeScript: async () => [{ result }] } }
@@ -98,6 +98,26 @@ test('strict mode marks candidatesTruncated when matches exceed the collection l
   assert.equal(error.diagnostic.candidates.length, 50);
   assert.equal(error.diagnostic.candidatesTruncated, true);
   assert.ok(error.message.includes('more)'));
+});
+
+test('diagnostics surface the frame path for nested iframes', async () => {
+  const elements = [makeElement(0, 'a'), makeElement(1, 'b')];
+  const result = {
+    found: true,
+    count: 2,
+    visibleCount: 2,
+    elements,
+    element: elements[0],
+    actionability: { visible: true, enabled: true, receivesEvents: true, editable: true, selectable: true }
+  };
+  const frame = { frameId: 12, url: 'https://embed.example/b', framePath: [{ frameId: 0 }, { frameId: 7 }, { frameId: 12 }] };
+  const handlers = await makeHandlers(result, frame);
+  const error = await captureRejection(
+    handlers.locatorClick({ tabId: 1, selector: 'button', strict: true, timeoutMs: 25, intervalMs: 10 })
+  );
+
+  assert.deepEqual(error.diagnostic.frame.framePath.map(f => f.frameId), [0, 7, 12]);
+  assert.ok(error.message.includes('path: 0 > 7 > 12'), 'expected the frame path in the message');
 });
 
 test('strict mode with zero matches stays a not-found actionability timeout', async () => {

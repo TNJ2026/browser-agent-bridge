@@ -392,6 +392,13 @@ Lists frames in a tab. Use a returned `frameId` with `page.*`, `dom.*`, and
 `locator.*` methods to target same-origin or cross-origin frames. `frameUrl`
 can also be passed to those methods to resolve the first matching frame URL.
 
+When a frame-scoped operation fails (locator actionability/strict/expectation
+timeouts, `page.waitForSelector`, `page.waitForText`), the error `diagnostic`
+carries a `frame` object with `frameId`, `url`, `name`, and a `framePath` — the
+root-to-target ancestor chain (`[{frameId,url,name}, ...]`) — so failures inside
+nested iframes are traceable. The human-readable message appends `(path: 0 > 7 >
+12)` when the target is more than one frame deep.
+
 ```json
 { "tabId": 123 }
 ```
