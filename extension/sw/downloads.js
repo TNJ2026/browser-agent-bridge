@@ -3,6 +3,7 @@ export function createDownloadsHandlers({ chromeApi = chrome }) {
   const maxEvents = 500;
 
   function initDownloadEvents() {
+    if (!chromeApi.downloads) return;
     chromeApi.downloads.onCreated.addListener(item => {
       pushDownloadEvent({ type: 'created', item, timestamp: Date.now() });
     });

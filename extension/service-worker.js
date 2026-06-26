@@ -6,7 +6,7 @@ import { createDevtoolsHandlers } from './sw/devtools.js';
 import { createDownloadsHandlers } from './sw/downloads.js';
 import { CSP_BYPASS_ALARM, createCspHandlers } from './sw/csp.js';
 import { createRecordingHandlers } from './sw/recording.js';
-import { createSessionHandlers } from './sw/sessions.js';
+import { createSessionHandlers, SESSION_STORAGE_KEY, AGENT_TAB_GROUPS_STORAGE_KEY } from './sw/sessions.js';
 import { createPolicyHandlers } from './sw/policy.js';
 import { createTraceHandlers } from './sw/tracing.js';
 import { createFrameTargetResolver } from './sw/frames.js';
@@ -177,6 +177,12 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.action.onClicked.addListener(async tab => {
   if (tab.id) await chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+});
+
+chrome.permissions.onAdded.addListener(permissions => {
+  if (permissions.permissions && permissions.permissions.includes('downloads')) {
+    downloadsHandlers.initDownloadEvents();
+  }
 });
 
 chrome.commands.onCommand.addListener(async command => {

@@ -1,5 +1,5 @@
-const SESSION_STORAGE_KEY = 'browserAgentBridgeSessions';
-const AGENT_TAB_GROUPS_STORAGE_KEY = 'browserAgentBridgeAgentTabGroups';
+export const SESSION_STORAGE_KEY = 'browserAgentBridgeSessions';
+export const AGENT_TAB_GROUPS_STORAGE_KEY = 'browserAgentBridgeAgentTabGroups';
 
 export function createSessionHandlers({
   assertString,
