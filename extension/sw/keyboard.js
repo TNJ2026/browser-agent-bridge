@@ -11,6 +11,32 @@ export function createKeyboardDispatcher({ cdp, sleep = async () => {} }) {
     }
   }
 
+  async function compose(tabId, text, options = {}) {
+    // Drive an IME composition (compositionstart/update via imeSetComposition)
+    // then commit it, so fields with composition handlers (CJK/accents,
+    // search-as-you-type with composition guards) behave like real IME input.
+    const delayMs = Number.isInteger(options.delayMs) && options.delayMs > 0 ? options.delayMs : 0;
+    const chars = Array.from(text);
+    const segments = Array.isArray(options.segments) && options.segments.length
+      ? options.segments.map(segment => String(segment))
+      : chars.map((_, index) => chars.slice(0, index + 1).join(''));
+
+    for (const segment of segments) {
+      const caret = Array.from(segment).length;
+      await cdp(tabId, 'Input.imeSetComposition', {
+        text: segment,
+        selectionStart: caret,
+        selectionEnd: caret
+      });
+      if (delayMs) await sleep(delayMs);
+    }
+
+    if (options.commit === false) return;
+    if (segments.length === 0 && chars.length === 0) return;
+    // Commit the composition with the final text (fires compositionend + input).
+    await cdp(tabId, 'Input.insertText', { text });
+  }
+
   async function press(tabId, keyString, options = {}) {
     const { key, modifiers } = parseKeyShortcut(keyString);
     const delayMs = Number.isInteger(options.delayMs) && options.delayMs > 0 ? options.delayMs : 0;
@@ -59,7 +85,7 @@ export function createKeyboardDispatcher({ cdp, sleep = async () => {} }) {
     });
   }
 
-  return { typeText, press, down, up };
+  return { typeText, compose, press, down, up };
 }
 
 export function createKeyboardHandlers({
@@ -77,6 +103,16 @@ export function createKeyboardHandlers({
     await attachDebugger(tabId);
     await dispatcher.typeText(tabId, params.text, params);
     await recordAction(tabId, 'keyboard.type', { text: params.text, delayMs: params.delayMs || 0 });
+    return { ok: true };
+  }
+
+  async function keyboardCompose(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'keyboard.compose');
+    assertString(params.text, 'text');
+    await attachDebugger(tabId);
+    await dispatcher.compose(tabId, params.text, params);
+    await recordAction(tabId, 'keyboard.compose', { text: params.text, delayMs: params.delayMs || 0, committed: params.commit !== false });
     return { ok: true };
   }
 
@@ -112,6 +148,7 @@ export function createKeyboardHandlers({
 
   return {
     keyboardType,
+    keyboardCompose,
     keyboardPress,
     keyboardDown,
     keyboardUp

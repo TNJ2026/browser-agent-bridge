@@ -801,6 +801,22 @@ character at a time.
 { "tabId": 123, "text": "hello", "delayMs": 20 }
 ```
 
+### `keyboard.compose`
+
+Types `text` into the focused element as IME composition: drives
+`compositionstart`/`compositionupdate` (via CDP `Input.imeSetComposition`) and
+then commits with `compositionend`, so fields with composition handlers
+(CJK/accented input, search-as-you-type that guards on composition) behave like
+real IME input rather than a raw paste. By default each character extends the
+composition incrementally; pass `segments` to control the composition steps
+explicitly, `delayMs` to pace them, or `commit:false` to leave the composition
+uncommitted (pending). Focus the target first (e.g. with `locator.click` or
+`dom.click`); contenteditable elements are supported.
+
+```json
+{ "tabId": 123, "text": "你好", "delayMs": 30 }
+```
+
 ### `keyboard.press`
 
 Dispatches one key or shortcut with realistic key metadata such as `code`,
