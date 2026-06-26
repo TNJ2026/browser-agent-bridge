@@ -7,7 +7,7 @@ async function importDevtoolsModule() {
   const devtoolsSource = await readFile(new URL('../extension/sw/devtools.js', import.meta.url), 'utf8');
   const source = [
     networkSource.replaceAll('export ', ''),
-    devtoolsSource.replace("import { fetchPatternsForRules } from './network-interceptors.js';\n\n", '')
+    devtoolsSource.replace("import { fetchPatternsForRules, harEntriesToRules } from './network-interceptors.js';\n\n", '')
   ].join('\n');
   const dataUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
   return import(dataUrl);
@@ -328,4 +328,38 @@ test('network.interceptors.clearEvents clears recent match events', async () => 
   assert.deepEqual(result, { ok: true, tabId: 7, eventsCount: 0 });
   assert.equal(context.attachCount, 0);
   assert.equal(context.calls.length, 0);
+});
+
+test('network.routeFromHAR installs mock rules and enables Fetch', async () => {
+  const { handlers, calls, fetchInterceptorsByTab } = await makeHandlers();
+  const har = {
+    log: {
+      entries: [
+        {
+          request: { method: 'GET', url: 'https://api.example.test/items' },
+          response: { status: 200, headers: [{ name: 'Content-Type', value: 'application/json' }], content: { text: '{"items":[]}' } }
+        }
+      ]
+    }
+  };
+
+  const result = await handlers.networkRouteFromHAR({ tabId: 9, har });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rulesCount, 1);
+  assert.equal(result.entriesRouted, 1);
+  assert.equal(result.notFound, 'fallback');
+  assert.equal(fetchInterceptorsByTab.get(9).length, 1);
+  assert.equal(fetchInterceptorsByTab.get(9)[0].action, 'mock');
+  const enable = calls.find(call => call.method === 'Fetch.enable');
+  assert.ok(enable, 'expected Fetch.enable');
+  assert.ok(enable.params.patterns.some(pattern => pattern.urlPattern === 'https://api.example.test/items'));
+});
+
+test('network.routeFromHAR with an empty archive disables Fetch', async () => {
+  const { handlers, calls, fetchInterceptorsByTab } = await makeHandlers();
+  const result = await handlers.networkRouteFromHAR({ tabId: 9, har: { log: { entries: [] } } });
+  assert.equal(result.rulesCount, 0);
+  assert.equal(fetchInterceptorsByTab.has(9), false);
+  assert.ok(calls.some(call => call.method === 'Fetch.disable'));
 });

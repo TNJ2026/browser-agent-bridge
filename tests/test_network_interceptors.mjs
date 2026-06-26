@@ -306,3 +306,105 @@ test('network interceptor events support filters', async () => {
   assert.equal(filtered.events[0].method, 'POST');
   assert.equal(context.controller.events(7, { action: 'redirect' }).events.length, 0);
 });
+
+const SAMPLE_HAR = {
+  log: {
+    entries: [
+      {
+        request: { method: 'GET', url: 'https://api.example.test/items' },
+        response: {
+          status: 200,
+          headers: [
+            { name: 'Content-Type', value: 'application/json' },
+            { name: 'Content-Length', value: '12' },
+            { name: ':status', value: '200' }
+          ],
+          content: { text: '{"items":[]}', mimeType: 'application/json' }
+        }
+      },
+      {
+        request: { method: 'POST', url: 'https://api.example.test/login' },
+        response: {
+          status: 201,
+          headers: [{ name: 'Content-Type', value: 'application/json' }],
+          content: { text: 'eyJvayI6dHJ1ZX0=', encoding: 'base64', mimeType: 'application/json' }
+        }
+      },
+      {
+        request: { method: 'GET', url: 'https://img.example.test/x.png' },
+        response: { status: 0, headers: [], content: {} }
+      }
+    ]
+  }
+};
+
+test('harEntriesToRules converts entries into mock rules', async () => {
+  const { harEntriesToRules } = await importNetworkInterceptorsModule();
+  const rules = harEntriesToRules(SAMPLE_HAR);
+
+  assert.equal(rules.length, 2); // status-0 entry skipped
+  assert.equal(rules[0].action, 'mock');
+  assert.equal(rules[0].urlPattern, 'https://api.example.test/items');
+  assert.deepEqual(rules[0].methods, ['GET']);
+  assert.equal(rules[0].responseCode, 200);
+  assert.equal(rules[0].responseBody, '{"items":[]}');
+  // transfer + pseudo headers dropped, content-type kept
+  assert.deepEqual(rules[0].responseHeaders, { 'Content-Type': 'application/json' });
+  assert.equal(rules[1].responseBodyBase64, 'eyJvayI6dHJ1ZX0=');
+  assert.equal(rules[1].responseBody, undefined);
+});
+
+test('harEntriesToRules supports urlFilter, methods, and sequential', async () => {
+  const { harEntriesToRules } = await importNetworkInterceptorsModule();
+  assert.equal(harEntriesToRules(SAMPLE_HAR, { urlFilter: 'login' }).length, 1);
+  assert.equal(harEntriesToRules(SAMPLE_HAR, { methods: ['post'] })[0].urlPattern, 'https://api.example.test/login');
+  assert.equal(harEntriesToRules(SAMPLE_HAR, { sequential: true })[0].times, 1);
+});
+
+test('harEntriesToRules appends a catch-all block rule for notFound abort', async () => {
+  const { harEntriesToRules } = await importNetworkInterceptorsModule();
+  const rules = harEntriesToRules(SAMPLE_HAR, { notFound: 'abort' });
+  assert.equal(rules.length, 3);
+  const last = rules[rules.length - 1];
+  assert.equal(last.urlPattern, '*');
+  assert.equal(last.action, 'block');
+});
+
+test('harEntriesToRules rejects a malformed archive', async () => {
+  const { harEntriesToRules } = await importNetworkInterceptorsModule();
+  assert.throws(() => harEntriesToRules({}), /log\.entries/);
+  assert.throws(() => harEntriesToRules({ log: {} }), /log\.entries/);
+});
+
+test('HAR-derived rules replay a recorded response', async () => {
+  const { harEntriesToRules } = await importNetworkInterceptorsModule();
+  const rules = harEntriesToRules(SAMPLE_HAR);
+  const context = await makeController(rules);
+
+  await context.controller.handleRequestPaused(7, {
+    requestId: 'r1',
+    resourceType: 'XHR',
+    request: { url: 'https://api.example.test/items', method: 'GET', headers: {} }
+  });
+
+  const fulfill = context.calls.find(call => call.method === 'Fetch.fulfillRequest');
+  assert.ok(fulfill, 'expected a fulfillRequest');
+  assert.equal(fulfill.params.responseCode, 200);
+  assert.equal(Buffer.from(fulfill.params.body, 'base64').toString('utf8'), '{"items":[]}');
+});
+
+test('HAR notFound abort blocks an unmatched request', async () => {
+  const { harEntriesToRules } = await importNetworkInterceptorsModule();
+  const rules = harEntriesToRules(SAMPLE_HAR, { notFound: 'abort' });
+  const context = await makeController(rules);
+
+  await context.controller.handleRequestPaused(7, {
+    requestId: 'r2',
+    resourceType: 'XHR',
+    request: { url: 'https://api.example.test/unknown', method: 'GET', headers: {} }
+  });
+
+  const fail = context.calls.find(call => call.method === 'Fetch.failRequest');
+  assert.ok(fail, 'expected a failRequest for the unmatched url');
+  assert.equal(fail.params.errorReason, 'BlockedByClient');
+});

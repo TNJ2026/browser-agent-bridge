@@ -1,4 +1,4 @@
-import { fetchPatternsForRules } from './network-interceptors.js';
+import { fetchPatternsForRules, harEntriesToRules } from './network-interceptors.js';
 
 export function createDevtoolsHandlers({
   assertTabId,
@@ -56,6 +56,26 @@ export function createDevtoolsHandlers({
     return { ok: true, rulesCount: rules.length };
   }
 
+  async function networkRouteFromHAR(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'network.routeFromHAR');
+    const rules = harEntriesToRules(params.har, params);
+    await attachDebugger(tabId);
+    if (rules.length > 0) {
+      fetchInterceptorsByTab.set(tabId, rules);
+      await cdp(tabId, 'Fetch.enable', { patterns: fetchPatternsForRules(rules) });
+    } else {
+      fetchInterceptorsByTab.delete(tabId);
+      await cdp(tabId, 'Fetch.disable').catch(() => {});
+    }
+    return {
+      ok: true,
+      rulesCount: rules.length,
+      entriesRouted: rules.filter(rule => rule.action === 'mock').length,
+      notFound: params.notFound === 'abort' ? 'abort' : 'fallback'
+    };
+  }
+
   async function networkInterceptorsStatus(params = {}) {
     const tabId = params.tabId == null ? null : assertTabId(params.tabId);
     if (tabId != null) await assertTabAllowed(tabId, 'network.interceptors.status');
@@ -85,6 +105,7 @@ export function createDevtoolsHandlers({
     networkRead,
     networkSetBlockedUrls,
     networkSetInterceptors,
+    networkRouteFromHAR,
     networkInterceptorsClear,
     networkInterceptorsClearEvents,
     networkInterceptorsEvents,

@@ -144,6 +144,71 @@ export function createNetworkInterceptorController({
   };
 }
 
+// Convert a HAR archive's entries into `mock` interceptor rules so recorded
+// responses can be replayed. Each entry becomes a rule matching its exact
+// request URL + method and fulfilling with the recorded status/headers/body.
+export function harEntriesToRules(har, options = {}) {
+  const log = har && har.log ? har.log : har;
+  const entries = Array.isArray(log && log.entries) ? log.entries : null;
+  if (!entries) throw new Error('routeFromHAR requires a HAR object with log.entries');
+
+  const urlFilter = typeof options.urlFilter === 'string' && options.urlFilter ? options.urlFilter : null;
+  const methods = Array.isArray(options.methods) && options.methods.length
+    ? options.methods.map(method => String(method).toUpperCase())
+    : null;
+  const sequential = options.sequential === true;
+
+  const rules = [];
+  let index = 0;
+  for (const entry of entries) {
+    const request = (entry && entry.request) || {};
+    const response = (entry && entry.response) || {};
+    const url = typeof request.url === 'string' ? request.url : '';
+    const method = String(request.method || 'GET').toUpperCase();
+    if (!url) continue;
+    if (urlFilter && !url.includes(urlFilter)) continue;
+    if (methods && !methods.includes(method)) continue;
+    // Skip incomplete entries (status 0 means no response was captured).
+    if (!Number.isInteger(response.status) || response.status < 100) continue;
+
+    rules.push({
+      id: `har-${index++}`,
+      urlPattern: url,
+      methods: [method],
+      action: 'mock',
+      responseCode: response.status,
+      responseHeaders: harHeadersToMap(response.headers),
+      ...harResponseBody(response.content),
+      ...(sequential ? { times: 1 } : {})
+    });
+  }
+
+  if (options.notFound === 'abort') {
+    rules.push({ id: 'har-not-found', urlPattern: '*', action: 'block', errorReason: 'BlockedByClient' });
+  }
+  return rules;
+}
+
+function harHeadersToMap(headers) {
+  const map = {};
+  if (!Array.isArray(headers)) return map;
+  for (const header of headers) {
+    if (!header || typeof header.name !== 'string') continue;
+    const lower = header.name.toLowerCase();
+    if (lower.startsWith(':')) continue; // HTTP/2 pseudo-headers
+    // Body is decoded/replayed, so drop transfer-affecting headers.
+    if (lower === 'content-encoding' || lower === 'content-length' || lower === 'transfer-encoding') continue;
+    map[header.name] = String(header.value ?? '');
+  }
+  return map;
+}
+
+function harResponseBody(content) {
+  if (!content || typeof content.text !== 'string') return {};
+  if (content.encoding === 'base64') return { responseBodyBase64: content.text };
+  return { responseBody: content.text };
+}
+
 export function fetchPatternsForRules(rules) {
   const seen = new Set();
   const patterns = [];
