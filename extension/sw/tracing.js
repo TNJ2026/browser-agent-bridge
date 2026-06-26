@@ -255,8 +255,21 @@ export function createTraceHandlers({
       includeText: trace.includeText,
       includeParams: trace.includeParams,
       includeResults: trace.includeResults,
-      eventCount: trace.events.length
+      eventCount: trace.events.length,
+      errorCount: trace.events.reduce((count, event) => count + (event.status === 'error' ? 1 : 0), 0)
     };
+  }
+
+  function traceErrorSummary(events) {
+    return events
+      .filter(event => event.status === 'error')
+      .map(event => ({
+        index: event.index,
+        method: event.method || '',
+        code: event.errorData?.code || null,
+        message: event.error || '',
+        diagnostic: event.errorData?.diagnostic || null
+      }));
   }
 
   function pushTraceEvent(trace, event) {
@@ -322,7 +335,8 @@ export function createTraceHandlers({
   function renderTraceHtml(trace) {
     const events = Array.isArray(trace.events) ? trace.events : [];
     const maxDuration = Math.max(1, ...events.map(event => Number(event.durationMs) || 0));
-    const errorCount = events.filter(event => event.status === 'error').length;
+    const errors = traceErrorSummary(events);
+    const errorCount = errors.length;
     const rows = events.map(event => renderTraceEvent(event, maxDuration)).join('\n');
     return `<!doctype html>
 <html lang="en">
@@ -349,6 +363,11 @@ h1{margin:0 0 8px;font-size:22px}
 .bar{height:8px;background:color-mix(in srgb,var(--bar) 20%,transparent);border-radius:999px;overflow:hidden}
 .bar span{display:block;height:100%;background:var(--bar)}
 pre{margin:0;padding:12px;border-top:1px solid var(--line);overflow:auto;white-space:pre-wrap;word-break:break-word}
+.failures{background:var(--card);border:1px solid var(--err);border-radius:8px;padding:12px 14px;margin-bottom:16px}
+.failures h2{margin:0 0 8px;font-size:15px;color:var(--err)}
+.failures ul{margin:0;padding-left:18px}
+.failures li{margin:4px 0}
+code.chip{font:12px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;background:color-mix(in srgb,var(--err) 14%,transparent);color:var(--err);border-radius:4px;padding:1px 5px;margin-left:6px}
 </style>
 </head>
 <body>
@@ -362,10 +381,22 @@ pre{margin:0;padding:12px;border-top:1px solid var(--line);overflow:auto;white-s
 <div class="stat"><strong>${errorCount}</strong><span>errors</span></div>
 <div class="stat"><strong>${Math.round(events.reduce((sum, event) => sum + (Number(event.durationMs) || 0), 0))}ms</strong><span>total duration</span></div>
 </section>
+${errors.length ? renderTraceFailures(errors) : ''}
 ${rows || '<p>No events recorded.</p>'}
 </main>
 </body>
 </html>`;
+  }
+
+  function renderTraceFailures(errors) {
+    const items = errors.map(error => {
+      const code = error.code ? `<code class="chip">${escapeHtml(error.code)}</code>` : '';
+      return `<li>#${error.index} <strong>${escapeHtml(error.method)}</strong>${code} — ${escapeHtml(error.message)}</li>`;
+    }).join('\n');
+    return `<section class="failures">
+<h2>Failures (${errors.length})</h2>
+<ul>${items}</ul>
+</section>`;
   }
 
   function renderTraceEvent(event, maxDuration) {
@@ -377,12 +408,14 @@ ${rows || '<p>No events recorded.</p>'}
       requestId: event.requestId,
       params: event.params,
       result: event.result,
-      error: event.error
+      error: event.error,
+      errorData: event.errorData
     };
+    const code = event.errorData?.code ? `<code class="chip">${escapeHtml(event.errorData.code)}</code>` : '';
     return `<details class="event" ${event.status === 'error' ? 'open' : ''}>
 <summary>
 <span class="idx">#${event.index}</span>
-<span class="method">${escapeHtml(event.method || '')}</span>
+<span class="method">${escapeHtml(event.method || '')}${code}</span>
 <span class="status ${event.status === 'error' ? 'error' : 'ok'}">${escapeHtml(event.status || '')}</span>
 <span>${duration}ms</span>
 <span class="bar" style="grid-column:1/-1"><span style="width:${width}%"></span></span>

@@ -162,7 +162,9 @@ Stops the active trace, or a specific trace by `traceId`.
 
 ### `trace.status`
 
-Lists traces, or returns one trace summary when `traceId` is supplied.
+Lists traces, or returns one trace summary when `traceId` is supplied. Each
+summary includes `eventCount` and `errorCount` so a failing trace is
+identifiable without exporting it.
 
 ```json
 {}
@@ -171,7 +173,10 @@ Lists traces, or returns one trace summary when `traceId` is supplied.
 ### `trace.export`
 
 Exports the active trace, or a specific trace by `traceId`. Pass
-`download:true` to save it through Chrome downloads.
+`download:true` to save it through Chrome downloads. Each error event carries
+`error` (message) plus `errorData` with the structured `code` and `diagnostic`
+of waits/locator/network failures, so the trace is a self-contained failure
+postmortem.
 
 ```json
 { "traceId": "uuid", "download": false }
@@ -180,7 +185,10 @@ Exports the active trace, or a specific trace by `traceId`. Pass
 ### `trace.exportHtml`
 
 Exports the active trace, or a specific trace by `traceId`, as a standalone
-HTML timeline. Pass `download:true` to save it through Chrome downloads.
+HTML timeline. Pass `download:true` to save it through Chrome downloads. When a
+trace has errors the HTML opens with a Failures section listing each failing
+method and its error `code`, and every error event shows its structured
+`errorData` diagnostic inline.
 
 ```json
 { "traceId": "uuid", "download": true, "filename": "trace.html" }
