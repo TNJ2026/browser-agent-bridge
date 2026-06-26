@@ -287,10 +287,16 @@ wait until Chrome reports the tab load status as complete.
 ```
 
 URL filters can be `url` for exact match, `urlContains`, or `urlRegex`.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_NAVIGATION_TIMEOUT"` and `data.diagnostic` with
+`currentUrl`, `urlChanged`, `waitUntil`, and `elapsedMs`.
 
 ### `page.waitForURL`
 
 Polls the active tab URL until it matches `url`, `urlContains`, or `urlRegex`.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_URL_TIMEOUT"` and `data.diagnostic` with the
+`currentUrl` and `urlPattern`.
 
 ```json
 { "tabId": 123, "urlRegex": "/dashboard(\\?|$)", "timeoutMs": 30000 }
@@ -331,6 +337,9 @@ filters, observed event count, and recent response candidates.
 
 Waits until new network activity has been idle for `idleMs` (default `500`).
 Set `maxInflight` to allow a small number of still-open requests.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_NETWORK_IDLE_TIMEOUT"` and `data.diagnostic` with
+`inflight`, `maxInflight`, `idleMs`, and `msSinceLastActivity`.
 
 ```json
 { "tabId": 123, "idleMs": 500, "maxInflight": 0, "timeoutMs": 30000 }
@@ -341,6 +350,8 @@ Set `maxInflight` to allow a small number of still-open requests.
 Waits for a JavaScript dialog (`alert`, `confirm`, `prompt`, or
 `beforeunload`). Supports `type`, `message`, `messageContains`, and
 `messageRegex` filters.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_DIALOG_TIMEOUT"` and `data.diagnostic`.
 
 ```json
 { "tabId": 123, "type": "confirm", "messageContains": "Delete", "timeoutMs": 30000 }
@@ -369,6 +380,10 @@ can also be passed to those methods to resolve the first matching frame URL.
 
 Polls for a CSS selector. Set `visible` to require a visible box. Use
 `frameId`, `frameUrl`, or `frameSelector` to target a frame.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_SELECTOR_TIMEOUT"` and `data.diagnostic` with
+`selector`, `foundInDom`, `visible`, `tagName`, and `frame`. `foundInDom` with
+`visible:false` distinguishes a hidden element from a missing one.
 
 ```json
 { "tabId": 123, "selector": "main button", "visible": true, "timeoutMs": 30000, "frameId": 7 }
@@ -378,6 +393,9 @@ Polls for a CSS selector. Set `visible` to require a visible box. Use
 
 Polls the whole page, or a selector subtree, for text. Use `frameId`,
 `frameUrl`, or `frameSelector` to target a frame.
+On timeout, the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_TEXT_TIMEOUT"` and `data.diagnostic` with `text`,
+`selectorFound`, `observedTextLength`, `preview`, and `frame`.
 
 ```json
 { "tabId": 123, "text": "Signed in", "selector": "main", "timeoutMs": 30000, "frameId": 7 }
