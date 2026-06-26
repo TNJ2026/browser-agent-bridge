@@ -301,8 +301,9 @@ Polls the active tab URL until it matches `url`, `urlContains`, or `urlRegex`.
 Waits for a CDP `Network.requestWillBeSent` event. Supports `url`,
 `urlContains`, `urlRegex`, `method`, `resourceType`,
 `requestHeaderContains`/`headerContains`, and
-`requestHeaderRegex`/`headerRegex` filters. Pass `includeHeaders:true` to
-include redacted request headers in the result.
+`requestHeaderRegex`/`headerRegex`, `postDataContains`, and `postDataRegex`
+filters. Pass `includeHeaders:true` to include redacted request headers in the
+result.
 
 ```json
 { "tabId": 123, "urlContains": "/api/items", "method": "POST", "headerContains": { "Content-Type": "json" }, "timeoutMs": 30000 }

@@ -295,6 +295,8 @@ def run_smoke_test():
             "urlContains": "header-smoke.test/request",
             "method": "POST",
             "requestHeaderContains": { "X-Smoke-Header": "bridge" },
+            "postDataContains": "header smoke",
+            "postDataRegex": "header\\s+smoke",
             "includeHeaders": True,
             "timeoutMs": 5000
         })

@@ -96,13 +96,15 @@ export function createPageHandlers({
     const resourceType = typeof params.resourceType === 'string' && params.resourceType ? params.resourceType.toLowerCase() : null;
     const requestHeaderContains = normalizeHeaderMatcher(params.requestHeaderContains ?? params.headerContains, 'page.waitForRequest headerContains');
     const requestHeaderRegex = normalizeHeaderMatcher(params.requestHeaderRegex ?? params.headerRegex, 'page.waitForRequest headerRegex', { regex: true });
+    const postDataContains = normalizeOptionalNonEmptyString(params.postDataContains, 'page.waitForRequest postDataContains');
+    const postDataRegex = normalizeOptionalRegexString(params.postDataRegex, 'page.waitForRequest postDataRegex');
     const started = Date.now();
     await attachDebugger(tabId);
     await cdp(tabId, 'Network.enable').catch(() => {});
 
     while (Date.now() - started <= timeoutMs) {
       const events = networkEventsByTab?.get(tabId) || [];
-      const match = findMatchingRequest(events, { ...params, method, resourceType, requestHeaderContains, requestHeaderRegex, started });
+      const match = findMatchingRequest(events, { ...params, method, resourceType, requestHeaderContains, requestHeaderRegex, postDataContains, postDataRegex, started });
       if (match) return { ok: true, request: match, elapsedMs: Date.now() - started };
       await sleep(intervalMs);
     }
@@ -573,6 +575,7 @@ function findMatchingRequest(events, options) {
     if (options.resourceType && String(params.type || '').toLowerCase() !== options.resourceType) continue;
     if (!headersMatch(request.headers || {}, options.requestHeaderContains, 'contains')) continue;
     if (!headersMatch(request.headers || {}, options.requestHeaderRegex, 'regex')) continue;
+    if (!postDataMatches(request.postData || '', options)) continue;
     return {
       requestId: params.requestId || '',
       url,
@@ -585,6 +588,12 @@ function findMatchingRequest(events, options) {
     };
   }
   return null;
+}
+
+function postDataMatches(postData, options) {
+  if (options.postDataContains != null && !postData.includes(options.postDataContains)) return false;
+  if (options.postDataRegex != null && !(new RegExp(options.postDataRegex)).test(postData)) return false;
+  return true;
 }
 
 function normalizeHeaderMatcher(headers, label, { regex = false } = {}) {
@@ -606,6 +615,23 @@ function normalizeHeaderMatcher(headers, label, { regex = false } = {}) {
     }
     return [name, value];
   }));
+}
+
+function normalizeOptionalNonEmptyString(value, label) {
+  if (value == null) return null;
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`${label} must be a non-empty string`);
+  return value;
+}
+
+function normalizeOptionalRegexString(value, label) {
+  const normalized = normalizeOptionalNonEmptyString(value, label);
+  if (normalized == null) return null;
+  try {
+    new RegExp(normalized);
+  } catch {
+    throw new Error(`${label} must be a valid regular expression`);
+  }
+  return normalized;
 }
 
 function headersMatch(headers, matchers, mode) {
