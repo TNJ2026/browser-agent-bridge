@@ -22,7 +22,7 @@ function makeChromeApi() {
   };
 }
 
-async function makeHandlers() {
+async function makeHandlers({ captureFailureContext } = {}) {
   const { createTraceHandlers } = await importTracingModule();
   let uuid = 0;
   let clock = 1_000;
@@ -34,8 +34,19 @@ async function makeHandlers() {
     errorMessage: (e) => (e instanceof Error ? e.message : String(e)),
     chromeApi: makeChromeApi(),
     now: () => (clock += 5),
-    cryptoApi: { randomUUID: () => `trace-${uuid++}` }
+    cryptoApi: { randomUUID: () => `trace-${uuid++}` },
+    captureFailureContext
   });
+}
+
+function pageContext() {
+  return {
+    tabId: 1,
+    url: 'https://example.com/checkout',
+    title: 'Checkout',
+    a11y: { headings: 2, links: 9, buttons: 3, inputs: 4 },
+    text: 'Secret order details for the customer'
+  };
 }
 
 function strictError() {
@@ -97,4 +108,51 @@ test('HTML export omits the Failures section when there are no errors', async ()
 
   const { html } = await handlers.traceExportHtml();
   assert.ok(!html.includes('Failures ('), 'expected no failures section');
+});
+
+test('failure context is captured and kept (includeText:true)', async () => {
+  const handlers = await makeHandlers({ captureFailureContext: async () => pageContext() });
+  await handlers.traceStart({ name: 'checkout', includeText: true });
+  const token = await handlers.traceRpcStart({ method: 'locator.click', id: 'r1' });
+  await handlers.traceRpcError(token, { method: 'locator.click', params: { tabId: 1 } }, strictError());
+
+  const event = (await handlers.traceExport()).trace.events[0];
+  assert.equal(event.context.url, 'https://example.com/checkout');
+  assert.equal(event.context.a11y.headings, 2);
+  assert.equal(event.context.text, 'Secret order details for the customer');
+});
+
+test('failure context text is redacted when includeText is false', async () => {
+  const handlers = await makeHandlers({ captureFailureContext: async () => pageContext() });
+  await handlers.traceStart({ name: 'checkout' });
+  const token = await handlers.traceRpcStart({ method: 'locator.click', id: 'r1' });
+  await handlers.traceRpcError(token, { method: 'locator.click', params: { tabId: 1 } }, strictError());
+
+  const event = (await handlers.traceExport()).trace.events[0];
+  // url/a11y survive; only the free-text preview is redacted.
+  assert.equal(event.context.url, 'https://example.com/checkout');
+  assert.equal(event.context.a11y.links, 9);
+  assert.equal(event.context.text.redacted, true);
+  assert.equal(typeof event.context.text.length, 'number');
+});
+
+test('a capture failure never masks the original error', async () => {
+  const handlers = await makeHandlers({ captureFailureContext: async () => { throw new Error('capture boom'); } });
+  await handlers.traceStart({ name: 'checkout', includeText: true });
+  const token = await handlers.traceRpcStart({ method: 'locator.click', id: 'r1' });
+  await handlers.traceRpcError(token, { method: 'locator.click', params: { tabId: 1 } }, strictError());
+
+  const event = (await handlers.traceExport()).trace.events[0];
+  assert.equal(event.errorData.code, 'LOCATOR_STRICT_MODE_VIOLATION');
+  assert.equal(event.context, undefined);
+});
+
+test('HTML failures section shows the captured url', async () => {
+  const handlers = await makeHandlers({ captureFailureContext: async () => pageContext() });
+  await handlers.traceStart({ name: 'checkout', includeText: true });
+  const token = await handlers.traceRpcStart({ method: 'locator.click', id: 'r1' });
+  await handlers.traceRpcError(token, { method: 'locator.click', params: { tabId: 1 } }, strictError());
+
+  const { html } = await handlers.traceExportHtml();
+  assert.ok(html.includes('at https://example.com/checkout'), 'expected the captured url in failures');
 });

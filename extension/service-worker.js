@@ -43,7 +43,8 @@ const cspHandlers = createCspHandlers({});
 const policyHandlers = createPolicyHandlers({});
 const traceHandlers = createTraceHandlers({
   assertString,
-  errorMessage
+  errorMessage,
+  captureFailureContext
 });
 const frameTargetResolver = createFrameTargetResolver({});
 const keyboardDispatcher = createKeyboardDispatcher({ cdp, sleep });
@@ -1065,6 +1066,38 @@ async function blobToBase64(blob) {
     binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
   }
   return btoa(binary);
+}
+
+// Best-effort lightweight page snapshot attached to trace error events. Stays
+// within the Agent boundary, never throws, and never blocks the error path for
+// long. Captures url/title/a11y counts always; the free-text preview is gated
+// by the trace's includeText flag downstream (via the sanitized `text` key).
+async function captureFailureContext(request) {
+  const tabId = request?.params?.tabId;
+  if (!Number.isInteger(tabId)) return null;
+  try {
+    if (!await sessionsHandlers.areAgentManagedTabs([tabId])) return null;
+    const [{ result } = {}] = await withTimeout(chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const text = (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+        return {
+          url: location.href,
+          title: document.title,
+          a11y: {
+            headings: document.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
+            links: document.querySelectorAll('a[href]').length,
+            buttons: document.querySelectorAll('button,[role="button"]').length,
+            inputs: document.querySelectorAll('input,textarea,select').length
+          },
+          text
+        };
+      }
+    }), 2500, 'captureFailureContext');
+    return result ? { tabId, ...result } : null;
+  } catch {
+    return null;
+  }
 }
 
 function pushLimited(map, key, value, limit) {

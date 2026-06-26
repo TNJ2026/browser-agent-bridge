@@ -9,7 +9,8 @@ export function createTraceHandlers({
   errorMessage,
   chromeApi = chrome,
   now = () => Date.now(),
-  cryptoApi = crypto
+  cryptoApi = crypto,
+  captureFailureContext = null
 }) {
   const traces = new Map();
   let tracesLoaded = false;
@@ -32,6 +33,7 @@ export function createTraceHandlers({
       includeText: params.includeText === true,
       includeParams: params.includeParams !== false,
       includeResults: params.includeResults !== false,
+      includeContext: params.includeContext !== false,
       events: []
     };
     traces.set(trace.id, trace);
@@ -155,6 +157,18 @@ export function createTraceHandlers({
       event.error = errorMessage(outcome.error);
       const data = errorData(outcome.error);
       if (data) event.errorData = compactForTrace(data, trace);
+      if (trace.includeContext && typeof captureFailureContext === 'function') {
+        // Best-effort lightweight page snapshot for postmortem. Never let a
+        // capture failure mask the original error.
+        try {
+          const context = await captureFailureContext(request);
+          // sanitize (redacts the `text` preview when includeText is false) but
+          // keep the structure rather than whole-object truncating it.
+          if (context) event.context = sanitizeForTrace(context, trace);
+        } catch {
+          // ignore capture failures
+        }
+      }
     }
     pushTraceEvent(trace, event);
     await saveTracesNow();
@@ -237,6 +251,7 @@ export function createTraceHandlers({
       includeText: trace.includeText === true,
       includeParams: trace.includeParams !== false,
       includeResults: trace.includeResults !== false,
+      includeContext: trace.includeContext !== false,
       events: Array.isArray(trace.events) ? trace.events : []
     };
   }
@@ -255,6 +270,7 @@ export function createTraceHandlers({
       includeText: trace.includeText,
       includeParams: trace.includeParams,
       includeResults: trace.includeResults,
+      includeContext: trace.includeContext,
       eventCount: trace.events.length,
       errorCount: trace.events.reduce((count, event) => count + (event.status === 'error' ? 1 : 0), 0)
     };
@@ -268,7 +284,8 @@ export function createTraceHandlers({
         method: event.method || '',
         code: event.errorData?.code || null,
         message: event.error || '',
-        diagnostic: event.errorData?.diagnostic || null
+        diagnostic: event.errorData?.diagnostic || null,
+        context: event.context || null
       }));
   }
 
@@ -367,6 +384,7 @@ pre{margin:0;padding:12px;border-top:1px solid var(--line);overflow:auto;white-s
 .failures h2{margin:0 0 8px;font-size:15px;color:var(--err)}
 .failures ul{margin:0;padding-left:18px}
 .failures li{margin:4px 0}
+.failures .muted{color:var(--muted);font-size:12px}
 code.chip{font:12px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;background:color-mix(in srgb,var(--err) 14%,transparent);color:var(--err);border-radius:4px;padding:1px 5px;margin-left:6px}
 </style>
 </head>
@@ -391,7 +409,8 @@ ${rows || '<p>No events recorded.</p>'}
   function renderTraceFailures(errors) {
     const items = errors.map(error => {
       const code = error.code ? `<code class="chip">${escapeHtml(error.code)}</code>` : '';
-      return `<li>#${error.index} <strong>${escapeHtml(error.method)}</strong>${code} — ${escapeHtml(error.message)}</li>`;
+      const where = error.context?.url ? `<div class="muted">at ${escapeHtml(error.context.url)}</div>` : '';
+      return `<li>#${error.index} <strong>${escapeHtml(error.method)}</strong>${code} — ${escapeHtml(error.message)}${where}</li>`;
     }).join('\n');
     return `<section class="failures">
 <h2>Failures (${errors.length})</h2>
@@ -409,7 +428,8 @@ ${rows || '<p>No events recorded.</p>'}
       params: event.params,
       result: event.result,
       error: event.error,
-      errorData: event.errorData
+      errorData: event.errorData,
+      context: event.context
     };
     const code = event.errorData?.code ? `<code class="chip">${escapeHtml(event.errorData.code)}</code>` : '';
     return `<details class="event" ${event.status === 'error' ? 'open' : ''}>

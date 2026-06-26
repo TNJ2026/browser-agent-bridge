@@ -148,8 +148,14 @@ Starts a lightweight debug trace. While active, each JSON-RPC call records
 method, duration, status, selected params, compact result previews, and errors.
 Text-like fields are redacted by default; pass `includeText:true` to keep them.
 
+When a traced call fails on a tab, a lightweight page snapshot is attached to
+the error event as `context` (target `url`, `title`, accessibility element
+counts, and a visible-text preview). The text preview follows the same
+redaction as `includeText`; `url`, `title`, and counts are always kept. Pass
+`includeContext:false` to disable capture.
+
 ```json
-{ "name": "debug checkout", "includeText": false, "maxEvents": 1000 }
+{ "name": "debug checkout", "includeText": false, "includeContext": true, "maxEvents": 1000 }
 ```
 
 ### `trace.stop`
