@@ -16,7 +16,10 @@ class TestHostUtilities(unittest.TestCase):
             "ALLOW_NO_AUTH": host.ALLOW_NO_AUTH,
             "ALLOW_CUSTOM_SAVE_DIR": host.ALLOW_CUSTOM_SAVE_DIR,
             "EXTENSION_ID": host.EXTENSION_ID,
+            "EXTENSION_ID_FROM_ENV": host.EXTENSION_ID_FROM_ENV,
             "safe_filename": host.safe_filename,
+            "extension_ready": host.extension_ready,
+            "next_rpc_id": host.next_rpc_id,
         }
 
     def tearDown(self):
@@ -104,6 +107,48 @@ class TestHostUtilities(unittest.TestCase):
         self.assertFalse(dummy.is_origin_allowed("https://example.com"))
         self.assertFalse(dummy.is_origin_allowed("http://malicious.com:8765"))
 
+    def test_origin_validation_fails_closed_without_pinned_id(self):
+        class Dummy:
+            pass
+        dummy = Dummy()
+        dummy.is_origin_allowed = host.RpcRequestHandler.is_origin_allowed.__get__(dummy)
+        host.EXTENSION_ID = ""
+
+        # Non-browser clients (no Origin) and localhost stay allowed.
+        self.assertTrue(dummy.is_origin_allowed(None))
+        self.assertTrue(dummy.is_origin_allowed(""))
+        self.assertTrue(dummy.is_origin_allowed("http://127.0.0.1:8765"))
+        # Unknown extension origin is rejected instead of blanket-allowed.
+        self.assertFalse(dummy.is_origin_allowed("chrome-extension://aodcpicfepmdmpfaflncbndcicoemdje"))
+
+    def test_extension_ready_adopts_reported_id_when_not_env_pinned(self):
+        host.EXTENSION_ID = ""
+        host.EXTENSION_ID_FROM_ENV = False
+        host.handle_native_notification({
+            "method": "extension.ready",
+            "params": {"version": "1.0.0", "extensionId": "lpemchcojepfkbgjgoehfknibdjjppig"},
+        })
+        self.assertEqual(host.EXTENSION_ID, "lpemchcojepfkbgjgoehfknibdjjppig")
+
+    def test_extension_ready_keeps_env_pinned_id(self):
+        host.EXTENSION_ID = "aodcpicfepmdmpfaflncbndcicoemdje"
+        host.EXTENSION_ID_FROM_ENV = True
+        host.handle_native_notification({
+            "method": "extension.ready",
+            "params": {"extensionId": "lpemchcojepfkbgjgoehfknibdjjppig"},
+        })
+        self.assertEqual(host.EXTENSION_ID, "aodcpicfepmdmpfaflncbndcicoemdje")
+
+    def test_extension_ready_rejects_malformed_reported_id(self):
+        host.EXTENSION_ID = ""
+        host.EXTENSION_ID_FROM_ENV = False
+        for bad in ("../etc/passwd", "ABCDEF", "lpemchcojepfkbgjgoehfknibdjjppi", "xyz"):
+            host.handle_native_notification({
+                "method": "extension.ready",
+                "params": {"extensionId": bad},
+            })
+            self.assertEqual(host.EXTENSION_ID, "")
+
     def test_get_site_patterns(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -123,6 +168,150 @@ class TestHostUtilities(unittest.TestCase):
             self.assertEqual(patterns[0]["filename"], "example.com.md")
             self.assertEqual(patterns[0]["summary"], "This is a summary of example.com. More details here.")
             self.assertIn("Example Site", patterns[0]["content"])
+
+    def test_websocket_recv_rejects_oversized_frame(self):
+        import struct
+
+        class FakeSock:
+            def __init__(self, chunks):
+                self._chunks = list(chunks)
+                self.read_bytes = 0
+                self.sent = []
+
+            def recv(self, size):
+                if not self._chunks:
+                    raise AssertionError("recv called after payload would be read")
+                chunk = self._chunks.pop(0)
+                self.read_bytes += len(chunk)
+                return chunk
+
+            def sendall(self, data):
+                self.sent.append(data)
+
+        # FIN + text opcode, length marker 127, then 8-byte length above the cap.
+        huge = host.MAX_MESSAGE_BYTES + 1
+        chunks = [bytes([0x81]), bytes([0x7F]), struct.pack("!Q", huge)]
+        sock = FakeSock(chunks)
+
+        with self.assertRaises(ConnectionError):
+            host.websocket_recv(sock)
+
+        # Only the 10 header bytes were read; payload never allocated.
+        self.assertEqual(sock.read_bytes, 10)
+        # A close frame (opcode 0x8) with status 1009 was sent back.
+        self.assertEqual(len(sock.sent), 1)
+        self.assertEqual(sock.sent[0][0] & 0x0F, 0x8)
+        self.assertEqual(struct.unpack("!H", sock.sent[0][2:4])[0], 1009)
+
+    def test_call_extension_isolates_colliding_client_ids(self):
+        from unittest.mock import patch
+
+        host.extension_ready = True
+        captured = []
+
+        def fake_write(msg):
+            # Simulate the extension echoing the forwarded (internal) id back.
+            internal_id = msg["id"]
+            captured.append(internal_id)
+            with host.pending_lock:
+                waiter = host.pending_requests.get(internal_id)
+            waiter["response"] = {
+                "jsonrpc": "2.0",
+                "id": internal_id,
+                "result": {"echo": internal_id},
+            }
+            waiter["event"].set()
+
+        with patch("host.write_native_message", side_effect=fake_write):
+            r1 = host.call_extension({"jsonrpc": "2.0", "id": 1, "method": "tabs.list", "params": {}})
+            r2 = host.call_extension({"jsonrpc": "2.0", "id": 1, "method": "tabs.list", "params": {}})
+
+        # Same client id (1) but distinct internal correlation ids -> no collision.
+        self.assertNotEqual(captured[0], captured[1])
+        self.assertTrue(captured[0].startswith("rpc-"))
+        # Client's original id (and int type) is restored on the response.
+        self.assertEqual(r1["id"], 1)
+        self.assertEqual(r2["id"], 1)
+        self.assertIsInstance(r1["id"], int)
+        # Each response carries its own internal echo -> matched to the right waiter.
+        self.assertEqual(r1["result"]["echo"], captured[0])
+        self.assertEqual(r2["result"]["echo"], captured[1])
+        # Waiters cleaned up.
+        self.assertNotIn(captured[0], host.pending_requests)
+        self.assertNotIn(captured[1], host.pending_requests)
+
+    def test_call_extension_falls_back_to_internal_id_when_client_omits_id(self):
+        from unittest.mock import patch
+
+        host.extension_ready = True
+
+        def fake_write(msg):
+            internal_id = msg["id"]
+            with host.pending_lock:
+                waiter = host.pending_requests.get(internal_id)
+            waiter["response"] = {"jsonrpc": "2.0", "id": internal_id, "result": {}}
+            waiter["event"].set()
+
+        with patch("host.write_native_message", side_effect=fake_write):
+            r = host.call_extension({"jsonrpc": "2.0", "method": "tabs.list", "params": {}})
+
+        # No client id supplied -> response carries the internal id, never None.
+        self.assertTrue(str(r["id"]).startswith("rpc-"))
+
+    def test_event_tab_id_extraction(self):
+        self.assertEqual(host.event_tab_id({"params": {"source": {"tabId": 7}}}), 7)
+        self.assertEqual(host.event_tab_id({"params": {"tabId": 9}}), 9)
+        self.assertIsNone(host.event_tab_id({"params": {"version": "1.0.0"}}))
+        self.assertIsNone(host.event_tab_id({}))
+        self.assertIsNone(host.event_tab_id("not-a-dict"))
+
+    def test_apply_ws_subscription(self):
+        client = {"lock": None, "tabs": None}
+
+        # List of ints -> set; duplicates collapse, bools/strings dropped.
+        r = host.apply_ws_subscription(client, {"id": 1, "params": {"tabIds": [1, 2, 2, True, "x"]}})
+        self.assertEqual(client["tabs"], {1, 2})
+        self.assertEqual(r["result"]["subscribed"], [1, 2])
+
+        # null -> clears filter (receive all).
+        r = host.apply_ws_subscription(client, {"id": 2, "params": {"tabIds": None}})
+        self.assertIsNone(client["tabs"])
+        self.assertIsNone(r["result"]["subscribed"])
+
+        # Wrong type -> error, filter unchanged.
+        r = host.apply_ws_subscription(client, {"id": 3, "params": {"tabIds": "bad"}})
+        self.assertIn("error", r)
+        self.assertIsNone(client["tabs"])
+
+    def test_broadcast_websocket_filters_by_tab_subscription(self):
+        class FakeSock:
+            def __init__(self):
+                self.sent = []
+
+            def sendall(self, data):
+                self.sent.append(data)
+
+        sub_sock = FakeSock()
+        all_sock = FakeSock()
+        sub_client = host.register_websocket(sub_sock)
+        sub_client["tabs"] = {123}
+        host.register_websocket(all_sock)  # tabs stays None -> receive all
+        try:
+            # Tab-scoped event for a subscribed tab -> both clients.
+            host.broadcast_websocket({"jsonrpc": "2.0", "method": "cdp.event",
+                                      "params": {"source": {"tabId": 123}, "method": "Network.x"}})
+            # Tab-scoped event for another tab -> only the unfiltered client.
+            host.broadcast_websocket({"jsonrpc": "2.0", "method": "cdp.event",
+                                      "params": {"source": {"tabId": 999}}})
+            # Global event (no tab id) -> both clients.
+            host.broadcast_websocket({"jsonrpc": "2.0", "method": "extension.ready",
+                                      "params": {"version": "1.0.0"}})
+        finally:
+            host.unregister_websocket(sub_sock)
+            host.unregister_websocket(all_sock)
+
+        self.assertEqual(len(sub_sock.sent), 2)  # tab123 + global
+        self.assertEqual(len(all_sock.sent), 3)  # all three
 
     def test_handle_native_request_rejects_unknown_methods(self):
         from unittest.mock import patch

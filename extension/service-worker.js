@@ -345,6 +345,7 @@ async function connectNative() {
 
   sendNativeNotification('extension.ready', {
     version: chrome.runtime.getManifest().version,
+    extensionId: chrome.runtime.id,
     port: port
   });
 
