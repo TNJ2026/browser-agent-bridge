@@ -448,6 +448,9 @@ export function createLocatorHandlers({
       await sleep(intervalMs);
     }
 
+    if (params.strict === true && (last?.count ?? 0) > 1) {
+      throw createLocatorStrictModeError(params, actionKind, frameTarget, last, Date.now() - started);
+    }
     throw createLocatorTimeoutError(params, actionKind, frameTarget, last, Date.now() - started);
   }
 
@@ -474,6 +477,45 @@ export function createLocatorHandlers({
     error.code = 'LOCATOR_ACTIONABILITY_TIMEOUT';
     error.diagnostic = diagnostic;
     return error;
+  }
+
+  function createLocatorStrictModeError(params, actionKind, frameTarget, last, elapsedMs) {
+    // List every observed candidate (capped only by the in-page collection
+    // limit) so "matched too many" is diagnosable without re-querying.
+    const candidates = (last?.elements || []).map(compactLocatorElement).filter(Boolean);
+    const count = Number.isInteger(last?.count) ? last.count : candidates.length;
+    const diagnostic = {
+      type: 'LocatorStrictModeViolation',
+      locator: describeLocator(params),
+      action: actionKind,
+      elapsedMs,
+      count,
+      visibleCount: last?.visibleCount ?? null,
+      strict: true,
+      candidates,
+      candidatesTruncated: count > candidates.length,
+      frame: frameTarget?.frame || null
+    };
+    const error = new Error(formatLocatorStrictModeMessage(diagnostic));
+    error.name = 'LocatorStrictModeViolation';
+    error.code = 'LOCATOR_STRICT_MODE_VIOLATION';
+    error.diagnostic = diagnostic;
+    return error;
+  }
+
+  function formatLocatorStrictModeMessage(diagnostic) {
+    const parts = [
+      `Strict mode violation: locator ${diagnostic.locator} resolved to ${diagnostic.count} elements for ${diagnostic.action}`
+    ];
+    if (diagnostic.frame?.frameId != null) {
+      parts.push(`frame: ${diagnostic.frame.frameId}${diagnostic.frame.url ? ` ${diagnostic.frame.url}` : ''}`);
+    }
+    if (diagnostic.candidates.length > 0) {
+      const shown = diagnostic.candidates.slice(0, 10).map(formatCompactLocatorElement).join(' | ');
+      const hidden = diagnostic.count - Math.min(10, diagnostic.candidates.length);
+      parts.push(`candidates: ${shown}${hidden > 0 ? ` (+${hidden} more)` : ''}`);
+    }
+    return parts.join('; ');
   }
 
   function createLocatorExpectTimeoutError(params, assertion, frameTarget, details) {

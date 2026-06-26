@@ -640,6 +640,12 @@ On actionability timeout, the JSON-RPC error includes
 `data.code: "LOCATOR_ACTIONABILITY_TIMEOUT"` and `data.diagnostic` with the
 last match counts, reasons, frame, target element, and nearby candidate
 summaries.
+When `strict:true` and the locator resolves to more than one element, the error
+instead uses `data.code: "LOCATOR_STRICT_MODE_VIOLATION"` and `data.diagnostic`
+lists `count` and every conflicting candidate (`candidates`, capped by the
+in-page collection limit, with `candidatesTruncated` when `count` exceeds it).
+This applies to all auto-waiting locator actions (`locator.click`,
+`locator.fill`, `locator.check`, `locator.selectOption`, drag, etc.).
 
 ```json
 { "tabId": 123, "role": "button", "name": "Submit", "timeoutMs": 30000 }
