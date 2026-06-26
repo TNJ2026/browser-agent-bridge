@@ -41,7 +41,7 @@ function makeHandlers({ events, body, base64 = false } = {}) {
     cdp: async (tabId, cdpMethod) => {
       if (cdpMethod === 'Network.getResponseBody') {
         if (body == null) throw new Error('No data found');
-        return base64 ? { body: btoa(body), base64Encoded: true } : { body, base64Encoded: false };
+        return base64 ? { body: Buffer.from(body).toString('base64'), base64Encoded: true } : { body, base64Encoded: false };
       }
       return {};
     },
@@ -100,6 +100,12 @@ test('jsonPath existence matches without a value constraint', async () => {
 test('base64-encoded bodies are decoded before matching', async () => {
   const handlers = await makeHandlers({ events: networkEvents(), body: JSON_BODY, base64: true });
   const res = await handlers.pageWaitForResponse({ tabId: 1, urlContains: '/items', jsonPath: 'items[0].name', jsonContains: 'a', timeoutMs: 40, intervalMs: 10 });
+  assert.equal(res.response.bodyMatched, true);
+});
+
+test('base64-encoded UTF-8 bodies are properly decoded', async () => {
+  const handlers = await makeHandlers({ events: networkEvents(), body: '{"msg":"你好"}', base64: true });
+  const res = await handlers.pageWaitForResponse({ tabId: 1, urlContains: '/items', bodyContains: '你好', timeoutMs: 40, intervalMs: 10 });
   assert.equal(res.response.bodyMatched, true);
 });
 

@@ -762,7 +762,13 @@ function jsonDeepEqual(a, b) {
 
 function decodeBase64ToText(value) {
   try {
-    return atob(value);
+    const binString = atob(value);
+    const len = binString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binString.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
   } catch {
     return null;
   }
