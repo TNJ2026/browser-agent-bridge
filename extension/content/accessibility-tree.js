@@ -26,6 +26,11 @@
       'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'td', 'th', 'dt', 'dd', 'span', 'strong', 'em', 'b', 'i', 'code', 'pre', 'mark'
     ]);
 
+    const CONTAINER_ROLES = new Set([
+      'document', 'article', 'aside', 'main', 'navigation', 'region', 'form',
+      'list', 'listitem', 'table', 'row', 'cell', 'columnheader', 'group', 'dialog'
+    ]);
+
     function isElementVisible(el, rect, style) {
       if (rect.width <= 0 || rect.height <= 0) return false;
       if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
@@ -33,7 +38,7 @@
     }
 
     function hasInteractiveDescendants(el) {
-      return el.querySelector('a[href],button,input,textarea,select,[tabindex],[contenteditable="true"],[role]') !== null;
+      return el.querySelector('a[href],button,input,textarea,select,[tabindex],[contenteditable="true"],[role],h1,h2,h3,h4,h5,h6,img,option') !== null;
     }
 
     function traverse(node, offsetX = 0, offsetY = 0) {
@@ -106,8 +111,11 @@
         if (style.display === 'none') return;
       }
 
-      const role = el.getAttribute('role') || implicitRole(el);
-      const isInteractive = Boolean(role || el.matches('a[href],button,input,textarea,select,[tabindex],[contenteditable="true"]'));
+      const role = firstExplicitRole(el) || implicitRole(el);
+      const isInteractive = Boolean(
+        (role && !CONTAINER_ROLES.has(role)) ||
+        el.matches('a[href],button,input,textarea,select,[tabindex],[contenteditable="true"]')
+      );
 
       if (isInteractive) {
         const name = accessibleName(el);
@@ -192,31 +200,106 @@
     };
   }
 
+  // Best-effort DOM a11y helpers. Keep common name/role behavior aligned with
+  // extension/sw/locator.js, which uses the same concepts for locator matching.
   function implicitRole(el) {
     const tag = el.tagName.toLowerCase();
-    if (tag === 'button') return 'button';
     if (tag === 'a' && el.hasAttribute('href')) return 'link';
-    if (tag === 'input') return 'textbox';
-    if (tag === 'textarea') return 'textbox';
-    if (tag === 'select') return 'combobox';
+    if (tag === 'area' && el.hasAttribute('href')) return 'link';
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    if (tag === 'button' || ['button', 'submit', 'reset', 'image'].includes(type)) return 'button';
+    if (tag === 'select') return el.multiple ? 'listbox' : 'combobox';
+    if (tag === 'textarea' || (tag === 'input' && ['email', 'password', 'tel', 'text', 'url', ''].includes(type))) return 'textbox';
+    if (tag === 'input' && type === 'search') return 'searchbox';
+    if (tag === 'input' && type === 'checkbox') return 'checkbox';
+    if (tag === 'input' && type === 'radio') return 'radio';
+    if (tag === 'input' && type === 'range') return 'slider';
+    if (tag === 'input' && type === 'number') return 'spinbutton';
+    if (tag === 'option') return 'option';
     if (/^h[1-6]$/.test(tag)) return 'heading';
+    if (tag === 'img') return 'img';
+    if (tag === 'summary') return 'button';
+    if (tag === 'progress') return 'progressbar';
+    if (tag === 'meter') return 'meter';
     return '';
   }
 
   function accessibleName(el) {
-    const aria = el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('alt');
-    if (aria) return aria.trim().slice(0, 500);
+    if (isAriaHidden(el)) return '';
+    return accessibleNameInternal(el, new Set()).trim().replace(/\s+/g, ' ').slice(0, 500);
+  }
+
+  function accessibleNameInternal(el, visited) {
+    if (!el || visited.has(el)) return '';
+    visited.add(el);
+    const doc = el.ownerDocument || document;
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
-      const text = labelledBy.split(/\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ').trim();
-      if (text) return text.slice(0, 500);
+      const value = labelledBy.split(/\s+/)
+        .map(id => doc.getElementById?.(id))
+        .filter(Boolean)
+        .map(label => accessibleNameInternal(label, visited) || visibleText(label))
+        .join(' ')
+        .trim();
+      if (value) return value;
     }
+    const aria = el.getAttribute('aria-label');
+    if (aria) return aria.trim();
     const tag = el.tagName.toLowerCase();
-    if (tag === 'input' || tag === 'textarea') {
-      const placeholder = el.getAttribute('placeholder');
-      if (placeholder) return placeholder.trim().slice(0, 500);
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    if (el.id) {
+      const label = doc.querySelector?.(`label[for="${cssEscape(el.id)}"]`);
+      if (label) return visibleText(label);
     }
-    return (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 500);
+    const wrappingLabel = el.closest?.('label');
+    if (wrappingLabel) return visibleText(wrappingLabel);
+    if (tag === 'img' || tag === 'area') return el.getAttribute('alt') || '';
+    if (tag === 'input' && ['button', 'submit', 'reset'].includes(type)) {
+      return el.value || el.getAttribute('value') || defaultInputButtonName(type);
+    }
+    if (tag === 'button') return visibleText(el);
+    if (tag === 'fieldset') {
+      const legend = Array.from(el.children || []).find(child => child.tagName?.toLowerCase() === 'legend');
+      if (legend) return visibleText(legend);
+    }
+    if (tag === 'table') {
+      const caption = el.querySelector?.(':scope > caption');
+      if (caption) return visibleText(caption);
+    }
+    return [
+      el.getAttribute('title'),
+      el.getAttribute('placeholder'),
+      visibleText(el),
+      'value' in el ? String(el.value) : ''
+    ].filter(Boolean).join(' ').trim();
+  }
+
+  function firstExplicitRole(el) {
+    const role = el.getAttribute('role');
+    if (!role) return '';
+    const token = role.trim().split(/\s+/).find(Boolean);
+    if (!token || token === 'none' || token === 'presentation') return '';
+    return token.toLowerCase();
+  }
+
+  function visibleText(el) {
+    if (isAriaHidden(el)) return '';
+    return (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+  }
+
+  function isAriaHidden(el) {
+    return Boolean(el.closest?.('[aria-hidden="true"]'));
+  }
+
+  function defaultInputButtonName(type) {
+    if (type === 'submit') return 'Submit';
+    if (type === 'reset') return 'Reset';
+    return '';
+  }
+
+  function cssEscape(value) {
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
+    return String(value).replace(/["\\]/g, '\\$&');
   }
 
   function valueOf(el) {
