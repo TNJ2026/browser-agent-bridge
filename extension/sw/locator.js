@@ -13,18 +13,25 @@ export function createLocatorHandlers({
   chromeApi = chrome,
   domA11ySource = null
 }) {
-  let domA11ySourcePromise = null;
-
-  async function getDomA11ySource() {
-    if (typeof domA11ySource === 'string') return domA11ySource;
-    if (!domA11ySourcePromise) {
-      const getURL = chromeApi.runtime?.getURL || globalThis.chrome?.runtime?.getURL;
-      if (!getURL) {
-        return '';
-      }
-      domA11ySourcePromise = fetch(getURL('content/dom-a11y.js')).then(response => response.text());
+  async function ensureDomA11yAtom(tabId, frameTarget) {
+    const target = frameTarget?.target || { tabId };
+    if (typeof domA11ySource === 'string') {
+      await chromeApi.scripting.executeScript({
+        target,
+        func: source => {
+          if (!globalThis.__browserAgentBridgeDomA11y) (0, eval)(source);
+        },
+        args: [domA11ySource],
+        world: 'MAIN'
+      });
+      return;
     }
-    return domA11ySourcePromise;
+    if (!chromeApi.runtime?.getURL && !globalThis.chrome?.runtime?.getURL) return;
+    await chromeApi.scripting.executeScript({
+      target,
+      files: ['content/dom-a11y.js'],
+      world: 'MAIN'
+    });
   }
 
   async function locatorCount(params) {
@@ -802,6 +809,7 @@ export function createLocatorHandlers({
   }
 
   async function runLocatorScript(tabId, params, action, frameTarget) {
+    await ensureDomA11yAtom(tabId, frameTarget);
     const locator = normalizeLocatorParams(params);
     if (frameTarget?.frameSelector === null) locator.frameSelector = null;
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
@@ -823,16 +831,12 @@ export function createLocatorHandlers({
       scrollIntoView: params.scrollIntoView !== false,
       force: params.force === true,
       actionKind: params.actionKind || null,
-      wait: params.wait || null,
-      domA11ySource: await getDomA11ySource()
+      wait: params.wait || null
     };
 
     const [{ result }] = await chromeApi.scripting.executeScript({
       target: frameTarget?.target || { tabId },
       func: options => {
-        if (!globalThis.__browserAgentBridgeDomA11y && options.domA11ySource) {
-          (0, eval)(options.domA11ySource);
-        }
         const domA11y = globalThis.__browserAgentBridgeDomA11y;
         if (!domA11y) throw new Error('DOM a11y atom is not loaded');
         const root = resolveDomRoot(options.locator.frameSelector);
