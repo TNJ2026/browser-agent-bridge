@@ -206,6 +206,7 @@ const rpcRouter = {
   'page.waitForResponse': (params) => pageHandlers.pageWaitForResponse(params),
   'page.waitForRequest': (params) => pageHandlers.pageWaitForRequest(params),
   'page.waitForURL': (params) => pageHandlers.pageWaitForURL(params),
+  'page.waitForPopup': (params) => pageHandlers.pageWaitForPopup(params),
   'page.waitForNetworkIdle': (params) => pageHandlers.pageWaitForNetworkIdle(params),
   'page.waitForDialog': (params) => pageHandlers.pageWaitForDialog(params),
   'page.acceptDialog': (params) => pageHandlers.pageAcceptDialog(params),

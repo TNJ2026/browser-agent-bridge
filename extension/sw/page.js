@@ -228,6 +228,76 @@ export function createPageHandlers({
     });
   }
 
+  async function pageWaitForPopup(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.waitForPopup');
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const started = Date.now();
+
+    const result = await new Promise((resolve, reject) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        finish(createPageWaitTimeoutError({
+          type: 'PageWaitForPopupTimeout',
+          code: 'PAGE_WAIT_FOR_POPUP_TIMEOUT',
+          method: 'page.waitForPopup',
+          elapsedMs: Date.now() - started,
+          timeoutMs,
+          summary: `no popup opened by tab ${tabId} within ${timeoutMs}ms`
+        }));
+      }, timeoutMs);
+
+      const onCreatedListener = async (tab) => {
+        if (done) return;
+        if (tab.openerTabId === tabId) {
+          if (hasUrlPattern(params)) {
+            if (matchesUrlPattern(tab.url || '', params)) {
+              finish(null, tab);
+              return;
+            }
+            const newTabId = tab.id;
+            const onUpdatedListener = (updatedTabId, changeInfo, updatedTab) => {
+              if (updatedTabId === newTabId && updatedTab.url) {
+                if (matchesUrlPattern(updatedTab.url, params)) {
+                  chromeApi.tabs.onUpdated.removeListener(onUpdatedListener);
+                  finish(null, updatedTab);
+                }
+              }
+            };
+            chromeApi.tabs.onUpdated.addListener(onUpdatedListener);
+            cleanupUpdated = () => {
+              chromeApi.tabs.onUpdated.removeListener(onUpdatedListener);
+            };
+          } else {
+            finish(null, tab);
+          }
+        }
+      };
+
+      let cleanupUpdated = () => {};
+      chromeApi.tabs.onCreated.addListener(onCreatedListener);
+
+      function finish(err, tab) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        chromeApi.tabs.onCreated.removeListener(onCreatedListener);
+        cleanupUpdated();
+        if (err) {
+          reject(err);
+        } else {
+          resolve(tab);
+        }
+      }
+    });
+
+    return {
+      ok: true,
+      tab: normalizeTab(result),
+      elapsedMs: Date.now() - started
+    };
+  }
+
   async function pageWaitForNetworkIdle(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'page.waitForNetworkIdle');
@@ -1225,6 +1295,7 @@ export function createPageHandlers({
     pageWaitForResponse,
     pageWaitForRequest,
     pageWaitForURL,
+    pageWaitForPopup,
     pageWaitForNetworkIdle,
     pageWaitForDialog,
     pageAcceptDialog,

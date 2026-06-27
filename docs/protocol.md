@@ -338,6 +338,16 @@ On timeout, the JSON-RPC error includes
 { "tabId": 123, "urlRegex": "/dashboard(\\?|$)", "timeoutMs": 30000 }
 ```
 
+### `page.waitForPopup`
+
+Waits for a popup tab/window to be opened by the target tab.
+Supports optional `url`, `urlContains`, or `urlRegex` filters to wait for the popup target.
+On timeout, the JSON-RPC error includes `data.code: "PAGE_WAIT_FOR_POPUP_TIMEOUT"`.
+
+```json
+{ "tabId": 123, "urlContains": "login-success", "timeoutMs": 30000 }
+```
+
 ### `page.waitForRequest`
 
 Waits for a CDP `Network.requestWillBeSent` event. Supports `url`,
