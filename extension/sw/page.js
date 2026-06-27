@@ -228,10 +228,51 @@ export function createPageHandlers({
     });
   }
 
+  // Recently-opened popups, buffered so page.waitForPopup can also catch a popup
+  // that opened just *before* it was called (the common click-then-wait race).
+  // Holds only {openerTabId, tabId, ts} with a short lookback window + ring cap,
+  // so it is metadata-only and self-expiring — no timer/GC needed.
+  const POPUP_LOOKBACK_MS = 3000;
+  const POPUP_LOOKBACK_MAX_MS = 10000;
+  const POPUP_BUFFER_MAX = 50;
+  const recentPopups = [];
+
+  function recordRecentPopup(tab) {
+    if (!tab || typeof tab.openerTabId !== 'number' || tab.openerTabId < 0) return;
+    recentPopups.push({ openerTabId: tab.openerTabId, tabId: tab.id, ts: Date.now() });
+    while (recentPopups.length > POPUP_BUFFER_MAX) recentPopups.shift();
+  }
+
+  function drainRecentPopups(openerTabId, lookbackMs) {
+    const now = Date.now();
+    const tabIds = [];
+    for (let i = recentPopups.length - 1; i >= 0; i -= 1) {
+      const entry = recentPopups[i];
+      if (entry.openerTabId === openerTabId && now - entry.ts <= lookbackMs) {
+        tabIds.unshift(entry.tabId); // oldest-first
+        recentPopups.splice(i, 1);   // consume once
+      }
+    }
+    return tabIds;
+  }
+
+  function forgetRecentPopup(tabId) {
+    for (let i = recentPopups.length - 1; i >= 0; i -= 1) {
+      if (recentPopups[i].tabId === tabId) recentPopups.splice(i, 1);
+    }
+  }
+
+  if (chromeApi.tabs?.onCreated?.addListener) {
+    chromeApi.tabs.onCreated.addListener(recordRecentPopup);
+  }
+
   async function pageWaitForPopup(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'page.waitForPopup');
     const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const lookbackMs = Number.isInteger(params.popupLookbackMs) && params.popupLookbackMs >= 0
+      ? Math.min(params.popupLookbackMs, POPUP_LOOKBACK_MAX_MS)
+      : POPUP_LOOKBACK_MS;
     const started = Date.now();
 
     const result = await new Promise((resolve, reject) => {
@@ -274,6 +315,17 @@ export function createPageHandlers({
 
       chromeApi.tabs.onCreated.addListener(onCreatedListener);
 
+      // Replay popups this tab opened within the recent lookback window through
+      // the same matching path (consume-once), so a popup that opened just
+      // before this call is still caught.
+      (async () => {
+        for (const popupTabId of drainRecentPopups(tabId, lookbackMs)) {
+          if (done) return;
+          const fresh = await chromeApi.tabs.get(popupTabId).catch(() => null);
+          if (fresh) onCreatedListener({ ...fresh, openerTabId: tabId });
+        }
+      })();
+
       function finish(err, tab) {
         if (done) return;
         done = true;
@@ -283,6 +335,7 @@ export function createPageHandlers({
         if (err) {
           reject(err);
         } else {
+          if (tab && typeof tab.id === 'number') forgetRecentPopup(tab.id);
           resolve(tab);
         }
       }

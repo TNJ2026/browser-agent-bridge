@@ -160,5 +160,50 @@ test('page.waitForPopup removes every listener on finish (no leak with multiple 
   chromeApi.triggerUpdated(3, {}, { id: 3, url: 'https://example.com/done' });
   await promise;
   assert.equal(chromeApi.tabs.onUpdated.listeners.length, 0);
-  assert.equal(chromeApi.tabs.onCreated.listeners.length, 0);
+  // Only the permanent popup recorder remains on onCreated; the per-call
+  // listener is removed.
+  assert.equal(chromeApi.tabs.onCreated.listeners.length, 1);
+});
+
+test('page.waitForPopup catches a popup opened just before the call (lookback)', async () => {
+  const chromeApi = new MockChromeApi();
+  const handlers = await makeHandlers(chromeApi);
+  // popup opens BEFORE waitForPopup is called -> buffered by the recorder
+  chromeApi.triggerCreated({ id: 2, openerTabId: 1, url: 'about:blank' });
+  const res = await handlers.pageWaitForPopup({ tabId: 1, timeoutMs: 100 });
+  assert.equal(res.ok, true);
+  assert.equal(res.tab.id, 2);
+});
+
+test('lookback only replays popups from the requesting opener', async () => {
+  const chromeApi = new MockChromeApi();
+  const handlers = await makeHandlers(chromeApi);
+  chromeApi.triggerCreated({ id: 7, openerTabId: 99, url: 'about:blank' }); // other opener
+  await assert.rejects(
+    handlers.pageWaitForPopup({ tabId: 1, timeoutMs: 30 }),
+    /PageWaitForPopupTimeout/
+  );
+});
+
+test('lookback is consume-once: a second wait does not re-collect the popup', async () => {
+  const chromeApi = new MockChromeApi();
+  const handlers = await makeHandlers(chromeApi);
+  chromeApi.triggerCreated({ id: 2, openerTabId: 1, url: 'about:blank' });
+  const first = await handlers.pageWaitForPopup({ tabId: 1, timeoutMs: 100 });
+  assert.equal(first.tab.id, 2);
+  await assert.rejects(
+    handlers.pageWaitForPopup({ tabId: 1, timeoutMs: 30 }),
+    /PageWaitForPopupTimeout/
+  );
+});
+
+test('popupLookbackMs:0 ignores already-buffered popups', async () => {
+  const chromeApi = new MockChromeApi();
+  const handlers = await makeHandlers(chromeApi);
+  chromeApi.triggerCreated({ id: 2, openerTabId: 1, url: 'about:blank' });
+  await new Promise(r => setTimeout(r, 5)); // ensure the buffered ts is in the past
+  await assert.rejects(
+    handlers.pageWaitForPopup({ tabId: 1, popupLookbackMs: 0, timeoutMs: 30 }),
+    /PageWaitForPopupTimeout/
+  );
 });

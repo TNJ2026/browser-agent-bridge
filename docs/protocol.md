@@ -345,12 +345,18 @@ Waits for a popup tab/window to be opened by the target tab (matched by
 wait for the popup to reach a target URL. On timeout, the JSON-RPC error
 includes `data.code: "PAGE_WAIT_FOR_POPUP_TIMEOUT"`.
 
-Call `page.waitForPopup` **before** the action that opens the popup (e.g. a
-`locator.click`): it only sees popups created after it starts listening.
+A short lookback buffer means a popup opened **just before** the call is still
+caught, so the usual click-then-wait order works: a popup opened by this tab
+within `popupLookbackMs` (default 3000, max 10000) is collected even if it
+appeared before `page.waitForPopup` ran. Each buffered popup is collected at
+most once. Set `"popupLookbackMs": 0` to only consider popups opened after the
+call starts.
 
 The captured popup is moved into the opener's Agent-managed tab group so it can
 be driven immediately (`page.*`, `locator.*`, etc.); the returned `tab.groupId`
-reflects this. Pass `"adopt": false` to leave the popup ungrouped (observe only).
+reflects this. Because grouping co-locates tabs, a popup opened in a separate
+window is moved into the opener's window. Pass `"adopt": false` to leave the
+popup ungrouped (observe only; it then stays outside the Agent boundary).
 
 ```json
 { "tabId": 123, "urlContains": "login-success", "timeoutMs": 30000 }
