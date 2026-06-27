@@ -156,3 +156,29 @@ test('HTML failures section shows the captured url', async () => {
   const { html } = await handlers.traceExportHtml();
   assert.ok(html.includes('at https://example.com/checkout'), 'expected the captured url in failures');
 });
+
+test('traceNetworkEvent records an interceptor hit on the active trace', async () => {
+  const handlers = await makeHandlers();
+  await handlers.traceStart({ name: 'mocking' });
+  await handlers.traceNetworkEvent({ action: 'mock', method: 'GET', url: 'https://api.example/x', ruleId: 'r1', resourceType: 'XHR' });
+  const event = (await handlers.traceExport()).trace.events[0];
+  assert.equal(event.type, 'interceptor');
+  assert.equal(event.action, 'mock');
+  assert.equal(event.url, 'https://api.example/x');
+  assert.equal(event.ruleId, 'r1');
+});
+
+test('traceNetworkEvent is ignored when no trace is active', async () => {
+  const handlers = await makeHandlers();
+  await handlers.traceNetworkEvent({ action: 'mock', url: 'https://x' });
+  const status = await handlers.traceStatus();
+  assert.equal(status.traces.length, 0);
+});
+
+test('HTML export shows interceptor events with action and url', async () => {
+  const handlers = await makeHandlers();
+  await handlers.traceStart({ name: 'mocking' });
+  await handlers.traceNetworkEvent({ action: 'block', method: 'POST', url: 'https://api.example/track' });
+  const { html } = await handlers.traceExportHtml();
+  assert.ok(html.includes('[block] POST https://api.example/track'));
+});

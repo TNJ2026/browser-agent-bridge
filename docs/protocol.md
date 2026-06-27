@@ -152,6 +152,8 @@ started.
 
 Starts a lightweight debug trace. While active, each JSON-RPC call records
 method, duration, status, selected params, compact result previews, and errors.
+Network interceptor hits (mock/redirect/block/modifyHeaders) are also recorded
+as `interceptor` events so the timeline shows which requests were rerouted.
 Text-like fields are redacted by default; pass `includeText:true` to keep them.
 
 When a traced call fails on a tab, a lightweight page snapshot is attached to

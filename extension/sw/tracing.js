@@ -132,6 +132,30 @@ export function createTraceHandlers({
     await appendRpcEvent(token, request, { ok: false, error });
   }
 
+  // Records a network interceptor hit (mock/redirect/block/modifyHeaders) on the
+  // active trace, so the failure postmortem shows which requests were rerouted.
+  async function traceNetworkEvent(hit) {
+    if (!hit) return;
+    await ensureTracesLoaded();
+    const trace = getActiveTraceSync();
+    if (!trace || !trace.isTracing) return;
+    const event = {
+      index: trace.events.length,
+      type: 'interceptor',
+      action: hit.action || '',
+      method: hit.method || '',
+      url: hit.url || '',
+      resourceType: hit.resourceType || '',
+      ruleId: hit.ruleId ?? null,
+      requestId: hit.requestId ?? null,
+      status: 'ok',
+      durationMs: 0,
+      timestamp: new Date(Number.isFinite(hit.timestamp) ? hit.timestamp : now()).toISOString()
+    };
+    pushTraceEvent(trace, event);
+    await saveTracesNow();
+  }
+
   async function appendRpcEvent(token, request, outcome) {
     await ensureTracesLoaded();
     const trace = traces.get(token.traceId);
@@ -421,21 +445,25 @@ ${rows || '<p>No events recorded.</p>'}
   function renderTraceEvent(event, maxDuration) {
     const duration = Number(event.durationMs) || 0;
     const width = Math.max(2, Math.round((duration / maxDuration) * 100));
-    const detail = {
-      timestamp: event.timestamp,
-      endedAt: event.endedAt,
-      requestId: event.requestId,
-      params: event.params,
-      result: event.result,
-      error: event.error,
-      errorData: event.errorData,
-      context: event.context
-    };
+    const isInterceptor = event.type === 'interceptor';
+    const detail = isInterceptor
+      ? { timestamp: event.timestamp, action: event.action, method: event.method, url: event.url, resourceType: event.resourceType, ruleId: event.ruleId, requestId: event.requestId }
+      : {
+          timestamp: event.timestamp,
+          endedAt: event.endedAt,
+          requestId: event.requestId,
+          params: event.params,
+          result: event.result,
+          error: event.error,
+          errorData: event.errorData,
+          context: event.context
+        };
+    const label = isInterceptor ? `[${event.action}] ${event.method} ${event.url}`.trim() : (event.method || '');
     const code = event.errorData?.code ? `<code class="chip">${escapeHtml(event.errorData.code)}</code>` : '';
     return `<details class="event" ${event.status === 'error' ? 'open' : ''}>
 <summary>
 <span class="idx">#${event.index}</span>
-<span class="method">${escapeHtml(event.method || '')}${code}</span>
+<span class="method">${escapeHtml(label)}${code}</span>
 <span class="status ${event.status === 'error' ? 'error' : 'ok'}">${escapeHtml(event.status || '')}</span>
 <span>${duration}ms</span>
 <span class="bar" style="grid-column:1/-1"><span style="width:${width}%"></span></span>
@@ -463,6 +491,7 @@ ${rows || '<p>No events recorded.</p>'}
     traceClear,
     traceRpcStart,
     traceRpcEnd,
-    traceRpcError
+    traceRpcError,
+    traceNetworkEvent
   };
 }

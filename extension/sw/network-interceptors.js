@@ -3,7 +3,8 @@ const MAX_INTERCEPTOR_EVENTS_PER_TAB = 100;
 export function createNetworkInterceptorController({
   cdp,
   fetchInterceptorsByTab,
-  interceptorEventsByTab = new Map()
+  interceptorEventsByTab = new Map(),
+  onHit = () => {}
 }) {
   async function handleRequestPaused(tabId, params) {
     const rules = fetchInterceptorsByTab.get(tabId) || [];
@@ -118,8 +119,7 @@ export function createNetworkInterceptorController({
 
   function recordHit(tabId, rule, params) {
     const request = params.request || {};
-    const events = interceptorEventsByTab.get(tabId) || [];
-    events.push({
+    const record = {
       ruleId: rule.id || null,
       action: rule.action,
       requestId: params.requestId || null,
@@ -128,9 +128,17 @@ export function createNetworkInterceptorController({
       resourceType: params.resourceType || '',
       remainingTimes: Number.isInteger(rule.times) ? Math.max(0, rule.times) : null,
       timestamp: Date.now()
-    });
+    };
+    const events = interceptorEventsByTab.get(tabId) || [];
+    events.push(record);
     while (events.length > MAX_INTERCEPTOR_EVENTS_PER_TAB) events.shift();
     interceptorEventsByTab.set(tabId, events);
+    // Best-effort mirror to the active trace; never let it disrupt interception.
+    try {
+      Promise.resolve(onHit({ tabId, ...record })).catch(() => {});
+    } catch {
+      // ignore
+    }
   }
 
   return {
