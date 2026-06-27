@@ -140,7 +140,8 @@ const pageHandlers = createPageHandlers({
 const fetchInterceptorsByTab = new Map();
 const networkInterceptorController = createNetworkInterceptorController({
   cdp,
-  fetchInterceptorsByTab
+  fetchInterceptorsByTab,
+  onHit: hit => { traceHandlers.traceNetworkEvent(hit).catch(() => {}); }
 });
 
 const devtoolsHandlers = createDevtoolsHandlers({

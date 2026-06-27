@@ -408,3 +408,22 @@ test('HAR notFound abort blocks an unmatched request', async () => {
   assert.ok(fail, 'expected a failRequest for the unmatched url');
   assert.equal(fail.params.errorReason, 'BlockedByClient');
 });
+
+test('recordHit notifies onHit with the matched request', async () => {
+  const { createNetworkInterceptorController } = await importNetworkInterceptorsModule();
+  const hits = [];
+  const controller = createNetworkInterceptorController({
+    cdp: async () => ({}),
+    fetchInterceptorsByTab: new Map([[7, [{ id: 'm1', urlPattern: '*', action: 'mock', responseCode: 200, responseBody: '{}' }]]]),
+    onHit: (hit) => { hits.push(hit); }
+  });
+  await controller.handleRequestPaused(7, {
+    requestId: 'r1',
+    resourceType: 'XHR',
+    request: { url: 'https://api.example/x', method: 'GET', headers: {} }
+  });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].action, 'mock');
+  assert.equal(hits[0].url, 'https://api.example/x');
+  assert.equal(hits[0].tabId, 7);
+});
