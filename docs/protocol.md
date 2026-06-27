@@ -295,7 +295,16 @@ reason.
 { "tabId": 123, "url": "https://example.com", "wait": true }
 ```
 
-### `page.waitForLoad`
+### `page.reload` / `page.goBack` / `page.goForward`
+
+History navigation for a tab via the Chrome tabs API. `page.reload` accepts
+`bypassCache`. All wait for the tab to finish loading unless `wait:false`, and
+return the updated tab. `goBack`/`goForward` error if there is no entry in that
+direction.
+
+```json
+{ "tabId": 123, "bypassCache": false }
+```
 
 Waits until Chrome reports the tab load status as complete.
 

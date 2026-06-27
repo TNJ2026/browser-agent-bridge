@@ -197,6 +197,9 @@ const rpcRouter = {
 
   // page
   'page.navigate': (params) => pageHandlers.pageNavigate(params),
+  'page.reload': (params) => pageHandlers.pageReload(params),
+  'page.goBack': (params) => pageHandlers.pageGoBack(params),
+  'page.goForward': (params) => pageHandlers.pageGoForward(params),
   'page.waitForLoad': (params) => pageHandlers.pageWaitForLoad(params),
   'page.waitForNavigation': (params) => pageHandlers.pageWaitForNavigation(params),
   'page.waitForResponse': (params) => pageHandlers.pageWaitForResponse(params),

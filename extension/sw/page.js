@@ -34,6 +34,33 @@ export function createPageHandlers({
     return result;
   }
 
+  async function pageReload(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.reload');
+    await recordAction(tabId, 'page.reload', { bypassCache: params.bypassCache === true });
+    await chromeApi.tabs.reload(tabId, { bypassCache: params.bypassCache === true });
+    if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
+    return { tab: normalizeTab(await chromeApi.tabs.get(tabId)) };
+  }
+
+  async function pageGoBack(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.goBack');
+    await recordAction(tabId, 'page.goBack', {});
+    await chromeApi.tabs.goBack(tabId);
+    if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
+    return { tab: normalizeTab(await chromeApi.tabs.get(tabId)) };
+  }
+
+  async function pageGoForward(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.goForward');
+    await recordAction(tabId, 'page.goForward', {});
+    await chromeApi.tabs.goForward(tabId);
+    if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
+    return { tab: normalizeTab(await chromeApi.tabs.get(tabId)) };
+  }
+
   async function pageWaitForLoad(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'page.waitForLoad');
@@ -1141,6 +1168,9 @@ export function createPageHandlers({
 
   return {
     pageNavigate,
+    pageReload,
+    pageGoBack,
+    pageGoForward,
     pageWaitForLoad,
     pageWaitForNavigation,
     pageWaitForResponse,
