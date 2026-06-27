@@ -9,6 +9,7 @@ export function createSessionHandlers({
   normalizeTab,
   errorMessage,
   maybeEnableTemporaryCspBypassForUrl,
+  detachDebugger = async () => {},
   chromeApi = chrome
 }) {
   async function tabsList(params) {
@@ -247,9 +248,13 @@ export function createSessionHandlers({
   async function sessionStop(params) {
     const session = await requireSession(params.sessionId);
     if (params.closeTabs === true && Array.isArray(session.tabIds) && session.tabIds.length > 0) {
+      // Closing the tabs auto-detaches their debuggers.
       await chromeApi.tabs.remove(session.tabIds).catch(() => {});
-    } else if (Array.isArray(session.tabIds) && chromeApi.tabs.ungroup) {
-      await chromeApi.tabs.ungroup(session.tabIds).catch(() => {});
+    } else if (Array.isArray(session.tabIds)) {
+      // Tabs stay open, so detach the debugger to drop the "DevTools is
+      // debugging this browser" banner now that the agent is done with them.
+      await Promise.all(session.tabIds.map(tabId => detachDebugger(tabId).catch(() => {})));
+      if (chromeApi.tabs.ungroup) await chromeApi.tabs.ungroup(session.tabIds).catch(() => {});
     }
     const sessions = await loadSessions();
     delete sessions[session.id];

@@ -56,7 +56,8 @@ const sessionsHandlers = createSessionHandlers({
   assertTabAllowed,
   normalizeTab,
   errorMessage,
-  maybeEnableTemporaryCspBypassForUrl: cspHandlers.maybeEnableTemporaryCspBypassForUrl
+  maybeEnableTemporaryCspBypassForUrl: cspHandlers.maybeEnableTemporaryCspBypassForUrl,
+  detachDebugger
 });
 
 const recordingHandlers = createRecordingHandlers({
@@ -454,6 +455,9 @@ async function stopBridge() {
     port.disconnect();
   }
   rejectPendingNativeRequests('Bridge stopped by user');
+  // Drop all CDP attachments so the "DevTools is debugging this browser" banner
+  // clears when the user stops the bridge.
+  await detachAllDebuggers();
   setNativeStatus('stopped', 'Bridge stopped');
   return nativeStatus;
 }
@@ -890,6 +894,17 @@ async function attachDebugger(tabId) {
   await cdp(tabId, 'Runtime.enable').catch(() => {});
   await cdp(tabId, 'Network.enable').catch(() => {});
   await cdp(tabId, 'Page.enable').catch(() => {});
+}
+
+async function detachDebugger(tabId) {
+  if (!attachedTabs.has(tabId)) return;
+  // onDetach also clears attachedTabs + interceptor state; delete eagerly too.
+  await chrome.debugger.detach({ tabId }).catch(() => {});
+  attachedTabs.delete(tabId);
+}
+
+async function detachAllDebuggers() {
+  await Promise.all(Array.from(attachedTabs).map(tabId => detachDebugger(tabId)));
 }
 
 async function cdp(tabId, method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
