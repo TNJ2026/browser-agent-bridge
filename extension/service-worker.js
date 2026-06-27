@@ -36,7 +36,6 @@ let nativeStatus = {
 };
 const pendingNativeRequests = new Map();
 const attachedTabs = new Set();
-const cdpEvents = [];
 const networkEventsByTab = new Map();
 const consoleEventsByTab = new Map();
 const dialogsByTab = new Map();
@@ -386,8 +385,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.debugger.onEvent.addListener((source, method, params) => {
   const tabId = source.tabId;
   const event = { source, method, params, timestamp: Date.now() };
-  cdpEvents.push(event);
-  if (cdpEvents.length > 1000) cdpEvents.shift();
   if (typeof tabId === 'number') {
     if (method.startsWith('Network.')) {
       pushLimited(networkEventsByTab, tabId, event, 500);
