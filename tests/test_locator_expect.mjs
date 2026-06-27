@@ -94,3 +94,36 @@ test('toBeHidden passes when the locator resolves to no visible elements', async
   assert.equal(res.ok, true);
   assert.equal(res.assertion, 'toBeHidden');
 });
+
+test('locator expectations delegate waiting to a single in-page script', async () => {
+  const { createLocatorHandlers } = await importLocatorModule();
+  const calls = [];
+  const handlers = createLocatorHandlers({
+    assertTabId: (v) => v,
+    assertTabAllowed: async () => {},
+    assertString: (v) => v,
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async () => ({}),
+    captureElementScreenshot: async () => '',
+    resolveFrameTarget: async (tabId) => ({ target: { tabId }, frame: { frameId: 0 }, frameSelector: null }),
+    keyboardDispatcher: {},
+    sleep,
+    defaultTimeoutMs: 30,
+    chromeApi: {
+      scripting: {
+        executeScript: async (opts) => {
+          calls.push(opts);
+          return [{ result: { count: 2, visibleCount: 2, elements: [] } }];
+        }
+      }
+    }
+  });
+
+  const res = await handlers.expectLocatorToHaveCount({ ...COMMON, count: 2 });
+
+  assert.equal(res.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].args[0].wait.kind, 'count');
+  assert.equal(calls[0].args[0].wait.expected, 2);
+});

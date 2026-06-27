@@ -92,26 +92,24 @@ export function createLocatorHandlers({
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
     const state = ['attached', 'visible', 'hidden', 'detached'].includes(params.state) ? params.state : 'visible';
     const started = Date.now();
-    let last = null;
     const frameTarget = await resolveFrameTarget(tabId, params);
 
-    while (Date.now() - started <= timeoutMs) {
-      const result = await runLocatorScript(tabId, params, 'query', frameTarget);
-      last = result;
-      const visibleCount = result.visibleCount || 0;
-      const found = result.count > 0;
-      if (
-        (state === 'attached' && found) ||
-        (state === 'visible' && visibleCount > 0) ||
-        (state === 'hidden' && (!found || visibleCount === 0)) ||
-        (state === 'detached' && !found)
-      ) {
-        return { ok: true, state, elapsedMs: Date.now() - started, count: result.count, visibleCount: result.visibleCount, elements: result.elements, frame: frameTarget.frame };
-      }
-      await sleep(intervalMs);
+    const result = await runLocatorScript(tabId, {
+      ...params,
+      wait: { kind: 'locatorState', state, timeoutMs, intervalMs }
+    }, 'query', frameTarget);
+    const visibleCount = result.visibleCount || 0;
+    const found = result.count > 0;
+    if (
+      (state === 'attached' && found) ||
+      (state === 'visible' && visibleCount > 0) ||
+      (state === 'hidden' && (!found || visibleCount === 0)) ||
+      (state === 'detached' && !found)
+    ) {
+      return { ok: true, state, elapsedMs: Date.now() - started, count: result.count, visibleCount: result.visibleCount, elements: result.elements, frame: frameTarget.frame };
     }
 
-    throw new Error(`Timed out waiting for locator ${describeLocator(params)} to be ${state}${last ? ` (last count: ${last.count})` : ''}`);
+    throw new Error(`Timed out waiting for locator ${describeLocator(params)} to be ${state}${result ? ` (last count: ${result.count})` : ''}`);
   }
 
   async function expectLocatorToBeVisible(params) {
@@ -129,20 +127,19 @@ export function createLocatorHandlers({
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
     const started = Date.now();
     const frameTarget = await resolveFrameTarget(tabId, params);
-    let last = null;
 
-    while (Date.now() - started <= timeoutMs) {
-      last = await runLocatorScript(tabId, params, 'query', frameTarget);
-      if (last.count === expected) {
-        return { ok: true, assertion: 'toHaveCount', expected, actual: last.count, elapsedMs: Date.now() - started, frame: frameTarget.frame };
-      }
-      await sleep(intervalMs);
+    const result = await runLocatorScript(tabId, {
+      ...params,
+      wait: { kind: 'count', expected, timeoutMs, intervalMs }
+    }, 'query', frameTarget);
+    if (result.count === expected) {
+      return { ok: true, assertion: 'toHaveCount', expected, actual: result.count, elapsedMs: Date.now() - started, frame: frameTarget.frame };
     }
     throw createLocatorExpectTimeoutError(params, 'toHaveCount', frameTarget, {
       expected,
-      actual: last?.count ?? 0,
+      actual: result?.count ?? 0,
       elapsedMs: Date.now() - started,
-      last
+      last: result
     });
   }
 
@@ -154,23 +151,20 @@ export function createLocatorHandlers({
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
     const started = Date.now();
     const frameTarget = await resolveFrameTarget(tabId, params);
-    let last = null;
-    let lastResult = null;
 
-    while (Date.now() - started <= timeoutMs) {
-      const result = await runLocatorScript(tabId, params, Array.isArray(expected) ? 'allInnerTexts' : 'textContent', frameTarget);
-      lastResult = result;
-      last = Array.isArray(expected) ? result.texts : result.text;
-      if (matchesExpectedText(last, expected, params)) {
-        return { ok: true, assertion: 'toHaveText', expected, actual: last, elapsedMs: Date.now() - started, frame: frameTarget.frame };
-      }
-      await sleep(intervalMs);
+    const result = await runLocatorScript(tabId, {
+      ...params,
+      wait: { kind: 'text', expected, timeoutMs, intervalMs, match: locatorTextMatchOptions(params) }
+    }, Array.isArray(expected) ? 'allInnerTexts' : 'textContent', frameTarget);
+    const actual = Array.isArray(expected) ? result.texts : result.text;
+    if (matchesExpectedText(actual, expected, params)) {
+      return { ok: true, assertion: 'toHaveText', expected, actual, elapsedMs: Date.now() - started, frame: frameTarget.frame };
     }
     throw createLocatorExpectTimeoutError(params, 'toHaveText', frameTarget, {
       expected,
-      actual: last,
+      actual,
       elapsedMs: Date.now() - started,
-      last: lastResult
+      last: result
     });
   }
 
@@ -182,27 +176,21 @@ export function createLocatorHandlers({
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
     const started = Date.now();
     const frameTarget = await resolveFrameTarget(tabId, params);
-    let lastElement = null;
 
-    while (Date.now() - started <= timeoutMs) {
-      let element = null;
-      try {
-        const result = await runLocatorScript(tabId, { ...params, index }, 'summarize', frameTarget);
-        element = result.element;
-      } catch {
-        element = null; // element not present yet; keep polling
-      }
-      lastElement = element;
-      if (element && predicate(element)) {
-        return { ok: true, assertion, expected, actual: actualOf(element), elapsedMs: Date.now() - started, frame: frameTarget.frame };
-      }
-      await sleep(intervalMs);
+    const result = await runLocatorScript(tabId, {
+      ...params,
+      index,
+      wait: { kind: 'elementState', assertion, expected, timeoutMs, intervalMs, match: locatorTextMatchOptions(params) }
+    }, 'summarize', frameTarget);
+    const element = result.element;
+    if (element && predicate(element)) {
+      return { ok: true, assertion, expected, actual: actualOf(element), elapsedMs: Date.now() - started, frame: frameTarget.frame };
     }
     throw createLocatorExpectTimeoutError(params, assertion, frameTarget, {
       expected,
-      actual: lastElement ? actualOf(lastElement) : null,
+      actual: element ? actualOf(element) : null,
       elapsedMs: Date.now() - started,
-      last: { element: lastElement }
+      last: { element }
     });
   }
 
@@ -256,24 +244,23 @@ export function createLocatorHandlers({
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
     const started = Date.now();
     const frameTarget = await resolveFrameTarget(tabId, params);
-    let last = null;
-    let lastResult = null;
 
-    while (Date.now() - started <= timeoutMs) {
-      const result = await runLocatorScript(tabId, { ...params, index, attributeName }, 'getAttribute', frameTarget);
-      lastResult = result;
-      last = result.value;
-      if (matchesExpectedText(last || '', expected, params)) {
-        return { ok: true, assertion: 'toHaveAttribute', attribute: attributeName, expected, actual: last, elapsedMs: Date.now() - started, frame: frameTarget.frame };
-      }
-      await sleep(intervalMs);
+    const result = await runLocatorScript(tabId, {
+      ...params,
+      index,
+      attributeName,
+      wait: { kind: 'attribute', expected, attributeName, timeoutMs, intervalMs, match: locatorTextMatchOptions(params) }
+    }, 'getAttribute', frameTarget);
+    const actual = result.value;
+    if (matchesExpectedText(actual || '', expected, params)) {
+      return { ok: true, assertion: 'toHaveAttribute', attribute: attributeName, expected, actual, elapsedMs: Date.now() - started, frame: frameTarget.frame };
     }
     throw createLocatorExpectTimeoutError(params, 'toHaveAttribute', frameTarget, {
       attribute: attributeName,
       expected,
-      actual: last,
+      actual,
       elapsedMs: Date.now() - started,
-      last: lastResult
+      last: result
     });
   }
 
@@ -840,13 +827,16 @@ export function createLocatorHandlers({
       replace: params.replace !== false,
       scrollIntoView: params.scrollIntoView !== false,
       force: params.force === true,
-      actionKind: params.actionKind || null
+      actionKind: params.actionKind || null,
+      wait: params.wait || null
     };
 
     const [{ result }] = await chromeApi.scripting.executeScript({
       target: frameTarget?.target || { tabId },
       func: options => {
         const root = resolveDomRoot(options.locator.frameSelector);
+        if (options.wait) return waitForLocatorCondition(root, options);
+
         const matches = findLocatorMatches(root, options.locator);
         const elements = matches.slice(0, options.limit).map((element, index) => summarizeElement(element, index));
 
@@ -986,6 +976,182 @@ export function createLocatorHandlers({
         }
 
         throw new Error(`Unsupported locator action: ${options.action}`);
+
+        function waitForLocatorCondition(root, options) {
+          return new Promise((resolve, reject) => {
+            const timeoutMs = Number.isInteger(options.wait.timeoutMs) && options.wait.timeoutMs > 0 ? options.wait.timeoutMs : 30000;
+            const intervalMs = Number.isInteger(options.wait.intervalMs) && options.wait.intervalMs > 0 ? options.wait.intervalMs : 250;
+            const started = Date.now();
+            const observers = [];
+            let done = false;
+            let last = null;
+            let checkQueued = false;
+            let observedRoots = new Set();
+
+            const timeoutId = setTimeout(() => finish(last || locatorSnapshot(root, options)), timeoutMs);
+            const fallbackId = setInterval(check, intervalMs);
+
+            function finish(value) {
+              if (done) return;
+              done = true;
+              clearTimeout(timeoutId);
+              clearInterval(fallbackId);
+              for (const observer of observers) observer.disconnect();
+              resolve(value);
+            }
+
+            function fail(error) {
+              if (done) return;
+              done = true;
+              clearTimeout(timeoutId);
+              clearInterval(fallbackId);
+              for (const observer of observers) observer.disconnect();
+              reject(error);
+            }
+
+            function queueCheck() {
+              if (checkQueued || done) return;
+              checkQueued = true;
+              setTimeout(() => {
+                checkQueued = false;
+                check();
+              }, 0);
+            }
+
+            function observeCurrentRoots(root) {
+              const roots = collectObservableRoots(root);
+              let changed = roots.length !== observedRoots.size;
+              for (const rootItem of roots) {
+                if (!observedRoots.has(rootItem)) changed = true;
+              }
+              if (!changed) return;
+              for (const observer of observers) observer.disconnect();
+              observers.length = 0;
+              observedRoots = new Set(roots);
+              for (const rootItem of roots) {
+                const observer = new MutationObserver(queueCheck);
+                observer.observe(rootItem, {
+                  childList: true,
+                  subtree: true,
+                  attributes: true,
+                  characterData: true
+                });
+                observers.push(observer);
+              }
+            }
+
+            function check() {
+              if (done) return;
+              try {
+                observeCurrentRoots(root);
+                last = locatorSnapshot(root, options);
+                if (locatorWaitSatisfied(last, options.wait)) finish(last);
+                else if (Date.now() - started >= timeoutMs) finish(last);
+              } catch (error) {
+                fail(error);
+              }
+            }
+
+            check();
+          });
+        }
+
+        function locatorSnapshot(root, options) {
+          const matches = findLocatorMatches(root, options.locator);
+          const elements = matches.slice(0, options.limit).map((element, index) => summarizeElement(element, index));
+          const visibleCount = matches.filter(isVisible).length;
+          const base = { count: matches.length, visibleCount, elements };
+          if (options.action === 'query') return base;
+          if (options.action === 'allTextContents') {
+            return { ...base, texts: matches.slice(0, options.limit).map(item => item.textContent || '') };
+          }
+          if (options.action === 'allInnerTexts') {
+            return { ...base, texts: matches.slice(0, options.limit).map(item => item.innerText || item.textContent || '') };
+          }
+          const element = matches[options.index];
+          if (!element) return { ...base, element: null, value: null, text: null };
+          if (options.action === 'textContent') {
+            return { ...base, text: (element.innerText || element.textContent || '').trim(), element: summarizeElement(element, options.index) };
+          }
+          if (options.action === 'getAttribute') {
+            return { ...base, value: element.getAttribute(options.attributeName), element: summarizeElement(element, options.index) };
+          }
+          return { ...base, element: summarizeElement(element, options.index) };
+        }
+
+        function locatorWaitSatisfied(snapshot, wait) {
+          if (wait.kind === 'locatorState') {
+            const found = snapshot.count > 0;
+            const visibleCount = snapshot.visibleCount || 0;
+            return (wait.state === 'attached' && found) ||
+              (wait.state === 'visible' && visibleCount > 0) ||
+              (wait.state === 'hidden' && (!found || visibleCount === 0)) ||
+              (wait.state === 'detached' && !found);
+          }
+          if (wait.kind === 'count') return snapshot.count === wait.expected;
+          if (wait.kind === 'text') {
+            const actual = Array.isArray(wait.expected) ? snapshot.texts : snapshot.text;
+            return matchesExpectedTextInPage(actual, wait.expected, wait.match || {});
+          }
+          if (wait.kind === 'attribute') {
+            return matchesExpectedTextInPage(snapshot.value || '', wait.expected, wait.match || {});
+          }
+          if (wait.kind === 'elementState') {
+            const element = snapshot.element;
+            if (!element) return false;
+            if (wait.assertion === 'toBeEnabled') return (element.disabled === false) === wait.expected;
+            if (wait.assertion === 'toBeDisabled') return element.disabled === true;
+            if (wait.assertion === 'toBeEditable') return (element.editable === true) === wait.expected;
+            if (wait.assertion === 'toBeChecked') return element.checked === wait.expected;
+            if (wait.assertion === 'toHaveValue') return matchesExpectedTextInPage(element.value || '', wait.expected, wait.match || {});
+          }
+          return false;
+        }
+
+        function matchesExpectedTextInPage(actual, expected, options) {
+          if (Array.isArray(expected)) {
+            if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+            return expected.every((item, index) => matchesExpectedTextValueInPage(actual[index] || '', item, options));
+          }
+          return matchesExpectedTextValueInPage(String(actual || ''), expected, options);
+        }
+
+        function matchesExpectedTextValueInPage(actual, expected, options) {
+          if (options.regex === true) {
+            try {
+              return new RegExp(String(expected), options.caseSensitive === true ? '' : 'i').test(String(actual ?? ''));
+            } catch {
+              return false;
+            }
+          }
+          const normalizeWhitespace = options.normalizeWhitespace !== false;
+          const contains = options.contains === true;
+          const caseSensitive = options.caseSensitive === true;
+          let left = normalizeWhitespace ? actual.replace(/\s+/g, ' ').trim() : actual;
+          let right = normalizeWhitespace ? String(expected).replace(/\s+/g, ' ').trim() : String(expected);
+          if (!caseSensitive) {
+            left = left.toLowerCase();
+            right = right.toLowerCase();
+          }
+          return contains ? left.includes(right) : left === right;
+        }
+
+        function collectObservableRoots(root) {
+          const roots = [];
+          const visited = new Set();
+          visitRoot(root);
+          return roots;
+
+          function visitRoot(currentRoot) {
+            if (!currentRoot || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            roots.push(currentRoot);
+            if (typeof currentRoot.querySelectorAll !== 'function') return;
+            for (const element of currentRoot.querySelectorAll('*')) {
+              if (element.shadowRoot) visitRoot(element.shadowRoot);
+            }
+          }
+        }
 
         function findLocatorMatches(root, locator) {
           if (locator.label) return findByLabel(root, locator).filter(element => matchesLocator(element, locator, true));
@@ -1754,6 +1920,15 @@ export function createLocatorHandlers({
       right = right.toLowerCase();
     }
     return contains ? left.includes(right) : left === right;
+  }
+
+  function locatorTextMatchOptions(params) {
+    return {
+      regex: params.regex === true,
+      caseSensitive: params.caseSensitive === true,
+      normalizeWhitespace: params.normalizeWhitespace !== false,
+      contains: params.contains === true
+    };
   }
 
   function normalizeSelectOptionValues(params) {
