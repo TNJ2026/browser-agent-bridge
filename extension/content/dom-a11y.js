@@ -143,6 +143,81 @@
     return querySelectorDeep(root, `#${cssEscape(id)}`);
   }
 
+  function isVisible(element) {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0 &&
+      rect.height > 0 &&
+      style.visibility !== 'hidden' &&
+      style.display !== 'none' &&
+      style.opacity !== '0' &&
+      !element.hidden &&
+      !element.closest('[hidden]') &&
+      !isAriaHidden(element);
+  }
+
+  function isHiddenForRole(element) {
+    return !isVisible(element) || isAriaHidden(element);
+  }
+
+  function isEnabled(element) {
+    return !Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true' || element.closest('fieldset[disabled]'));
+  }
+
+  function isTextInputElement(element) {
+    const tag = element.tagName.toLowerCase();
+    const type = (element.getAttribute('type') || '').toLowerCase();
+    if (tag === 'textarea') return true;
+    if (tag !== 'input') return false;
+    return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type);
+  }
+
+  function isEditable(element) {
+    if (!isEnabled(element)) return false;
+    if (element.isContentEditable) return true;
+    const tag = element.tagName.toLowerCase();
+    if (tag === 'select') return true;
+    if (!isTextInputElement(element)) return false;
+    if (element.readOnly) return false;
+    return true;
+  }
+
+  function matchesDisabled(element, expected) {
+    return expected ? !isEnabled(element) : isEnabled(element);
+  }
+
+  function headingLevel(element) {
+    const ariaLevel = Number.parseInt(element.getAttribute('aria-level') || '', 10);
+    if (Number.isInteger(ariaLevel)) return ariaLevel;
+    const tag = element.tagName.toLowerCase();
+    return /^h[1-6]$/.test(tag) ? Number.parseInt(tag.slice(1), 10) : null;
+  }
+
+  function ariaBooleanState(element, state) {
+    const tag = element.tagName.toLowerCase();
+    const type = (element.getAttribute('type') || '').toLowerCase();
+    if (state === 'checked' && tag === 'input' && ['checkbox', 'radio'].includes(type)) return element.checked;
+    if (state === 'selected' && tag === 'option') return element.selected;
+    if (state === 'expanded' && tag === 'details') return element.open;
+    const value = element.getAttribute(`aria-${state}`);
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return null;
+  }
+
+  function matchesText(value, expected, locator) {
+    if (locator.regex === true) {
+      try {
+        return new RegExp(String(expected), locator.caseSensitive ? '' : 'i').test(String(value));
+      } catch {
+        return false;
+      }
+    }
+    const source = locator.caseSensitive ? String(value) : String(value).toLowerCase();
+    const needle = locator.caseSensitive ? String(expected) : String(expected).toLowerCase();
+    return locator.exact ? source.trim() === needle.trim() : source.includes(needle);
+  }
+
   globalThis.__browserAgentBridgeDomA11y = {
     accessibleName,
     implicitRole,
@@ -152,6 +227,15 @@
     cssEscape,
     querySelectorDeep,
     querySelectorAllDeep,
-    getElementByIdDeep
+    getElementByIdDeep,
+    isVisible,
+    isHiddenForRole,
+    isEnabled,
+    isEditable,
+    isTextInputElement,
+    matchesDisabled,
+    headingLevel,
+    ariaBooleanState,
+    matchesText
   };
 })();
