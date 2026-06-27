@@ -364,6 +364,19 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 - Doctor: `scripts/doctor.py`
 - Release builder: `scripts/build-release.sh`
 
+## Tests
+
+The extension is plain ES modules and the native host is stdlib-only, so there
+are no dependencies to install. Run the suites directly:
+
+```bash
+node --test tests/*.mjs                                  # extension handler unit tests
+python3 -m unittest discover -s tests -p 'test_*.py'     # native host tests
+```
+
+GitHub Actions (`.github/workflows/test.yml`) runs both suites plus a syntax
+check on every pull request.
+
 ## Security and Privacy
 
 - Browser tab reads and controls are isolated to Agent-managed tab groups. Calls targeting tabs or groups outside that boundary are rejected immediately.
