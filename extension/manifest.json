@@ -52,6 +52,7 @@
         "<all_urls>"
       ],
       "js": [
+        "content/dom-a11y.js",
         "content/accessibility-tree.js",
         "content/visual-indicator.js"
       ],

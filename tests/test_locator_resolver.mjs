@@ -15,6 +15,10 @@ async function importLocatorModule() {
   return import(dataUrl);
 }
 
+async function loadDomA11ySource() {
+  return readFile(new URL('../extension/content/dom-a11y.js', import.meta.url), 'utf8');
+}
+
 const VISIBLE_RECT = { x: 0, y: 0, width: 10, height: 10 };
 const HIDDEN_RECT = { x: 0, y: 0, width: 0, height: 0 };
 
@@ -74,7 +78,7 @@ function buildDom() {
   return { els, all, doc };
 }
 
-function makeHandlers(doc) {
+async function makeHandlers(doc) {
   const chromeApi = {
     scripting: {
       async executeScript({ func, args }) {
@@ -95,26 +99,34 @@ function makeHandlers(doc) {
   return createLocatorHandlersFor(chromeApi);
 }
 
-let createLocatorHandlers;
-function createLocatorHandlersFor(chromeApi) {
+let createLocatorHandlersPromise;
+async function getCreateLocatorHandlers() {
+  createLocatorHandlersPromise ||= importLocatorModule().then(module => module.createLocatorHandlers);
+  return createLocatorHandlersPromise;
+}
+let domA11ySource;
+async function createLocatorHandlersFor(chromeApi) {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  domA11ySource ||= await loadDomA11ySource();
   return createLocatorHandlers({
     assertTabId: id => id,
     assertTabAllowed: async () => {},
     assertString: () => {},
     recordAction: async () => {},
     resolveFrameTarget: async tabId => ({ target: { tabId }, frame: { url: 'about:test' } }),
-    chromeApi
+    chromeApi,
+    domA11ySource
   });
 }
 
 async function count(doc, params) {
-  const h = makeHandlers(doc);
+  const h = await makeHandlers(doc);
   const res = await h.locatorCount({ tabId: 1, ...params });
   return res;
 }
 
 test('module loads', async () => {
-  ({ createLocatorHandlers } = await importLocatorModule());
+  const createLocatorHandlers = await getCreateLocatorHandlers();
   assert.equal(typeof createLocatorHandlers, 'function');
 });
 

@@ -3,6 +3,12 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { test } from 'node:test';
 
+async function importLocatorModule() {
+  const source = await readFile(new URL('../extension/sw/locator.js', import.meta.url), 'utf8');
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+  return import(dataUrl);
+}
+
 class FakeElement {
   constructor(tag, { attrs = {}, text = '', value = '', children = [] } = {}) {
     this.nodeType = 1;
@@ -71,6 +77,7 @@ function matchesSelector(el, selector) {
   if (selector === '*') return true;
   if (selector === 'label') return tag === 'label';
   if (selector === ':scope > caption') return tag === 'caption' && el.parentElement?.tagName?.toLowerCase() === 'table';
+  if (selector.startsWith('#')) return el.id === selector.slice(1);
   const attrMatch = selector.match(/^([a-z]*)?\[([^=\]]+)(?:="([^"]*)")?\]$/i);
   if (attrMatch) {
     const [, wantedTag, attr, value] = attrMatch;
@@ -93,14 +100,16 @@ function makeDocument(bodyChildren) {
     body,
     documentElement: body,
     getElementById(id) { return all.find(el => el.id === id) || null; },
-    querySelector(selector) { return all.find(el => matchesSelectorList(el, selector)) || null; }
+    querySelector(selector) { return all.find(el => matchesSelectorList(el, selector)) || null; },
+    querySelectorAll(selector) { return all.filter(el => matchesSelectorList(el, selector)); }
   };
   assignDocument(body, doc);
   return doc;
 }
 
 async function runAccessibilityTree(document) {
-  const source = await readFile(new URL('../extension/content/accessibility-tree.js', import.meta.url), 'utf8');
+  const a11ySource = await readFile(new URL('../extension/content/dom-a11y.js', import.meta.url), 'utf8');
+  const treeSource = await readFile(new URL('../extension/content/accessibility-tree.js', import.meta.url), 'utf8');
   let listener = null;
   const context = {
     chrome: { runtime: { onMessage: { addListener(fn) { listener = fn; } } } },
@@ -118,11 +127,44 @@ async function runAccessibilityTree(document) {
     globalThis: null
   };
   context.globalThis = context;
-  vm.runInNewContext(source, context);
+  vm.runInNewContext(a11ySource, context);
+  vm.runInNewContext(treeSource, context);
   let response = null;
   listener({ type: 'GET_ACCESSIBILITY_TREE', maxNodes: 100 }, {}, value => { response = value; });
   assert.equal(response.ok, true, response.error);
   return response.tree;
+}
+
+async function locatorCount(document, params) {
+  const { createLocatorHandlers } = await importLocatorModule();
+  const domA11ySource = await readFile(new URL('../extension/content/dom-a11y.js', import.meta.url), 'utf8');
+  const chromeApi = {
+    scripting: {
+      async executeScript({ func, args }) {
+        const prev = { d: globalThis.document, g: globalThis.getComputedStyle, w: globalThis.window };
+        globalThis.document = document;
+        globalThis.getComputedStyle = () => ({ visibility: 'visible', display: 'block', opacity: '1', pointerEvents: 'auto' });
+        globalThis.window = { innerWidth: 1024, innerHeight: 768, CSS: { escape: value => String(value).replace(/["\\]/g, '\\$&') } };
+        try {
+          return [{ result: func(...args) }];
+        } finally {
+          globalThis.document = prev.d;
+          globalThis.getComputedStyle = prev.g;
+          globalThis.window = prev.w;
+        }
+      }
+    }
+  };
+  const handlers = createLocatorHandlers({
+    assertTabId: id => id,
+    assertTabAllowed: async () => {},
+    assertString: () => {},
+    recordAction: async () => {},
+    resolveFrameTarget: async tabId => ({ target: { tabId }, frame: { url: 'about:test' } }),
+    chromeApi,
+    domA11ySource
+  });
+  return (await handlers.locatorCount({ tabId: 1, ...params })).count;
 }
 
 test('content accessibility tree uses locator-aligned accessible names and implicit roles', async () => {
@@ -151,4 +193,16 @@ test('content accessibility tree uses locator-aligned accessible names and impli
   assert.equal(byName.get('Submit').role, 'button');
   assert.equal(byName.get('Accept terms').role, 'checkbox');
   assert.equal(byName.get('Company logo').role, 'img');
+  assert.equal(await locatorCount(document, { selector: 'img' }), 1);
+  assert.equal(await locatorCount(document, { selector: 'img', name: 'Company logo' }), 1);
+
+  for (const [name, role] of [
+    ['Billing Save', 'button'],
+    ['Email address', 'textbox'],
+    ['Search query', 'searchbox'],
+    ['Submit', 'button'],
+    ['Accept terms', 'checkbox']
+  ]) {
+    assert.equal(await locatorCount(document, { role, name }), 1, `${role} ${name}`);
+  }
 });

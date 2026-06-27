@@ -10,8 +10,23 @@ export function createLocatorHandlers({
   keyboardDispatcher,
   sleep,
   defaultTimeoutMs,
-  chromeApi = chrome
+  chromeApi = chrome,
+  domA11ySource = null
 }) {
+  let domA11ySourcePromise = null;
+
+  async function getDomA11ySource() {
+    if (typeof domA11ySource === 'string') return domA11ySource;
+    if (!domA11ySourcePromise) {
+      const getURL = chromeApi.runtime?.getURL || globalThis.chrome?.runtime?.getURL;
+      if (!getURL) {
+        return '';
+      }
+      domA11ySourcePromise = fetch(getURL('content/dom-a11y.js')).then(response => response.text());
+    }
+    return domA11ySourcePromise;
+  }
+
   async function locatorCount(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.count');
@@ -808,12 +823,18 @@ export function createLocatorHandlers({
       scrollIntoView: params.scrollIntoView !== false,
       force: params.force === true,
       actionKind: params.actionKind || null,
-      wait: params.wait || null
+      wait: params.wait || null,
+      domA11ySource: await getDomA11ySource()
     };
 
     const [{ result }] = await chromeApi.scripting.executeScript({
       target: frameTarget?.target || { tabId },
       func: options => {
+        if (!globalThis.__browserAgentBridgeDomA11y && options.domA11ySource) {
+          (0, eval)(options.domA11ySource);
+        }
+        const domA11y = globalThis.__browserAgentBridgeDomA11y;
+        if (!domA11y) throw new Error('DOM a11y atom is not loaded');
         const root = resolveDomRoot(options.locator.frameSelector);
         if (options.wait) return waitForLocatorCondition(root, options);
 
@@ -1535,97 +1556,15 @@ export function createLocatorHandlers({
         }
 
         function accessibleName(element, root) {
-          if (isAriaHidden(element)) return '';
-          return accessibleNameInternal(element, root, new Set()).trim().replace(/\s+/g, ' ');
-        }
-
-        function accessibleNameInternal(element, root, visited) {
-          if (!element || visited.has(element)) return '';
-          visited.add(element);
-          const labelledBy = element.getAttribute('aria-labelledby');
-          if (labelledBy) {
-            const value = labelledBy.split(/\s+/)
-              .map(id => getElementByIdDeep(root, id))
-              .filter(Boolean)
-              .map(label => accessibleNameInternal(label, root, visited) || visibleText(label))
-              .join(' ')
-              .trim();
-            if (value) return value;
-          }
-          const aria = element.getAttribute('aria-label');
-          if (aria) return aria.trim();
-          const tag = element.tagName.toLowerCase();
-          const type = (element.getAttribute('type') || '').toLowerCase();
-          if (element.id) {
-            const label = querySelectorDeep(root, `label[for="${cssEscape(element.id)}"]`);
-            if (label) return visibleText(label);
-          }
-          const wrappingLabel = element.closest('label');
-          if (wrappingLabel) return visibleText(wrappingLabel);
-          if (tag === 'img' || tag === 'area') return element.getAttribute('alt') || '';
-          if (tag === 'input' && ['button', 'submit', 'reset'].includes(type)) return element.value || element.getAttribute('value') || defaultInputButtonName(type);
-          if (tag === 'button') return visibleText(element);
-          if (tag === 'fieldset') {
-            const legend = Array.from(element.children).find(child => child.tagName?.toLowerCase() === 'legend');
-            if (legend) return visibleText(legend);
-          }
-          if (tag === 'table') {
-            const caption = querySelectorDeep(element, ':scope > caption');
-            if (caption) return visibleText(caption);
-          }
-          return [
-            element.getAttribute('title'),
-            element.getAttribute('placeholder'),
-            visibleText(element),
-            'value' in element ? String(element.value) : ''
-          ].filter(Boolean).join(' ').trim();
+          return domA11y.accessibleName(element, root);
         }
 
         function inferredRole(element) {
-          const explicit = firstExplicitRole(element);
-          if (explicit) return explicit;
-          const tag = element.tagName.toLowerCase();
-          const type = (element.getAttribute('type') || '').toLowerCase();
-          if (tag === 'a' && element.hasAttribute('href')) return 'link';
-          if (tag === 'area' && element.hasAttribute('href')) return 'link';
-          if (tag === 'button' || ['button', 'submit', 'reset', 'image'].includes(type)) return 'button';
-          if (tag === 'select') return element.multiple ? 'listbox' : 'combobox';
-          if (tag === 'textarea' || (tag === 'input' && ['email', 'password', 'tel', 'text', 'url', ''].includes(type))) return 'textbox';
-          if (tag === 'input' && type === 'search') return 'searchbox';
-          if (tag === 'input' && type === 'checkbox') return 'checkbox';
-          if (tag === 'input' && type === 'radio') return 'radio';
-          if (tag === 'input' && type === 'range') return 'slider';
-          if (tag === 'input' && ['number'].includes(type)) return 'spinbutton';
-          if (tag === 'option') return 'option';
-          if (/^h[1-6]$/.test(tag)) return 'heading';
-          if (tag === 'img') return 'img';
-          if (tag === 'article') return 'article';
-          if (tag === 'aside') return 'complementary';
-          if (tag === 'body') return 'document';
-          if (tag === 'form' && accessibleName(element, root)) return 'form';
-          if (tag === 'main') return 'main';
-          if (tag === 'nav') return 'navigation';
-          if (tag === 'section' && accessibleName(element, root)) return 'region';
-          if (tag === 'ul' || tag === 'ol') return 'list';
-          if (tag === 'li') return 'listitem';
-          if (tag === 'table') return 'table';
-          if (tag === 'th') return 'columnheader';
-          if (tag === 'td') return 'cell';
-          if (tag === 'tr') return 'row';
-          if (tag === 'summary') return 'button';
-          if (tag === 'details') return 'group';
-          if (tag === 'dialog') return 'dialog';
-          if (tag === 'progress') return 'progressbar';
-          if (tag === 'meter') return 'meter';
-          return '';
+          return domA11y.implicitRole(element, root);
         }
 
         function firstExplicitRole(element) {
-          const role = element.getAttribute('role');
-          if (!role) return '';
-          const token = role.trim().split(/\s+/).find(Boolean);
-          if (!token || token === 'none' || token === 'presentation') return '';
-          return token.toLowerCase();
+          return domA11y.firstExplicitRole(element);
         }
 
         function headingLevel(element) {
@@ -1651,15 +1590,8 @@ export function createLocatorHandlers({
           return expected ? !isEnabled(element) : isEnabled(element);
         }
 
-        function defaultInputButtonName(type) {
-          if (type === 'submit') return 'Submit';
-          if (type === 'reset') return 'Reset';
-          return '';
-        }
-
         function visibleText(element) {
-          if (isAriaHidden(element)) return '';
-          return (element.innerText || element.textContent || '').trim().replace(/\s+/g, ' ');
+          return domA11y.visibleText(element);
         }
 
         function isVisible(element) {
@@ -1676,7 +1608,7 @@ export function createLocatorHandlers({
         }
 
         function isAriaHidden(element) {
-          return Boolean(element.closest('[aria-hidden="true"]'));
+          return domA11y.isAriaHidden(element);
         }
 
         function isHiddenForRole(element) {

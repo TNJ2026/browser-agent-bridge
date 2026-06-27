@@ -68,9 +68,9 @@ test('setUserAgent requires a userAgent string', async () => {
   await assert.rejects(handlers.pageSetUserAgent({ tabId: 1 }), /userAgent required/);
 });
 
+import { getMethodCategory } from '../extension/sw/method-policy.js';
+
 test('request customization methods require page_action approval', async () => {
-  const source = await readFile(new URL('../extension/service-worker.js', import.meta.url), 'utf8');
-  const pageActionBlock = source.match(/if \(\s*method === 'dom\.click'[\s\S]*?\)\s*\{\s*return 'page_action';\s*\}/)?.[0] || '';
-  assert.match(pageActionBlock, /method === 'page\.setExtraHTTPHeaders'/);
-  assert.match(pageActionBlock, /method === 'page\.setUserAgent'/);
+  assert.equal(getMethodCategory('page.setExtraHTTPHeaders'), 'page_action');
+  assert.equal(getMethodCategory('page.setUserAgent'), 'page_action');
 });

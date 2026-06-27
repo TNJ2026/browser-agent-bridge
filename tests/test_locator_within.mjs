@@ -12,6 +12,10 @@ async function importLocatorModule() {
   return import(dataUrl);
 }
 
+async function loadDomA11ySource() {
+  return readFile(new URL('../extension/content/dom-a11y.js', import.meta.url), 'utf8');
+}
+
 const RECT = { x: 0, y: 0, width: 10, height: 10 };
 
 function makeEl({ tag, text = '', attrs = {}, children = [] }) {
@@ -58,8 +62,10 @@ function buildDom() {
 }
 
 let createLocatorHandlers;
+let domA11ySource;
 async function count(doc, params) {
   createLocatorHandlers ||= (await importLocatorModule()).createLocatorHandlers;
+  domA11ySource ||= await loadDomA11ySource();
   const chromeApi = {
     scripting: {
       async executeScript({ func, args }) {
@@ -78,7 +84,8 @@ async function count(doc, params) {
     assertString: () => {},
     recordAction: async () => {},
     resolveFrameTarget: async tabId => ({ target: { tabId }, frame: { url: 'about:test' } }),
-    chromeApi
+    chromeApi,
+    domA11ySource
   });
   return (await h.locatorCount({ tabId: 1, ...params })).count;
 }
