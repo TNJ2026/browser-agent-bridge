@@ -295,6 +295,7 @@ const rpcRouter = {
   'console.read': (params) => devtoolsHandlers.consoleRead(params),
   'network.read': (params) => devtoolsHandlers.networkRead(params),
   'cookies.get': (params) => devtoolsHandlers.cookiesGet(params),
+  'network.getResponseBody': (params) => devtoolsHandlers.networkGetResponseBody(params),
   'network.setBlockedUrls': (params) => devtoolsHandlers.networkSetBlockedUrls(params),
   'network.setInterceptors': (params) => devtoolsHandlers.networkSetInterceptors(params),
   'network.routeFromHAR': (params) => devtoolsHandlers.networkRouteFromHAR(params),
@@ -967,6 +968,7 @@ async function assertRpcTabIsolation(method, params = {}) {
     method.startsWith('computer.') ||
     method === 'console.read' ||
     method === 'network.read' ||
+    method === 'network.getResponseBody' ||
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
     method === 'network.routeFromHAR' ||
@@ -1186,6 +1188,7 @@ function optionalPermissionsForMethod(method, params = {}) {
     method.startsWith('computer.') ||
     method === 'console.read' ||
     method === 'network.read' ||
+    method === 'network.getResponseBody' ||
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
     method === 'network.routeFromHAR' ||
@@ -1279,6 +1282,7 @@ function getMethodCategory(method, params = {}) {
   if (
     method === 'console.read' ||
     method === 'network.read' ||
+    method === 'network.getResponseBody' ||
     method === 'network.interceptors.status' ||
     method === 'network.interceptors.events' ||
     method === 'network.interceptors.clearEvents'
@@ -1328,6 +1332,7 @@ async function isAgentTabGroupOperation(method, params = {}) {
     method.startsWith('computer.') ||
     method === 'console.read' ||
     method === 'network.read' ||
+    method === 'network.getResponseBody' ||
     method === 'network.setBlockedUrls' ||
     method === 'network.setInterceptors' ||
     method === 'network.routeFromHAR' ||

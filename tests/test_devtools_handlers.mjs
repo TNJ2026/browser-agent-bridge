@@ -363,7 +363,6 @@ test('network.routeFromHAR with an empty archive disables Fetch', async () => {
   assert.equal(fetchInterceptorsByTab.has(9), false);
   assert.ok(calls.some(call => call.method === 'Fetch.disable'));
 });
-
 test('cookies.get redacts values by default and includes metadata', async () => {
   const { createDevtoolsHandlers } = await importDevtoolsModule();
   const handlers = createDevtoolsHandlers({
@@ -410,4 +409,41 @@ test('cookies.get returns values only with includeValues:true and filters by nam
   assert.equal(res.valuesIncluded, true);
   assert.equal(res.cookies[0].name, 'sid');
   assert.equal(res.cookies[0].value, 'tok');
+});
+
+test('network.getResponseBody forwards the CDP body and base64 flag', async () => {
+  const { createDevtoolsHandlers } = await importDevtoolsModule();
+  const calls = [];
+  const handlers = createDevtoolsHandlers({
+    assertTabId: (v) => v,
+    assertTabAllowed: async () => {},
+    attachDebugger: async () => {},
+    cdp: async (tabId, method, params) => {
+      calls.push({ method, params });
+      return method === 'Network.getResponseBody' ? { body: '{"x":1}', base64Encoded: false } : {};
+    },
+    consoleEventsByTab: new Map(),
+    networkEventsByTab: new Map(),
+    fetchInterceptorsByTab: new Map()
+  });
+
+  const res = await handlers.networkGetResponseBody({ tabId: 7, requestId: 'req-1' });
+  assert.equal(res.requestId, 'req-1');
+  assert.equal(res.base64Encoded, false);
+  assert.equal(res.body, '{"x":1}');
+  assert.equal(calls.find(c => c.method === 'Network.getResponseBody').params.requestId, 'req-1');
+});
+
+test('network.getResponseBody requires a requestId', async () => {
+  const { createDevtoolsHandlers } = await importDevtoolsModule();
+  const handlers = createDevtoolsHandlers({
+    assertTabId: (v) => v,
+    assertTabAllowed: async () => {},
+    attachDebugger: async () => {},
+    cdp: async () => ({}),
+    consoleEventsByTab: new Map(),
+    networkEventsByTab: new Map(),
+    fetchInterceptorsByTab: new Map()
+  });
+  await assert.rejects(handlers.networkGetResponseBody({ tabId: 7 }), /requestId/);
 });
