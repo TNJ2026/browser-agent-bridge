@@ -20,9 +20,15 @@ class TestHostUtilities(unittest.TestCase):
             "safe_filename": host.safe_filename,
             "extension_ready": host.extension_ready,
             "next_rpc_id": host.next_rpc_id,
+            "write_native_message": host.write_native_message,
         }
+        host.write_native_message = lambda message: None
+        with host.websocket_clients_lock:
+            host.websocket_clients.clear()
 
     def tearDown(self):
+        with host.websocket_clients_lock:
+            host.websocket_clients.clear()
         for name, value in self._host_state.items():
             setattr(host, name, value)
 
@@ -312,6 +318,32 @@ class TestHostUtilities(unittest.TestCase):
 
         self.assertEqual(len(sub_sock.sent), 2)  # tab123 + global
         self.assertEqual(len(all_sock.sent), 3)  # all three
+
+    def test_websocket_subscription_status_summary(self):
+        class FakeSock:
+            def sendall(self, data):
+                pass
+
+        published = []
+        host.write_native_message = lambda message: published.append(message)
+        all_sock = FakeSock()
+        sub_sock = FakeSock()
+        all_client = host.register_websocket(all_sock)
+        self.assertEqual(host.current_ws_subscription_status(), {"all": True, "tabIds": []})
+
+        sub_client = host.register_websocket(sub_sock)
+        host.apply_ws_subscription(sub_client, {"id": 1, "params": {"tabIds": [5, 3, 3]}})
+        # One unfiltered client still requires all CDP events.
+        self.assertEqual(host.current_ws_subscription_status(), {"all": True, "tabIds": []})
+
+        host.apply_ws_subscription(all_client, {"id": 2, "params": {"tabIds": [9]}})
+        self.assertEqual(host.current_ws_subscription_status(), {"all": False, "tabIds": [3, 5, 9]})
+
+        host.unregister_websocket(sub_sock)
+        self.assertEqual(host.current_ws_subscription_status(), {"all": False, "tabIds": [9]})
+        host.unregister_websocket(all_sock)
+        self.assertEqual(host.current_ws_subscription_status(), {"all": False, "tabIds": []})
+        self.assertTrue(all(message["method"] == "bridge.subscriptionStatus" for message in published))
 
     def test_handle_native_request_rejects_unknown_methods(self):
         from unittest.mock import patch

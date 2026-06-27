@@ -314,26 +314,100 @@ export function createPageHandlers({
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
     const visible = params.visible === true;
     const started = Date.now();
-    let last = null;
     const frameTarget = await resolveFrameTarget(tabId, params);
 
-    while (Date.now() - started <= timeoutMs) {
-      const [{ result }] = await chromeApi.scripting.executeScript({
-        target: frameTarget.target,
-        func: (selector, visible, frameSelector) => {
-          const root = resolveDomRoot(frameSelector);
-          const element = querySelectorDeep(root, selector);
-          if (!element) return { found: false };
-          const rect = element.getBoundingClientRect();
-          const style = getComputedStyle(element);
-          const isVisible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-          return {
-            found: visible ? isVisible : true,
-            visible: isVisible,
-            tagName: element.tagName.toLowerCase(),
-            text: (element.innerText || element.textContent || '').trim().slice(0, 500),
-            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-          };
+    const [{ result }] = await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (selector, visible, frameSelector, timeoutMs, intervalMs) => {
+        return new Promise((resolve, reject) => {
+          const started = Date.now();
+          const observers = [];
+          let done = false;
+          let last = null;
+          let checkQueued = false;
+          let observedRoots = new Set();
+
+          const timeoutId = setTimeout(() => finish(last || { found: false }), timeoutMs);
+          const fallbackId = setInterval(check, intervalMs);
+
+          function finish(value) {
+            if (done) return;
+            done = true;
+            clearTimeout(timeoutId);
+            clearInterval(fallbackId);
+            for (const observer of observers) observer.disconnect();
+            resolve(value);
+          }
+
+          function fail(error) {
+            if (done) return;
+            done = true;
+            clearTimeout(timeoutId);
+            clearInterval(fallbackId);
+            for (const observer of observers) observer.disconnect();
+            reject(error);
+          }
+
+          function queueCheck() {
+            if (checkQueued || done) return;
+            checkQueued = true;
+            setTimeout(() => {
+              checkQueued = false;
+              check();
+            }, 0);
+          }
+
+          function observeCurrentRoots(root) {
+            const roots = collectObservableRoots(root);
+            let changed = roots.length !== observedRoots.size;
+            for (const rootItem of roots) {
+              if (!observedRoots.has(rootItem)) changed = true;
+            }
+            if (!changed) return;
+            for (const observer of observers) observer.disconnect();
+            observers.length = 0;
+            observedRoots = new Set(roots);
+            for (const rootItem of roots) {
+              const observer = new MutationObserver(queueCheck);
+              observer.observe(rootItem, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: true
+              });
+              observers.push(observer);
+            }
+          }
+
+          function check() {
+            if (done) return;
+            try {
+              const root = resolveDomRoot(frameSelector);
+              observeCurrentRoots(root);
+              last = inspect(root);
+              if (last?.found) finish(last);
+              else if (Date.now() - started >= timeoutMs) finish(last || { found: false });
+            } catch (error) {
+              fail(error);
+            }
+          }
+
+          function inspect(root) {
+            const element = querySelectorDeep(root, selector);
+            if (!element) return { found: false };
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            const isVisible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+            return {
+              found: visible ? isVisible : true,
+              visible: isVisible,
+              tagName: element.tagName.toLowerCase(),
+              text: (element.innerText || element.textContent || '').trim().slice(0, 500),
+              rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+            };
+          }
+
+          check();
 
           function resolveDomRoot(frameSelector) {
             if (!frameSelector) return document;
@@ -344,6 +418,23 @@ export function createPageHandlers({
               return frame.contentDocument;
             } catch {
               throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
+            }
+          }
+
+          function collectObservableRoots(root) {
+            const roots = [];
+            const visited = new Set();
+            visitRoot(root);
+            return roots;
+
+            function visitRoot(currentRoot) {
+              if (!currentRoot || visited.has(currentRoot)) return;
+              visited.add(currentRoot);
+              roots.push(currentRoot);
+              if (typeof currentRoot.querySelectorAll !== 'function') return;
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
             }
           }
 
@@ -368,14 +459,14 @@ export function createPageHandlers({
               }
             }
           }
-        },
-        args: [params.selector, visible, frameTarget.frameSelector],
-        world: 'MAIN'
-      });
-      last = result;
-      if (result?.found) return { ok: true, element: result, frame: frameTarget.frame, elapsedMs: Date.now() - started };
-      await sleep(intervalMs);
-    }
+        });
+      },
+      args: [params.selector, visible, frameTarget.frameSelector, timeoutMs, intervalMs],
+      world: 'MAIN'
+    });
+
+    if (result?.found) return { ok: true, element: result, frame: frameTarget.frame, elapsedMs: Date.now() - started };
+    const last = result;
     const foundInDom = !!(last && last.tagName);
     throw createPageWaitTimeoutError({
       type: 'PageWaitForSelectorTimeout',

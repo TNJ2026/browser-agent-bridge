@@ -36,6 +36,10 @@ const cdpEvents = [];
 const networkEventsByTab = new Map();
 const consoleEventsByTab = new Map();
 const dialogsByTab = new Map();
+const cdpEventForwarding = {
+  all: false,
+  tabIds: new Set()
+};
 let nextPromptId = 1;
 const pendingPrompts = new Map();
 let approvalPopupWindowId = null;
@@ -391,7 +395,9 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       });
     }
   }
-  sendNativeNotification('cdp.event', event);
+  if (shouldForwardCdpEvent(event)) {
+    sendNativeNotification('cdp.event', event);
+  }
 });
 
 chrome.debugger.onDetach.addListener(source => {
@@ -475,6 +481,10 @@ async function connectNative() {
   nativePort.onMessage.addListener(message => {
     if (message && message.jsonrpc === '2.0' && 'id' in message && !('method' in message)) {
       settleNativeResponse(message);
+      return;
+    }
+    if (message && message.jsonrpc === '2.0' && message.method && !('id' in message)) {
+      handleNativeNotification(message);
       return;
     }
     if (message && message.jsonrpc === '2.0' && message.method) {
@@ -639,7 +649,7 @@ async function dispatchRpc(request) {
   await assertOptionalPermissions(request.method, params);
   await assertRpcTabIsolation(request.method, params);
   await checkPermission(request.method, params);
-  const handler = rpcRouter[request.method];
+  const handler = Object.hasOwn(rpcRouter, request.method) ? rpcRouter[request.method] : null;
   if (!handler) {
     throw new Error(`Unknown method: ${request.method}`);
   }
@@ -818,9 +828,28 @@ async function attachDebugger(tabId) {
   if (attachedTabs.has(tabId)) return;
   await withTimeout(chrome.debugger.attach({ tabId }, CDP_VERSION), DEFAULT_TIMEOUT_MS, 'debugger.attach');
   attachedTabs.add(tabId);
-  await cdp(tabId, 'Runtime.enable').catch(() => {});
-  await cdp(tabId, 'Network.enable').catch(() => {});
-  await cdp(tabId, 'Page.enable').catch(() => {});
+}
+
+function handleNativeNotification(message) {
+  if (message.method === 'bridge.subscriptionStatus') {
+    updateCdpEventForwarding(message.params?.cdpEvents);
+  }
+}
+
+function updateCdpEventForwarding(status) {
+  cdpEventForwarding.all = status?.all === true;
+  cdpEventForwarding.tabIds.clear();
+  if (Array.isArray(status?.tabIds)) {
+    for (const tabId of status.tabIds) {
+      if (Number.isInteger(tabId)) cdpEventForwarding.tabIds.add(tabId);
+    }
+  }
+}
+
+function shouldForwardCdpEvent(event) {
+  if (cdpEventForwarding.all) return true;
+  const tabId = event?.source?.tabId;
+  return Number.isInteger(tabId) && cdpEventForwarding.tabIds.has(tabId);
 }
 
 async function detachDebugger(tabId) {

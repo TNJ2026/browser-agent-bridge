@@ -467,11 +467,34 @@ def register_websocket(sock):
     client = {"lock": threading.Lock(), "tabs": None}
     with websocket_clients_lock:
         websocket_clients[sock] = client
+    publish_ws_subscription_status()
     return client
 
 def unregister_websocket(sock):
     with websocket_clients_lock:
         websocket_clients.pop(sock, None)
+    publish_ws_subscription_status()
+
+def current_ws_subscription_status():
+    with websocket_clients_lock:
+        clients = list(websocket_clients.values())
+    if not clients:
+        return {"all": False, "tabIds": []}
+    if any(client["tabs"] is None for client in clients):
+        return {"all": True, "tabIds": []}
+    tab_ids = set()
+    for client in clients:
+        tab_ids.update(client["tabs"])
+    return {"all": False, "tabIds": sorted(tab_ids)}
+
+def publish_ws_subscription_status():
+    write_native_message({
+        "jsonrpc": "2.0",
+        "method": "bridge.subscriptionStatus",
+        "params": {
+            "cdpEvents": current_ws_subscription_status()
+        }
+    })
 
 def event_tab_id(value):
     """Best-effort tab id for an outbound event, or None for global events."""
@@ -515,6 +538,7 @@ def apply_ws_subscription(client, request):
             "id": request.get("id"),
             "error": {"code": -32602, "message": "tabIds must be an array of integers or null"}
         }
+    publish_ws_subscription_status()
     return {
         "jsonrpc": "2.0",
         "id": request.get("id"),
@@ -659,6 +683,7 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
                         response = apply_ws_subscription(client, request)
                     elif method == "bridge.unsubscribe":
                         client["tabs"] = None
+                        publish_ws_subscription_status()
                         response = {"jsonrpc": "2.0", "id": request.get("id"), "result": {"subscribed": None}}
                     else:
                         response = call_extension(request)

@@ -17,6 +17,8 @@ WS   ws://127.0.0.1:8765/ws
 
 By default a connection receives every notification. To receive only events scoped to specific tabs, send a host-local control message `bridge.subscribe` with `params.tabIds` (an array of tab ids). Tab-scoped events (those with a `params.source.tabId` or `params.tabId`) are then delivered only for those tabs; events with no tab id (such as `extension.ready`) always go to every connection. Send `bridge.subscribe` with `tabIds: null`, or `bridge.unsubscribe`, to receive all events again. These control messages are handled by the native host and are not forwarded to the extension.
 
+High-volume CDP notifications (`cdp.event`) are forwarded by the extension only while a WebSocket client is connected. If all connected clients use tab-scoped subscriptions, the extension forwards CDP events only for the union of those tab ids. `/events` therefore records CDP events only when there is an active WebSocket subscriber for them.
+
 ```bash
 scripts/ws-rpc.js '{"jsonrpc":"2.0","id":"sub","method":"bridge.subscribe","params":{"tabIds":[123]}}'
 ```
