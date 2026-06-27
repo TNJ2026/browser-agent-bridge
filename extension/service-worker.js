@@ -1275,6 +1275,8 @@ function getMethodCategory(method, params = {}) {
     method === 'locator.setInputFiles' ||
     method === 'dom.select' ||
     method === 'dom.setInputFiles' ||
+    method === 'page.setExtraHTTPHeaders' ||
+    method === 'page.setUserAgent' ||
     method === 'page.acceptDialog' ||
     method === 'page.dismissDialog' ||
     method === 'computer.click' ||
