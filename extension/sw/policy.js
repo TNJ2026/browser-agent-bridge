@@ -3,7 +3,7 @@ const DEFAULT_POLICY = {
   blockedUrlPatterns: [
     'chrome://*',
     'chrome-extension://*',
-    'chromewebstore.google.com/*'
+    '*://chromewebstore.google.com/*'
   ],
   allowedUrlPatterns: [],
   blockedMethods: [],
