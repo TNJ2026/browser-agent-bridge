@@ -787,6 +787,91 @@ export function createPageHandlers({
     return result;
   }
 
+  async function pageSetViewport(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.setViewport');
+    if (!Number.isInteger(params.width) || params.width <= 0 || !Number.isInteger(params.height) || params.height <= 0) {
+      throw new Error('page.setViewport requires positive integer width and height');
+    }
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Emulation.setDeviceMetricsOverride', {
+      width: params.width,
+      height: params.height,
+      deviceScaleFactor: Number.isFinite(params.deviceScaleFactor) && params.deviceScaleFactor > 0 ? params.deviceScaleFactor : 1,
+      mobile: params.mobile === true
+    });
+    return { ok: true, width: params.width, height: params.height };
+  }
+
+  async function pageEmulateMedia(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.emulateMedia');
+    await attachDebugger(tabId);
+    const features = [];
+    if (typeof params.colorScheme === 'string') features.push({ name: 'prefers-color-scheme', value: params.colorScheme === 'no-preference' ? '' : params.colorScheme });
+    if (typeof params.reducedMotion === 'string') features.push({ name: 'prefers-reduced-motion', value: params.reducedMotion === 'no-preference' ? '' : params.reducedMotion });
+    if (typeof params.forcedColors === 'string') features.push({ name: 'forced-colors', value: params.forcedColors });
+    await cdp(tabId, 'Emulation.setEmulatedMedia', {
+      media: typeof params.media === 'string' ? params.media : '',
+      features
+    });
+    return { ok: true };
+  }
+
+  async function pageSetGeolocation(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.setGeolocation');
+    if (!Number.isFinite(params.latitude) || !Number.isFinite(params.longitude)) {
+      throw new Error('page.setGeolocation requires numeric latitude and longitude');
+    }
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Emulation.setGeolocationOverride', {
+      latitude: params.latitude,
+      longitude: params.longitude,
+      accuracy: Number.isFinite(params.accuracy) ? params.accuracy : 100
+    });
+    return { ok: true, latitude: params.latitude, longitude: params.longitude };
+  }
+
+  async function pageSetLocale(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.setLocale');
+    await attachDebugger(tabId);
+    if (typeof params.locale === 'string' && params.locale) {
+      await cdp(tabId, 'Emulation.setLocaleOverride', { locale: params.locale });
+    }
+    if (typeof params.timezone === 'string' && params.timezone) {
+      await cdp(tabId, 'Emulation.setTimezoneOverride', { timezoneId: params.timezone });
+    }
+    return { ok: true, locale: params.locale || null, timezone: params.timezone || null };
+  }
+
+  async function pageSetOffline(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.setOffline');
+    const offline = params.offline === true;
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Network.enable').catch(() => {});
+    await cdp(tabId, 'Network.emulateNetworkConditions', {
+      offline,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1
+    });
+    return { ok: true, offline };
+  }
+
+  async function pageClearEmulation(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.clearEmulation');
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Emulation.clearDeviceMetricsOverride').catch(() => {});
+    await cdp(tabId, 'Emulation.clearGeolocationOverride').catch(() => {});
+    await cdp(tabId, 'Emulation.setEmulatedMedia', { media: '', features: [] }).catch(() => {});
+    await cdp(tabId, 'Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }).catch(() => {});
+    return { ok: true };
+  }
+
   return {
     pageNavigate,
     pageWaitForLoad,
@@ -811,7 +896,13 @@ export function createPageHandlers({
     pageExpectAriaSnapshot,
     pageScreenshot,
     pageExecuteJavaScript,
-    pageDomSnapshot
+    pageDomSnapshot,
+    pageSetViewport,
+    pageEmulateMedia,
+    pageSetGeolocation,
+    pageSetLocale,
+    pageSetOffline,
+    pageClearEmulation
   };
 }
 

@@ -498,6 +498,30 @@ Uses CDP `DOMSnapshot.captureSnapshot`.
 { "tabId": 123, "computedStyles": [], "includeDOMRects": true }
 ```
 
+### Emulation
+
+A small set of CDP-backed emulation overrides for a tab. `page.clearEmulation`
+resets device metrics, geolocation, media, and network conditions.
+
+- `page.setViewport` — `Emulation.setDeviceMetricsOverride` (`width`, `height`,
+  `deviceScaleFactor`, `mobile`).
+- `page.emulateMedia` — `Emulation.setEmulatedMedia` (`media`, `colorScheme`,
+  `reducedMotion`, `forcedColors`).
+- `page.setGeolocation` — `Emulation.setGeolocationOverride` (`latitude`,
+  `longitude`, `accuracy`). Grant the page's geolocation permission separately.
+- `page.setLocale` — `Emulation.setLocaleOverride` + `setTimezoneOverride`
+  (`locale`, `timezone`).
+- `page.setOffline` — `Network.emulateNetworkConditions` (`offline`).
+- `page.clearEmulation` — clears the above overrides.
+
+```json
+{ "tabId": 123, "width": 390, "height": 844, "deviceScaleFactor": 3, "mobile": true }
+```
+
+```json
+{ "tabId": 123, "colorScheme": "dark", "media": "screen" }
+```
+
 ### `page.ariaSnapshot`
 
 Returns a compact accessibility snapshot built from CDP
