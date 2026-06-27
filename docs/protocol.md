@@ -340,9 +340,17 @@ On timeout, the JSON-RPC error includes
 
 ### `page.waitForPopup`
 
-Waits for a popup tab/window to be opened by the target tab.
-Supports optional `url`, `urlContains`, or `urlRegex` filters to wait for the popup target.
-On timeout, the JSON-RPC error includes `data.code: "PAGE_WAIT_FOR_POPUP_TIMEOUT"`.
+Waits for a popup tab/window to be opened by the target tab (matched by
+`openerTabId`). Supports optional `url`, `urlContains`, or `urlRegex` filters to
+wait for the popup to reach a target URL. On timeout, the JSON-RPC error
+includes `data.code: "PAGE_WAIT_FOR_POPUP_TIMEOUT"`.
+
+Call `page.waitForPopup` **before** the action that opens the popup (e.g. a
+`locator.click`): it only sees popups created after it starts listening.
+
+The captured popup is moved into the opener's Agent-managed tab group so it can
+be driven immediately (`page.*`, `locator.*`, etc.); the returned `tab.groupId`
+reflects this. Pass `"adopt": false` to leave the popup ungrouped (observe only).
 
 ```json
 { "tabId": 123, "urlContains": "login-success", "timeoutMs": 30000 }

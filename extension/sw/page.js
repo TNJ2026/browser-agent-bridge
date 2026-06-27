@@ -236,6 +236,10 @@ export function createPageHandlers({
 
     const result = await new Promise((resolve, reject) => {
       let done = false;
+      // Track every onUpdated listener so all are removed on finish. A single
+      // cleanup slot would leak earlier listeners when the opener opens multiple
+      // non-matching popups while a URL filter is active.
+      const updatedListeners = [];
       const timer = setTimeout(() => {
         finish(createPageWaitTimeoutError({
           type: 'PageWaitForPopupTimeout',
@@ -247,34 +251,27 @@ export function createPageHandlers({
         }));
       }, timeoutMs);
 
-      const onCreatedListener = async (tab) => {
+      const onCreatedListener = (tab) => {
         if (done) return;
-        if (tab.openerTabId === tabId) {
-          if (hasUrlPattern(params)) {
-            if (matchesUrlPattern(tab.url || '', params)) {
-              finish(null, tab);
-              return;
-            }
-            const newTabId = tab.id;
-            const onUpdatedListener = (updatedTabId, changeInfo, updatedTab) => {
-              if (updatedTabId === newTabId && updatedTab.url) {
-                if (matchesUrlPattern(updatedTab.url, params)) {
-                  chromeApi.tabs.onUpdated.removeListener(onUpdatedListener);
-                  finish(null, updatedTab);
-                }
-              }
-            };
-            chromeApi.tabs.onUpdated.addListener(onUpdatedListener);
-            cleanupUpdated = () => {
-              chromeApi.tabs.onUpdated.removeListener(onUpdatedListener);
-            };
-          } else {
-            finish(null, tab);
-          }
+        if (tab.openerTabId !== tabId) return;
+        if (!hasUrlPattern(params)) {
+          finish(null, tab);
+          return;
         }
+        if (matchesUrlPattern(tab.url || '', params)) {
+          finish(null, tab);
+          return;
+        }
+        // URL does not match yet — watch this popup's navigations until it does.
+        const newTabId = tab.id;
+        const onUpdatedListener = (updatedTabId, changeInfo, updatedTab) => {
+          if (done || updatedTabId !== newTabId || !updatedTab.url) return;
+          if (matchesUrlPattern(updatedTab.url, params)) finish(null, updatedTab);
+        };
+        chromeApi.tabs.onUpdated.addListener(onUpdatedListener);
+        updatedListeners.push(onUpdatedListener);
       };
 
-      let cleanupUpdated = () => {};
       chromeApi.tabs.onCreated.addListener(onCreatedListener);
 
       function finish(err, tab) {
@@ -282,7 +279,7 @@ export function createPageHandlers({
         done = true;
         clearTimeout(timer);
         chromeApi.tabs.onCreated.removeListener(onCreatedListener);
-        cleanupUpdated();
+        for (const listener of updatedListeners) chromeApi.tabs.onUpdated.removeListener(listener);
         if (err) {
           reject(err);
         } else {
@@ -291,11 +288,32 @@ export function createPageHandlers({
       }
     });
 
+    const popup = await adoptPopupIntoOpenerGroup(tabId, result, params);
     return {
       ok: true,
-      tab: normalizeTab(result),
+      tab: normalizeTab(popup),
       elapsedMs: Date.now() - started
     };
+  }
+
+  // A popup opened by an Agent tab does not automatically join the opener's tab
+  // group, so it would sit outside the Agent boundary and be rejected by tab
+  // isolation on every follow-up call. Move it into the opener's (Agent-managed)
+  // group so it can actually be driven. Best-effort: a grouping failure must not
+  // mask a successful capture. Opt out with `adopt: false`.
+  async function adoptPopupIntoOpenerGroup(openerTabId, popupTab, params) {
+    if (params.adopt === false || !popupTab || typeof popupTab.id !== 'number') return popupTab;
+    try {
+      const opener = await chromeApi.tabs.get(openerTabId);
+      const groupId = opener?.groupId;
+      if (typeof groupId === 'number' && groupId >= 0 && chromeApi.tabs.group) {
+        await chromeApi.tabs.group({ groupId, tabIds: [popupTab.id] });
+        return await chromeApi.tabs.get(popupTab.id);
+      }
+    } catch {
+      // Keep the captured popup as-is on any grouping/get failure.
+    }
+    return popupTab;
   }
 
   async function pageWaitForNetworkIdle(params) {
