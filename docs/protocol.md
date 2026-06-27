@@ -448,6 +448,43 @@ On timeout, the JSON-RPC error includes
 { "tabId": 123, "script": "document.title", "world": "MAIN", "cspBypassTtlMs": 60000 }
 ```
 
+### `page.waitForFunction`
+
+Polls an in-page predicate until it is truthy. `expression` (alias `script`) is
+an expression or a function source; when it is a function it is called with
+`arg`. Use `world` (`MAIN`/`isolated`) and frame targeting (`frameId`/`frameUrl`/
+`frameSelector`). On timeout the JSON-RPC error includes
+`data.code: "PAGE_WAIT_FOR_FUNCTION_TIMEOUT"` and `data.diagnostic` with the
+last predicate error (if any). Returns the predicate's value when it resolves
+(primitive values only).
+
+```json
+{ "tabId": 123, "expression": "() => window.__appReady === true", "timeoutMs": 30000 }
+```
+
+### `expect.page.toHaveTitle`
+
+Waits for the tab title to match `title` (exact), `titleContains`, or
+`titleRegex`. On timeout: `data.code: "PAGE_EXPECT_TITLE_TIMEOUT"` with the
+current title.
+
+```json
+{ "tabId": 123, "titleContains": "Dashboard" }
+```
+
+### `page.addInitScript` / `page.removeInitScript`
+
+Registers a script (via CDP `Page.addScriptToEvaluateOnNewDocument`) to run
+before any page script on every subsequent navigation/document in the tab —
+useful for setting flags, stubbing, or installing probes ahead of page load.
+Returns an `identifier`; pass it to `page.removeInitScript` to unregister. Pass
+`runImmediately:true` to also evaluate it in the current document, and
+`worldName` to target an isolated world.
+
+```json
+{ "tabId": 123, "script": "window.__agent = true;" }
+```
+
 ### `page.domSnapshot`
 
 Uses CDP `DOMSnapshot.captureSnapshot`.
@@ -648,6 +685,15 @@ Assertion-style waits for common locator conditions. The locator can be passed
 directly or under `locator`. Text and attribute assertions support
 `timeoutMs`, `intervalMs`, `contains`, `caseSensitive`, `normalizeWhitespace`,
 and `regex:true` (match the expected value as a regular expression).
+
+Available: `toBeVisible`, `toBeHidden`, `toBeEnabled` (pass `enabled:false` to
+assert disabled), `toBeDisabled`, `toBeEditable`, `toBeChecked` (pass
+`checked:false` to assert unchecked), `toHaveValue` (`expectedValue`/`value`,
+supports `contains`/regex like the text assertions), `toHaveCount`,
+`toHaveText`, and `toHaveAttribute`. State assertions retry until the element is
+present and the condition holds, so they tolerate a not-yet-rendered element. On
+timeout: `data.code: "LOCATOR_EXPECT_TIMEOUT"` with the expected/actual values
+and candidate summaries. There is also a page-level `expect.page.toHaveTitle`.
 
 ```json
 { "tabId": 123, "locator": { "role": "button", "name": "Save" } }

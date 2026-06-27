@@ -311,6 +311,8 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Page | `page.waitForRequest` | Wait for a matching network request. |
 | Page | `page.waitForResponse` | Wait for a matching network response. |
 | Page | `page.waitForNetworkIdle` | Wait until network activity becomes idle. |
+| Page | `page.waitForFunction` | Wait until an in-page predicate becomes truthy. |
+| Page | `page.addInitScript` | Run a script before page scripts on every navigation. |
 | Page | `page.waitForDialog` | Wait for a JavaScript dialog. |
 | Page | `page.acceptDialog` | Accept the current JavaScript dialog. |
 | Page | `page.dismissDialog` | Dismiss the current JavaScript dialog. |
