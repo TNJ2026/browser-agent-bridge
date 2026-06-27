@@ -595,31 +595,133 @@ export function createDomHandlers({
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     const started = Date.now();
-    let previousRect = null;
-    let last = null;
 
-    while (Date.now() - started <= timeoutMs) {
-      const [{ result }] = await chromeApi.scripting.executeScript({
-        target: frameTarget.target,
-        func: (selector, index, scroll, frameSelector, actionKind) => {
+    const [{ result }] = await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (selector, index, scroll, frameSelector, actionKind, timeoutMs, intervalMs, requireStable, strict) => {
+        return new Promise((resolve, reject) => {
           const root = resolveDomRoot(frameSelector);
-          const matches = querySelectorAllDeep(root, selector);
-          const element = matches[index];
-          if (!element) {
+          const started = Date.now();
+          const observers = [];
+          let done = false;
+          let last = null;
+          let previousRect = null;
+          let checkQueued = false;
+          let observedRoots = new Set();
+
+          const timeoutId = setTimeout(() => finish(last || runCheck()), timeoutMs);
+          const fallbackId = setInterval(check, intervalMs);
+
+          // Eager check on start
+          check();
+
+          function finish(value) {
+            if (done) return;
+            done = true;
+            clearTimeout(timeoutId);
+            clearInterval(fallbackId);
+            for (const observer of observers) observer.disconnect();
+            resolve(value);
+          }
+
+          function fail(error) {
+            if (done) return;
+            done = true;
+            clearTimeout(timeoutId);
+            clearInterval(fallbackId);
+            for (const observer of observers) observer.disconnect();
+            reject(error);
+          }
+
+          function queueCheck() {
+            if (checkQueued || done) return;
+            checkQueued = true;
+            setTimeout(() => {
+              checkQueued = false;
+              check();
+            }, 0);
+          }
+
+          function observeCurrentRoots(root) {
+            const roots = collectObservableRoots(root);
+            let changed = roots.length !== observedRoots.size;
+            for (const rootItem of roots) {
+              if (!observedRoots.has(rootItem)) changed = true;
+            }
+            if (!changed) return;
+            for (const observer of observers) observer.disconnect();
+            observers.length = 0;
+            observedRoots = new Set(roots);
+            for (const rootItem of roots) {
+              const observer = new MutationObserver(queueCheck);
+              observer.observe(rootItem, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: true
+              });
+              observers.push(observer);
+            }
+          }
+
+          function check() {
+            if (done) return;
+            try {
+              observeCurrentRoots(root);
+              const snapshot = runCheck();
+              last = snapshot;
+              const satisfies = snapshot.found && snapshot.actionability?.actionable === true;
+              if (satisfies) finish(snapshot);
+              else if (Date.now() - started >= timeoutMs) finish(snapshot);
+            } catch (error) {
+              fail(error);
+            }
+          }
+
+          function runCheck() {
+            const matches = querySelectorAllDeep(root, selector);
+            const element = matches[index];
+            if (!element) {
+              return {
+                found: false,
+                count: matches.length,
+                actionability: { visible: false, enabled: false, editable: false, stable: false, actionable: false, reasons: ['not found'] }
+              };
+            }
+
+            if (scroll !== false) element.scrollIntoView({ block: 'center', inline: 'center' });
+
+            const baseActionability = getActionability(element, root, actionKind);
+            const rect = summarizeElement(element, root).rect;
+
+            let stable = true;
+            if (requireStable !== false) {
+              stable = rect && previousRect && rectsAlmostEqualInPage(rect, previousRect);
+            }
+            if (rect) previousRect = rect;
+
+            let actionable = baseActionability.actionable && stable;
+            const reasons = [...baseActionability.reasons];
+            if (!stable) reasons.push('not stable');
+
+            if (strict === true && matches.length !== 1) {
+              actionable = false;
+              reasons.unshift(`strict mode expected 1 match, got ${matches.length}`);
+            }
+
             return {
-              found: false,
+              found: true,
               count: matches.length,
-              actionability: { visible: false, enabled: false, editable: false, selectable: false, reasons: ['not found'] }
+              element: summarizeElement(element, root),
+              actionability: {
+                ...baseActionability,
+                actionable,
+                stable,
+                reasons,
+                strict: strict === true
+              }
             };
           }
-          if (scroll !== false) element.scrollIntoView({ block: 'center', inline: 'center' });
-          const actionability = getActionability(element, root, actionKind);
-          return {
-            found: true,
-            count: matches.length,
-            element: summarizeElement(element, root),
-            actionability
-          };
 
           function getActionability(element, root, actionKind) {
             const visible = isVisible(element);
@@ -674,7 +776,7 @@ export function createDomHandlers({
             const frame = frameForRoot(root);
             if (!frame) return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
             const frameRect = frame.getBoundingClientRect();
-            return { x: frameRect.x + rect.x, y: frameRect.y + rect.y, width: rect.width, height: rect.height };
+            return { x: frameRect.x + rect.x, y: frameRect.y + rect.y, width: frameRect.width, height: frameRect.height };
           }
 
           function hitTestElement(element, root, point) {
@@ -783,34 +885,47 @@ export function createDomHandlers({
               }
             }
           }
-        },
-        args: [params.selector, index, params.scrollIntoView !== false, frameTarget.frameSelector, actionKind],
-        world: 'MAIN'
-      });
 
-      last = result;
-      if (params.strict === true && result.count !== 1) {
-        await sleep(intervalMs);
-        continue;
-      }
+          function collectObservableRoots(root) {
+            const roots = [];
+            const visited = new Set();
+            visitRoot(root);
+            return roots;
 
-      const rect = result.element?.rect || null;
-      const stable = params.stable === false || (rect && previousRect && rectsAlmostEqual(rect, previousRect));
-      const checks = result.actionability || {};
-      if (result.found && checks.actionable === true && stable === true) {
-        return {
-          ok: true,
-          elapsedMs: Date.now() - started,
-          element: result.element,
-          actionability: { ...checks, stable: true, strict: params.strict === true }
-        };
-      }
+            function visitRoot(currentRoot) {
+              if (!currentRoot || visited.has(currentRoot)) return;
+              visited.add(currentRoot);
+              roots.push(currentRoot);
+              if (typeof currentRoot.querySelectorAll !== 'function') return;
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
+            }
+          }
 
-      if (rect) previousRect = rect;
-      await sleep(intervalMs);
+          function rectsAlmostEqualInPage(a, b) {
+            return Math.abs(a.x - b.x) < 0.5 &&
+              Math.abs(a.y - b.y) < 0.5 &&
+              Math.abs(a.width - b.width) < 0.5 &&
+              Math.abs(a.height - b.height) < 0.5;
+          }
+        });
+      },
+      args: [params.selector, index, params.scrollIntoView !== false, frameTarget.frameSelector, actionKind, timeoutMs, intervalMs, params.stable !== false, params.strict === true],
+      world: 'MAIN'
+    });
+
+    const elapsedMs = Date.now() - started;
+    if (result.found && result.actionability?.actionable === true && !(params.strict === true && result.count !== 1)) {
+      return {
+        ok: true,
+        elapsedMs,
+        element: result.element,
+        actionability: result.actionability
+      };
     }
 
-    throw createDomActionabilityTimeoutError(params, actionKind, frameTarget, last, Date.now() - started);
+    throw createDomActionabilityTimeoutError(params, actionKind, frameTarget, result, elapsedMs);
   }
 
   async function getDomClickTarget(tabId, params, frameTarget) {
