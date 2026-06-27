@@ -307,6 +307,8 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Session | `session.get` | Get session details. |
 | Session | `session.stop` | Close a session workspace. |
 | Page | `page.navigate` | Navigate to a URL. |
+| Page | `page.reload` | Reload the tab. |
+| Page | `page.goBack` / `page.goForward` | History navigation. |
 | Page | `page.waitForURL` | Wait for the tab URL to match. |
 | Page | `page.waitForRequest` | Wait for a matching network request. |
 | Page | `page.waitForResponse` | Wait for a matching network response. |
