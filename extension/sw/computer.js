@@ -55,7 +55,7 @@ export function createComputerHandlers({
         x: fromX + (toX - fromX) * t,
         y: fromY + (toY - fromY) * t,
         button,
-        buttons: 1
+        buttons: mouseButtonsMask(button)
       });
     }
     await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: toX, y: toY, button, clickCount: 1 });
@@ -131,4 +131,17 @@ export function createComputerHandlers({
     computerScroll,
     computerHover
   };
+}
+
+// CDP `buttons` is a bitmask of currently held buttons (left=1, right=2,
+// middle=4, back=8, forward=16). During a drag the held button must be
+// reflected, otherwise a right/middle drag reports the left button as down.
+function mouseButtonsMask(button) {
+  switch (button) {
+    case 'right': return 2;
+    case 'middle': return 4;
+    case 'back': return 8;
+    case 'forward': return 16;
+    default: return 1; // left / unspecified
+  }
 }
