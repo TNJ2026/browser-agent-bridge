@@ -29,6 +29,41 @@ export function createDevtoolsHandlers({
     return { events: (networkEventsByTab.get(tabId) || []).slice(-(params.limit || 100)) };
   }
 
+  // Read-only cookie inspection. Values (which may be httpOnly session tokens)
+  // are redacted unless includeValues:true. Approval is enforced upstream by the
+  // dedicated `cookies` category, which is never auto-allowed in-boundary.
+  async function cookiesGet(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'cookies.get');
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Network.enable').catch(() => {});
+    const cdpParams = Array.isArray(params.urls) && params.urls.length
+      ? { urls: params.urls.filter(url => typeof url === 'string' && url) }
+      : {};
+    const result = await cdp(tabId, 'Network.getCookies', cdpParams);
+    let cookies = Array.isArray(result?.cookies) ? result.cookies : [];
+    if (typeof params.name === 'string' && params.name) cookies = cookies.filter(c => c.name === params.name);
+    if (typeof params.domain === 'string' && params.domain) cookies = cookies.filter(c => String(c.domain || '').includes(params.domain));
+    const includeValues = params.includeValues === true;
+    const safe = cookies.map(c => {
+      const base = {
+        name: c.name,
+        domain: c.domain,
+        path: c.path,
+        expires: c.expires,
+        size: c.size,
+        httpOnly: c.httpOnly === true,
+        secure: c.secure === true,
+        sameSite: c.sameSite || null,
+        session: c.session === true
+      };
+      return includeValues
+        ? { ...base, value: c.value }
+        : { ...base, valueLength: typeof c.value === 'string' ? c.value.length : 0 };
+    });
+    return { cookies: safe, count: safe.length, valuesIncluded: includeValues };
+  }
+
   async function networkSetBlockedUrls(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'network.setBlockedUrls');
@@ -103,6 +138,7 @@ export function createDevtoolsHandlers({
   return {
     consoleRead,
     networkRead,
+    cookiesGet,
     networkSetBlockedUrls,
     networkSetInterceptors,
     networkRouteFromHAR,

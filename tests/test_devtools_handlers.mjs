@@ -363,3 +363,51 @@ test('network.routeFromHAR with an empty archive disables Fetch', async () => {
   assert.equal(fetchInterceptorsByTab.has(9), false);
   assert.ok(calls.some(call => call.method === 'Fetch.disable'));
 });
+
+test('cookies.get redacts values by default and includes metadata', async () => {
+  const { createDevtoolsHandlers } = await importDevtoolsModule();
+  const handlers = createDevtoolsHandlers({
+    assertTabId: (v) => v,
+    assertTabAllowed: async () => {},
+    attachDebugger: async () => {},
+    cdp: async (tabId, method) => method === 'Network.getCookies'
+      ? { cookies: [{ name: 'sid', value: 'super-secret-token', domain: '.x.com', path: '/', httpOnly: true, secure: true, sameSite: 'Lax', size: 25, session: true }] }
+      : {},
+    consoleEventsByTab: new Map(),
+    networkEventsByTab: new Map(),
+    fetchInterceptorsByTab: new Map()
+  });
+
+  const res = await handlers.cookiesGet({ tabId: 9 });
+  assert.equal(res.count, 1);
+  assert.equal(res.valuesIncluded, false);
+  const c = res.cookies[0];
+  assert.equal(c.name, 'sid');
+  assert.equal(c.value, undefined);            // value redacted by default
+  assert.equal(c.valueLength, 'super-secret-token'.length);
+  assert.equal(c.httpOnly, true);
+  assert.equal(c.domain, '.x.com');
+});
+
+test('cookies.get returns values only with includeValues:true and filters by name', async () => {
+  const { createDevtoolsHandlers } = await importDevtoolsModule();
+  const cookies = [
+    { name: 'sid', value: 'tok', domain: '.x.com', path: '/' },
+    { name: 'theme', value: 'dark', domain: '.x.com', path: '/' }
+  ];
+  const handlers = createDevtoolsHandlers({
+    assertTabId: (v) => v,
+    assertTabAllowed: async () => {},
+    attachDebugger: async () => {},
+    cdp: async (tabId, method) => method === 'Network.getCookies' ? { cookies } : {},
+    consoleEventsByTab: new Map(),
+    networkEventsByTab: new Map(),
+    fetchInterceptorsByTab: new Map()
+  });
+
+  const res = await handlers.cookiesGet({ tabId: 9, includeValues: true, name: 'sid' });
+  assert.equal(res.count, 1);
+  assert.equal(res.valuesIncluded, true);
+  assert.equal(res.cookies[0].name, 'sid');
+  assert.equal(res.cookies[0].value, 'tok');
+});

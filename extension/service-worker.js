@@ -292,6 +292,7 @@ const rpcRouter = {
   // devtools / console / network
   'console.read': (params) => devtoolsHandlers.consoleRead(params),
   'network.read': (params) => devtoolsHandlers.networkRead(params),
+  'cookies.get': (params) => devtoolsHandlers.cookiesGet(params),
   'network.setBlockedUrls': (params) => devtoolsHandlers.networkSetBlockedUrls(params),
   'network.setInterceptors': (params) => devtoolsHandlers.networkSetInterceptors(params),
   'network.routeFromHAR': (params) => devtoolsHandlers.networkRouteFromHAR(params),
@@ -730,7 +731,6 @@ async function extensionInfo() {
     name: chrome.runtime.getManifest().name,
     version: chrome.runtime.getManifest().version,
     extensionId: chrome.runtime.id,
-    nativeStatus,
     tools: Object.keys(rpcRouter).filter(method => method !== 'permission.check')
   };
 }
@@ -952,6 +952,11 @@ async function assertRpcTabIsolation(method, params = {}) {
     return;
   }
 
+  if (method === 'cookies.get') {
+    await assertAgentManagedTabs([assertTabId(params.tabId)], method);
+    return;
+  }
+
   if (
     method.startsWith('page.') ||
     method.startsWith('dom.') ||
@@ -1163,6 +1168,7 @@ function errorData(error) {
 }
 
 function optionalPermissionsForMethod(method, params = {}) {
+  if (method === 'cookies.get') return ['tabs'];
   if (method === 'tabs.create') return ['tabs', 'tabGroups'];
   if (method === 'tabs.group') return ['tabs', 'tabGroups'];
   if (method.startsWith('tabs.')) return ['tabs'];
@@ -1204,6 +1210,10 @@ async function assertOptionalPermissions(method, params = {}) {
 }
 
 function getMethodCategory(method, params = {}) {
+  // Cookie reads expose httpOnly session tokens — a dedicated category that is
+  // never auto-allowed in-boundary (see isAgentTabGroupOperation), so it always
+  // prompts for approval.
+  if (method === 'cookies.get') return 'cookies';
   if (method === 'tabs.list' || method === 'session.list' || method === 'session.get') {
     return 'read_tabs';
   }
