@@ -382,6 +382,7 @@ def extension_for_mime(mime_type):
         "image/jpeg": ".jpg",
         "image/webp": ".webp",
         "application/json": ".json",
+        "application/pdf": ".pdf",
         "text/plain": ".txt"
     }.get(mime_type, ".bin")
 

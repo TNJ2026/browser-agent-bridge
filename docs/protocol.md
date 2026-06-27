@@ -561,6 +561,18 @@ Captures the visible tab and returns a `dataUrl`.
 
 To save a screenshot to disk, pass the returned `dataUrl` to `native.saveDataUrl`.
 
+### `page.pdf`
+
+Renders the page to PDF via CDP `Page.printToPDF` and returns a base64
+`dataUrl` (`application/pdf`). Supports `landscape`, `printBackground` (default
+`true`), `scale`, `paperWidth`/`paperHeight` (inches), `pageRanges`, and
+`preferCSSPageSize`. Pass the `dataUrl` to `native.saveDataUrl` to write it to
+disk (saved with a `.pdf` extension).
+
+```json
+{ "tabId": 123, "landscape": false, "printBackground": true }
+```
+
 ### `dom.query`
 
 Returns a bounded list of matching elements with text, value, visibility, and
