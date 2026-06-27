@@ -29,6 +29,24 @@ export function createDevtoolsHandlers({
     return { events: (networkEventsByTab.get(tabId) || []).slice(-(params.limit || 100)) };
   }
 
+  async function networkGetResponseBody(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'network.getResponseBody');
+    if (typeof params.requestId !== 'string' || !params.requestId) {
+      throw new Error('network.getResponseBody requires a requestId');
+    }
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Network.enable').catch(() => {});
+    const result = await cdp(tabId, 'Network.getResponseBody', { requestId: params.requestId });
+    // CDP returns the raw body: text when base64Encoded is false, a base64
+    // string otherwise. Forwarded as-is so callers decode binary deliberately.
+    return {
+      requestId: params.requestId,
+      base64Encoded: result?.base64Encoded === true,
+      body: typeof result?.body === 'string' ? result.body : ''
+    };
+  }
+
   async function networkSetBlockedUrls(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'network.setBlockedUrls');
@@ -103,6 +121,7 @@ export function createDevtoolsHandlers({
   return {
     consoleRead,
     networkRead,
+    networkGetResponseBody,
     networkSetBlockedUrls,
     networkSetInterceptors,
     networkRouteFromHAR,

@@ -1085,6 +1085,20 @@ Retrieves collected network request events for the specified tab.
 { "tabId": 123, "limit": 100 }
 ```
 
+### `network.getResponseBody`
+
+Fetches a captured response body via CDP `Network.getResponseBody`, using a
+`requestId` from `network.read` events or a `page.waitForResponse` result.
+Returns `{ requestId, base64Encoded, body }`; `body` is the raw CDP body — text
+when `base64Encoded` is `false`, otherwise a base64 string the caller decodes.
+The body must still be in the network buffer (after the response finished
+loading), and very large bodies may exceed the native host's 32 MB message
+limit.
+
+```json
+{ "tabId": 123, "requestId": "12345.67" }
+```
+
 ### `network.setBlockedUrls`
 
 Blocks network requests matching specified URL patterns for the target tab. Pass an empty array `[]` to clear all blocked URLs.
