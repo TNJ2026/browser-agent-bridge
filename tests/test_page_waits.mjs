@@ -139,6 +139,31 @@ test('waitForURL timeout carries the current url', async () => {
   assert.equal(error.diagnostic.currentUrl, 'https://example.com/start');
 });
 
+test('waitForURL resolves from a tab update event', async () => {
+  const { createPageHandlers } = await importPageModule();
+  const listeners = new Set();
+  let currentUrl = 'https://example.com/start';
+  const handlers = createPageHandlers(makeDeps({
+    chromeApi: {
+      tabs: {
+        get: async () => ({ id: 1, url: currentUrl, status: 'complete' }),
+        onUpdated: {
+          addListener: listener => listeners.add(listener),
+          removeListener: listener => listeners.delete(listener)
+        }
+      },
+      scripting: { executeScript: async () => [{ result: {} }] }
+    }
+  }));
+  setTimeout(() => {
+    currentUrl = 'https://example.com/done';
+    for (const listener of [...listeners]) listener(1, { url: currentUrl });
+  }, 0);
+  const result = await handlers.pageWaitForURL({ tabId: 1, urlContains: '/done', timeoutMs: 50, intervalMs: 10 });
+  assert.equal(result.url, 'https://example.com/done');
+  assert.equal(listeners.size, 0);
+});
+
 test('waitForNavigation timeout reports url stability', async () => {
   const { createPageHandlers } = await importPageModule();
   const handlers = createPageHandlers(makeDeps());
@@ -234,6 +259,31 @@ test('expect.page.toHaveTitle matches the tab title', async () => {
   const res = await handlers.pageExpectTitle({ tabId: 1, titleContains: 'Dashboard', timeoutMs: 30, intervalMs: 10 });
   assert.equal(res.ok, true);
   assert.equal(res.title, 'Dashboard — Home');
+});
+
+test('expect.page.toHaveTitle resolves from a tab update event', async () => {
+  const { createPageHandlers } = await importPageModule();
+  const listeners = new Set();
+  let currentTitle = 'Loading';
+  const handlers = createPageHandlers(makeDeps({
+    chromeApi: {
+      tabs: {
+        get: async () => ({ id: 1, title: currentTitle, url: 'https://example.com' }),
+        onUpdated: {
+          addListener: listener => listeners.add(listener),
+          removeListener: listener => listeners.delete(listener)
+        }
+      },
+      scripting: { executeScript: async () => [{ result: {} }] }
+    }
+  }));
+  setTimeout(() => {
+    currentTitle = 'Dashboard — Home';
+    for (const listener of [...listeners]) listener(1, { title: currentTitle });
+  }, 0);
+  const result = await handlers.pageExpectTitle({ tabId: 1, titleContains: 'Dashboard', timeoutMs: 50, intervalMs: 10 });
+  assert.equal(result.title, 'Dashboard — Home');
+  assert.equal(listeners.size, 0);
 });
 
 test('expect.page.toHaveTitle times out on a mismatch', async () => {

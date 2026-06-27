@@ -16,6 +16,8 @@ export function createPageHandlers({
   resolveFrameTarget,
   networkEventsByTab,
   dialogsByTab,
+  waitForNetworkActivity = null,
+  waitForDialogActivity = null,
   defaultTimeoutMs,
   chromeApi = chrome
 }) {
@@ -49,22 +51,19 @@ export function createPageHandlers({
     const initialTab = await chromeApi.tabs.get(tabId);
     const initialUrl = initialTab.url || '';
     const started = Date.now();
-    let lastUrl = initialUrl;
-    let lastStatus = initialTab.status || null;
-
-    while (Date.now() - started <= timeoutMs) {
-      const tab = await chromeApi.tabs.get(tabId);
+    const result = await waitForTabUpdateMatch(tabId, timeoutMs, intervalMs, tab => {
       const url = tab.url || '';
-      lastUrl = url;
-      lastStatus = tab.status || null;
       const changed = url !== initialUrl;
       const urlMatched = matchesUrlPattern(url, params);
       const reachedState = waitUntil === 'commit' ? changed : tab.status === 'complete';
-      if ((changed || hasUrlPattern(params)) && urlMatched && reachedState) {
-        return { ok: true, tab: normalizeTab(tab), url, waitUntil, elapsedMs: Date.now() - started };
-      }
-      await sleep(intervalMs);
+      return (changed || hasUrlPattern(params)) && urlMatched && reachedState;
+    });
+    if (result.matched) {
+      const url = result.tab.url || '';
+      return { ok: true, tab: normalizeTab(result.tab), url, waitUntil, elapsedMs: Date.now() - started };
     }
+    const lastUrl = result.tab?.url || initialUrl;
+    const lastStatus = result.tab?.status || initialTab.status || null;
     throw createPageWaitTimeoutError({
       type: 'PageWaitForNavigationTimeout',
       code: 'PAGE_WAIT_FOR_NAVIGATION_TIMEOUT',
@@ -131,7 +130,7 @@ export function createPageHandlers({
         }
         return { ok: true, response, elapsedMs: Date.now() - started };
       }
-      await sleep(intervalMs);
+      await waitForNetworkEvent(tabId, intervalMs);
     }
     throw createNetworkWaitTimeoutError('response', params, waitOptions, networkEventsByTab?.get(tabId) || [], Date.now() - started);
   }
@@ -172,7 +171,7 @@ export function createPageHandlers({
       const events = networkEventsByTab?.get(tabId) || [];
       const match = findMatchingRequest(events, waitOptions);
       if (match) return { ok: true, request: match, elapsedMs: Date.now() - started };
-      await sleep(intervalMs);
+      await waitForNetworkEvent(tabId, intervalMs);
     }
     throw createNetworkWaitTimeoutError('request', params, waitOptions, networkEventsByTab?.get(tabId) || [], Date.now() - started);
   }
@@ -184,17 +183,12 @@ export function createPageHandlers({
     const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
     const started = Date.now();
-    let lastUrl = '';
-
-    while (Date.now() - started <= timeoutMs) {
-      const tab = await chromeApi.tabs.get(tabId);
-      const url = tab.url || '';
-      lastUrl = url;
-      if (matchesUrlPattern(url, params)) {
-        return { ok: true, tab: normalizeTab(tab), url, elapsedMs: Date.now() - started };
-      }
-      await sleep(intervalMs);
+    const result = await waitForTabUpdateMatch(tabId, timeoutMs, intervalMs, tab => matchesUrlPattern(tab.url || '', params));
+    if (result.matched) {
+      const url = result.tab.url || '';
+      return { ok: true, tab: normalizeTab(result.tab), url, elapsedMs: Date.now() - started };
     }
+    const lastUrl = result.tab?.url || '';
     throw createPageWaitTimeoutError({
       type: 'PageWaitForURLTimeout',
       code: 'PAGE_WAIT_FOR_URL_TIMEOUT',
@@ -224,7 +218,7 @@ export function createPageHandlers({
       if (state.inflight <= maxInflight && Date.now() - state.lastActivityAt >= idleMs) {
         return { ok: true, inflight: state.inflight, idleMs, maxInflight, elapsedMs: Date.now() - started };
       }
-      await sleep(intervalMs);
+      await waitForNetworkEvent(tabId, Math.min(intervalMs, idleMs));
     }
     const state = computeNetworkIdleState(networkEventsByTab?.get(tabId) || [], { started, now: Date.now() });
     throw createPageWaitTimeoutError({
@@ -255,7 +249,7 @@ export function createPageHandlers({
       if (dialog && matchesDialog(dialog, params)) {
         return { ok: true, dialog: normalizeDialog(dialog), elapsedMs: Date.now() - started };
       }
-      await sleep(intervalMs);
+      await waitForDialogEvent(tabId, intervalMs);
     }
     throw createPageWaitTimeoutError({
       type: 'PageWaitForDialogTimeout',
@@ -497,25 +491,99 @@ export function createPageHandlers({
     const caseSensitive = params.caseSensitive === true;
     const started = Date.now();
     const frameTarget = await resolveFrameTarget(tabId, params);
-    let last = null;
 
-    while (Date.now() - started <= timeoutMs) {
-      const [{ result }] = await chromeApi.scripting.executeScript({
-        target: frameTarget.target,
-        func: (text, selector, exact, caseSensitive, frameSelector) => {
-          const doc = resolveDomRoot(frameSelector);
-          const root = selector ? querySelectorDeep(doc, selector) : doc.body;
-          if (!root) return { found: false, selectorFound: false };
-          const source = composedText(root);
-          const haystack = caseSensitive ? source : source.toLowerCase();
-          const needle = caseSensitive ? text : text.toLowerCase();
-          const found = exact ? haystack.trim() === needle : haystack.includes(needle);
-          return {
-            found,
-            selectorFound: true,
-            textLength: source.length,
-            preview: source.trim().slice(0, 500)
-          };
+    const [{ result }] = await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (text, selector, exact, caseSensitive, frameSelector, timeoutMs, intervalMs) => {
+        return new Promise((resolve, reject) => {
+          const started = Date.now();
+          const observers = [];
+          let done = false;
+          let last = null;
+          let checkQueued = false;
+          let observedRoots = new Set();
+
+          const timeoutId = setTimeout(() => finish(last || { found: false, selectorFound: selector ? false : true }), timeoutMs);
+          const fallbackId = setInterval(check, intervalMs);
+
+          function finish(value) {
+            if (done) return;
+            done = true;
+            clearTimeout(timeoutId);
+            clearInterval(fallbackId);
+            for (const observer of observers) observer.disconnect();
+            resolve(value);
+          }
+
+          function fail(error) {
+            if (done) return;
+            done = true;
+            clearTimeout(timeoutId);
+            clearInterval(fallbackId);
+            for (const observer of observers) observer.disconnect();
+            reject(error);
+          }
+
+          function queueCheck() {
+            if (checkQueued || done) return;
+            checkQueued = true;
+            setTimeout(() => {
+              checkQueued = false;
+              check();
+            }, 0);
+          }
+
+          function observeCurrentRoots(root) {
+            const roots = collectObservableRoots(root);
+            let changed = roots.length !== observedRoots.size;
+            for (const rootItem of roots) {
+              if (!observedRoots.has(rootItem)) changed = true;
+            }
+            if (!changed) return;
+            for (const observer of observers) observer.disconnect();
+            observers.length = 0;
+            observedRoots = new Set(roots);
+            for (const rootItem of roots) {
+              const observer = new MutationObserver(queueCheck);
+              observer.observe(rootItem, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: true
+              });
+              observers.push(observer);
+            }
+          }
+
+          function check() {
+            if (done) return;
+            try {
+              const doc = resolveDomRoot(frameSelector);
+              observeCurrentRoots(doc);
+              last = inspect(doc);
+              if (last?.found) finish(last);
+              else if (Date.now() - started >= timeoutMs) finish(last || { found: false, selectorFound: selector ? false : true });
+            } catch (error) {
+              fail(error);
+            }
+          }
+
+          function inspect(doc) {
+            const root = selector ? querySelectorDeep(doc, selector) : doc.body;
+            if (!root) return { found: false, selectorFound: false };
+            const source = composedText(root);
+            const haystack = caseSensitive ? source : source.toLowerCase();
+            const needle = caseSensitive ? text : text.toLowerCase();
+            const found = exact ? haystack.trim() === needle : haystack.includes(needle);
+            return {
+              found,
+              selectorFound: true,
+              textLength: source.length,
+              preview: source.trim().slice(0, 500)
+            };
+          }
+
+          check();
 
           function resolveDomRoot(frameSelector) {
             if (!frameSelector) return document;
@@ -526,6 +594,23 @@ export function createPageHandlers({
               return frame.contentDocument;
             } catch {
               throw new Error(`Frame is not accessible, likely cross-origin: ${frameSelector}`);
+            }
+          }
+
+          function collectObservableRoots(root) {
+            const roots = [];
+            const visited = new Set();
+            visitRoot(root);
+            return roots;
+
+            function visitRoot(currentRoot) {
+              if (!currentRoot || visited.has(currentRoot)) return;
+              visited.add(currentRoot);
+              roots.push(currentRoot);
+              if (typeof currentRoot.querySelectorAll !== 'function') return;
+              for (const element of currentRoot.querySelectorAll('*')) {
+                if (element.shadowRoot) visitRoot(element.shadowRoot);
+              }
             }
           }
 
@@ -568,14 +653,14 @@ export function createPageHandlers({
               }
             }
           }
-        },
-        args: [params.text, selector, exact, caseSensitive, frameTarget.frameSelector],
-        world: 'MAIN'
-      });
-      last = result;
-      if (result?.found) return { ok: true, match: result, frame: frameTarget.frame, elapsedMs: Date.now() - started };
-      await sleep(intervalMs);
-    }
+        });
+      },
+      args: [params.text, selector, exact, caseSensitive, frameTarget.frameSelector, timeoutMs, intervalMs],
+      world: 'MAIN'
+    });
+
+    if (result?.found) return { ok: true, match: result, frame: frameTarget.frame, elapsedMs: Date.now() - started };
+    const last = result;
     const scopeMissing = !!(selector && last && last.selectorFound === false);
     throw createPageWaitTimeoutError({
       type: 'PageWaitForTextTimeout',
@@ -778,30 +863,51 @@ export function createPageHandlers({
     const started = Date.now();
     const frameTarget = await resolveFrameTarget(tabId, params);
     const arg = params.arg ?? null;
-    let last = null;
 
-    while (Date.now() - started <= timeoutMs) {
-      const [{ result }] = await chromeApi.scripting.executeScript({
-        target: frameTarget.target,
-        func: (expression, arg) => {
-          try {
-            const evaluated = (0, eval)(`(${expression})`);
-            const value = typeof evaluated === 'function' ? evaluated(arg) : evaluated;
-            const safe = value === null || ['string', 'number', 'boolean'].includes(typeof value) ? value : undefined;
-            return { ok: true, truthy: !!value, value: safe };
-          } catch (error) {
-            return { ok: false, error: String((error && error.message) || error) };
+    const [{ result }] = await chromeApi.scripting.executeScript({
+      target: frameTarget.target,
+      func: (expression, arg, timeoutMs, intervalMs) => {
+        return new Promise(resolve => {
+          const started = Date.now();
+          let last = null;
+
+          const timeoutId = setTimeout(() => finish(last || { ok: true, truthy: false, value: undefined }), timeoutMs);
+          const intervalId = setInterval(check, intervalMs);
+
+          function finish(value) {
+            clearTimeout(timeoutId);
+            clearInterval(intervalId);
+            resolve(value);
           }
-        },
-        args: [expression, arg],
-        world: params.world === 'isolated' ? 'ISOLATED' : 'MAIN'
-      });
-      last = result;
-      if (result?.ok && result.truthy) {
-        return { ok: true, value: result.value, frame: frameTarget.frame, elapsedMs: Date.now() - started };
-      }
-      await sleep(intervalMs);
+
+          function check() {
+            last = evaluate(expression, arg);
+            if (last?.ok && last.truthy) finish(last);
+            else if (Date.now() - started >= timeoutMs) finish(last || { ok: true, truthy: false, value: undefined });
+          }
+
+          function evaluate(expression, arg) {
+            try {
+              const evaluated = (0, eval)(`(${expression})`);
+              const value = typeof evaluated === 'function' ? evaluated(arg) : evaluated;
+              const safe = value === null || ['string', 'number', 'boolean'].includes(typeof value) ? value : undefined;
+              return { ok: true, truthy: !!value, value: safe };
+            } catch (error) {
+              return { ok: false, error: String((error && error.message) || error) };
+            }
+          }
+
+          check();
+        });
+      },
+      args: [expression, arg, timeoutMs, intervalMs],
+      world: params.world === 'isolated' ? 'ISOLATED' : 'MAIN'
+    });
+
+    if (result?.ok && result.truthy) {
+      return { ok: true, value: result.value, frame: frameTarget.frame, elapsedMs: Date.now() - started };
     }
+    const last = result;
     throw createPageWaitTimeoutError({
       type: 'PageWaitForFunctionTimeout',
       code: 'PAGE_WAIT_FOR_FUNCTION_TIMEOUT',
@@ -820,16 +926,12 @@ export function createPageHandlers({
     const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
     const started = Date.now();
-    let lastTitle = '';
-
-    while (Date.now() - started <= timeoutMs) {
-      const tab = await chromeApi.tabs.get(tabId);
-      lastTitle = tab.title || '';
-      if (matchesTitlePattern(lastTitle, params)) {
-        return { ok: true, assertion: 'toHaveTitle', title: lastTitle, elapsedMs: Date.now() - started };
-      }
-      await sleep(intervalMs);
+    const result = await waitForTabUpdateMatch(tabId, timeoutMs, intervalMs, tab => matchesTitlePattern(tab.title || '', params));
+    if (result.matched) {
+      const title = result.tab.title || '';
+      return { ok: true, assertion: 'toHaveTitle', title, elapsedMs: Date.now() - started };
     }
+    const lastTitle = result.tab?.title || '';
     throw createPageWaitTimeoutError({
       type: 'PageExpectTitleTimeout',
       code: 'PAGE_EXPECT_TITLE_TIMEOUT',
@@ -961,6 +1063,80 @@ export function createPageHandlers({
     await cdp(tabId, 'Emulation.setEmulatedMedia', { media: '', features: [] }).catch(() => {});
     await cdp(tabId, 'Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }).catch(() => {});
     return { ok: true };
+  }
+
+  async function waitForTabUpdateMatch(tabId, timeoutMs, intervalMs, predicate) {
+    const eventApi = chromeApi.tabs?.onUpdated;
+    if (!eventApi?.addListener || !eventApi?.removeListener) {
+      let lastTab = await chromeApi.tabs.get(tabId);
+      const started = Date.now();
+      while (Date.now() - started <= timeoutMs) {
+        if (predicate(lastTab)) return { matched: true, tab: lastTab };
+        await sleep(intervalMs);
+        lastTab = await chromeApi.tabs.get(tabId);
+      }
+      return { matched: predicate(lastTab), tab: lastTab };
+    }
+
+    let lastTab = await chromeApi.tabs.get(tabId);
+    if (predicate(lastTab)) return { matched: true, tab: lastTab };
+
+    return new Promise(resolve => {
+      let done = false;
+      let checking = false;
+      let checkAgain = false;
+      const fallbackMs = Math.max(intervalMs, 1000);
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      const fallback = setInterval(() => {
+        check().catch(() => finish(false));
+      }, fallbackMs);
+      const listener = (updatedTabId) => {
+        if (updatedTabId !== tabId) return;
+        check().catch(() => finish(false));
+      };
+
+      eventApi.addListener(listener);
+
+      async function check() {
+        if (done) return;
+        if (checking) {
+          checkAgain = true;
+          return;
+        }
+        checking = true;
+        try {
+          do {
+            checkAgain = false;
+            lastTab = await chromeApi.tabs.get(tabId);
+            if (predicate(lastTab)) {
+              finish(true);
+              return;
+            }
+          } while (checkAgain && !done);
+        } finally {
+          checking = false;
+        }
+      }
+
+      function finish(matched) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        clearInterval(fallback);
+        eventApi.removeListener(listener);
+        resolve({ matched, tab: lastTab });
+      }
+    });
+  }
+
+  async function waitForNetworkEvent(tabId, timeoutMs) {
+    if (typeof waitForNetworkActivity === 'function') return waitForNetworkActivity(tabId, timeoutMs);
+    return sleep(timeoutMs);
+  }
+
+  async function waitForDialogEvent(tabId, timeoutMs) {
+    if (typeof waitForDialogActivity === 'function') return waitForDialogActivity(tabId, timeoutMs);
+    return sleep(timeoutMs);
   }
 
   return {

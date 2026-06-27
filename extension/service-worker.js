@@ -36,6 +36,8 @@ const cdpEvents = [];
 const networkEventsByTab = new Map();
 const consoleEventsByTab = new Map();
 const dialogsByTab = new Map();
+const networkActivityWaitersByTab = new Map();
+const dialogActivityWaitersByTab = new Map();
 const cdpEventForwarding = {
   all: false,
   tabIds: new Set()
@@ -139,6 +141,8 @@ const pageHandlers = createPageHandlers({
   resolveFrameTarget: frameTargetResolver.resolveFrameTarget,
   networkEventsByTab,
   dialogsByTab,
+  waitForNetworkActivity,
+  waitForDialogActivity,
   defaultTimeoutMs: DEFAULT_TIMEOUT_MS
 });
 
@@ -378,15 +382,20 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   cdpEvents.push(event);
   if (cdpEvents.length > 1000) cdpEvents.shift();
   if (typeof tabId === 'number') {
-    if (method.startsWith('Network.')) pushLimited(networkEventsByTab, tabId, event, 500);
+    if (method.startsWith('Network.')) {
+      pushLimited(networkEventsByTab, tabId, event, 500);
+      notifyActivityWaiters(networkActivityWaitersByTab, tabId);
+    }
     if (method === 'Runtime.consoleAPICalled' || method === 'Runtime.exceptionThrown') {
       pushLimited(consoleEventsByTab, tabId, event, 200);
     }
     if (method === 'Page.javascriptDialogOpening') {
       dialogsByTab.set(tabId, { ...params, timestamp: event.timestamp });
+      notifyActivityWaiters(dialogActivityWaitersByTab, tabId);
     }
     if (method === 'Page.javascriptDialogClosed') {
       dialogsByTab.delete(tabId);
+      notifyActivityWaiters(dialogActivityWaitersByTab, tabId);
     }
     if (method === 'Fetch.requestPaused') {
       networkInterceptorController.handleRequestPaused(tabId, params).catch(async err => {
@@ -417,6 +426,8 @@ chrome.tabs.onRemoved.addListener(tabId => {
   networkEventsByTab.delete(tabId);
   consoleEventsByTab.delete(tabId);
   dialogsByTab.delete(tabId);
+  notifyActivityWaiters(networkActivityWaitersByTab, tabId);
+  notifyActivityWaiters(dialogActivityWaitersByTab, tabId);
   networkInterceptorController.onTabRemoved(tabId);
   sessionsHandlers.onTabRemoved(tabId).catch(() => {});
   recordingHandlers.onTabRemoved(tabId).catch(() => {});
@@ -1133,6 +1144,41 @@ function pushLimited(map, key, value, limit) {
   values.push(value);
   while (values.length > limit) values.shift();
   map.set(key, values);
+}
+
+function waitForNetworkActivity(tabId, timeoutMs) {
+  return waitForActivity(networkActivityWaitersByTab, tabId, timeoutMs);
+}
+
+function waitForDialogActivity(tabId, timeoutMs) {
+  return waitForActivity(dialogActivityWaitersByTab, tabId, timeoutMs);
+}
+
+function waitForActivity(waitersByTab, tabId, timeoutMs) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const waiters = waitersByTab.get(tabId);
+      if (waiters) {
+        waiters.delete(finish);
+        if (waiters.size === 0) waitersByTab.delete(tabId);
+      }
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    const waiters = waitersByTab.get(tabId) || new Set();
+    waiters.add(finish);
+    waitersByTab.set(tabId, waiters);
+  });
+}
+
+function notifyActivityWaiters(waitersByTab, tabId) {
+  const waiters = waitersByTab.get(tabId);
+  if (!waiters) return;
+  for (const finish of [...waiters]) finish();
 }
 
 function withTimeout(promise, timeoutMs, label) {
