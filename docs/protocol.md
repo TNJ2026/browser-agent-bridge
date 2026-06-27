@@ -551,6 +551,12 @@ without being covered by another element. Use `timeoutMs` and `intervalMs` to
 tune the wait, `strict:true` to require exactly one selector match,
 `stable:false` to skip the bounding-box stability check, or `force:true` to
 bypass actionability checks.
+On actionability timeout, the `dom.*` action methods raise a JSON-RPC error with
+`data.code: "DOM_ACTIONABILITY_TIMEOUT"` and `data.diagnostic` (selector, action,
+match counts, reasons, frame, and last element). A located element that has no
+usable click point uses `data.code: "DOM_ELEMENT_NOT_ACTIONABLE"`. This mirrors
+the `locator.*` diagnostics so both interaction surfaces report failures the
+same way.
 
 ```json
 { "tabId": 123, "selector": "button[type=submit]", "index": 0, "timeoutMs": 30000, "frameSelector": "iframe[name=app]" }

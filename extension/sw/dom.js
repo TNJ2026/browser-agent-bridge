@@ -95,7 +95,9 @@ export function createDomHandlers({
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     let frameTarget = await resolveFrameTarget(tabId, params);
     const target = params.force === true ? await getDomClickTarget(tabId, params, frameTarget) : await waitForDomActionable(tabId, params, 'click', frameTarget);
-    if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point: ${params.selector} at index ${index}`);
+    if (!target?.element?.clickPoint) {
+      throw createDomNotActionableError(`Element has no clickable point: ${params.selector} at index ${index}`, { selector: params.selector, index, action: 'dom.click' });
+    }
     if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, params);
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = target.element;
@@ -117,8 +119,12 @@ export function createDomHandlers({
     const target = params.force === true
       ? await getDomClickTarget(tabId, { ...params, selector: params.targetSelector, index: targetIndex }, frameTarget)
       : await waitForDomActionable(tabId, { ...params, selector: params.targetSelector, index: targetIndex }, 'click', frameTarget);
-    if (!source?.element?.clickPoint) throw new Error(`Source element has no draggable point: ${params.selector} at index ${sourceIndex}`);
-    if (!target?.element?.clickPoint) throw new Error(`Target element has no drop point: ${params.targetSelector} at index ${targetIndex}`);
+    if (!source?.element?.clickPoint) {
+      throw createDomNotActionableError(`Source element has no draggable point: ${params.selector} at index ${sourceIndex}`, { selector: params.selector, index: sourceIndex, action: 'dom.dragTo' });
+    }
+    if (!target?.element?.clickPoint) {
+      throw createDomNotActionableError(`Target element has no drop point: ${params.targetSelector} at index ${targetIndex}`, { selector: params.targetSelector, index: targetIndex, action: 'dom.dragTo' });
+    }
     if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, params);
     await dispatchRealDrag(tabId, applyFrameOffset(source.element.clickPoint, frameTarget), applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = { source: source.element, target: target.element };
@@ -804,8 +810,7 @@ export function createDomHandlers({
       await sleep(intervalMs);
     }
 
-    const reasons = last?.actionability?.reasons || ['not found'];
-    throw new Error(`Timed out waiting for selector ${params.selector} to be actionable for dom.${actionKind}: ${reasons.join(', ')}`);
+    throw createDomActionabilityTimeoutError(params, actionKind, frameTarget, last, Date.now() - started);
   }
 
   async function getDomClickTarget(tabId, params, frameTarget) {
@@ -1324,4 +1329,48 @@ export function createDomHandlers({
     domHover,
     domScroll
   };
+}
+
+// Structured errors for dom.* actions, mirroring the locator diagnostics so
+// every interaction surface attaches a stable error.code + error.diagnostic.
+function createDomActionabilityTimeoutError(params, actionKind, frameTarget, last, elapsedMs) {
+  const checks = (last && last.actionability) || {};
+  const reasons = domDiagnosticReasons(last, checks, params);
+  const diagnostic = {
+    type: 'DomActionabilityTimeout',
+    selector: params.selector,
+    action: `dom.${actionKind}`,
+    elapsedMs,
+    count: last?.count ?? 0,
+    visibleCount: last?.visibleCount ?? 0,
+    index: Number.isInteger(params.index) && params.index >= 0 ? params.index : 0,
+    strict: params.strict === true,
+    reasons,
+    actionability: { ...checks, stable: checks.stable === true },
+    element: last?.element || null,
+    frame: frameTarget?.frame || null
+  };
+  const error = new Error(`Timed out after ${elapsedMs}ms waiting for selector ${params.selector} to be actionable for dom.${actionKind}: ${reasons.join(', ')}`);
+  error.name = 'DomActionabilityTimeout';
+  error.code = 'DOM_ACTIONABILITY_TIMEOUT';
+  error.diagnostic = diagnostic;
+  return error;
+}
+
+function domDiagnosticReasons(last, checks, params) {
+  const reasons = Array.isArray(checks.reasons) && checks.reasons.length > 0 ? [...checks.reasons] : [];
+  if (params.strict === true && Number.isInteger(last?.count) && last.count !== 1) {
+    reasons.unshift(`strict mode expected 1 match, got ${last.count}`);
+  }
+  if (last?.found && checks.stable !== true && params.stable !== false) reasons.push('not stable');
+  if (reasons.length === 0) reasons.push(last?.found ? 'not actionable' : 'not found');
+  return Array.from(new Set(reasons));
+}
+
+function createDomNotActionableError(message, diagnostic) {
+  const error = new Error(message);
+  error.name = 'DomElementNotActionable';
+  error.code = 'DOM_ELEMENT_NOT_ACTIONABLE';
+  error.diagnostic = { type: 'DomElementNotActionable', ...diagnostic };
+  return error;
 }
