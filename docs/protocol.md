@@ -563,9 +563,13 @@ for same-origin nested DOM traversal.
 Finds elements using a Playwright-like locator shape. Locator fields can be
 passed directly or under `locator`. Supported fields are `selector`, `text`,
 `role`, `name`, `label`, `placeholder`, `hasText`, `hasNotText`,
-`hasAttribute`, `hasNotAttribute`, `exact`, `caseSensitive`, `visible`,
+`hasAttribute`, `hasNotAttribute`, `exact`, `regex`, `caseSensitive`, `visible`,
 `includeHidden`, `checked`, `disabled`, `expanded`, `pressed`, `selected`,
-`level`, `frameId`, `frameUrl`, and `frameSelector`. Role/name matching uses implicit HTML roles,
+`level`, `frameId`, `frameUrl`, and `frameSelector`. With `regex:true` the text
+matchers (`text`, `hasText`, `hasNotText`, `name`, `label`, `placeholder`) treat
+their value as a regular expression (case-insensitive unless `caseSensitive`),
+which is the precise way to narrow "matched too many"; an invalid pattern simply
+never matches. Role/name matching uses implicit HTML roles,
 explicit ARIA roles, `aria-label`, `aria-labelledby`, associated labels,
 heading levels, and common ARIA state filters. Locator matching pierces open
 shadow roots by default. Closed shadow roots remain inaccessible.
@@ -642,8 +646,8 @@ waits for the element to be visible and stable, then returns a `dataUrl`.
 
 Assertion-style waits for common locator conditions. The locator can be passed
 directly or under `locator`. Text and attribute assertions support
-`timeoutMs`, `intervalMs`, `contains`, `caseSensitive`, and
-`normalizeWhitespace`.
+`timeoutMs`, `intervalMs`, `contains`, `caseSensitive`, `normalizeWhitespace`,
+and `regex:true` (match the expected value as a regular expression).
 
 ```json
 { "tabId": 123, "locator": { "role": "button", "name": "Save" } }

@@ -1406,6 +1406,13 @@ export function createLocatorHandlers({
         }
 
         function matchesText(value, expected, locator) {
+          if (locator.regex === true) {
+            try {
+              return new RegExp(String(expected), locator.caseSensitive ? '' : 'i').test(String(value));
+            } catch {
+              return false;
+            }
+          }
           const source = locator.caseSensitive ? String(value) : String(value).toLowerCase();
           const needle = locator.caseSensitive ? String(expected) : String(expected).toLowerCase();
           return locator.exact ? source.trim() === needle.trim() : source.includes(needle);
@@ -1536,6 +1543,7 @@ export function createLocatorHandlers({
       hasNotAttribute: objectOrNull(params.hasNotAttribute, nested.hasNotAttribute),
       frameSelector: pickString('frameSelector'),
       exact: params.exact === true || nested.exact === true,
+      regex: params.regex === true || nested.regex === true,
       caseSensitive: params.caseSensitive === true || nested.caseSensitive === true,
       includeHidden: params.includeHidden === true || nested.includeHidden === true,
       visible: booleanOrNull(params.visible, nested.visible),
@@ -1659,6 +1667,13 @@ export function createLocatorHandlers({
   }
 
   function matchesExpectedTextValue(actual, expected, params) {
+    if (params.regex === true) {
+      try {
+        return new RegExp(String(expected), params.caseSensitive === true ? '' : 'i').test(String(actual ?? ''));
+      } catch {
+        return false;
+      }
+    }
     const normalizeWhitespace = params.normalizeWhitespace !== false;
     const contains = params.contains === true;
     const caseSensitive = params.caseSensitive === true;
