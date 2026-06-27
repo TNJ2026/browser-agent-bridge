@@ -316,6 +316,7 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Page | `page.dismissDialog` | Dismiss the current JavaScript dialog. |
 | Page | `page.readText` | Extract visible page text. |
 | Page | `page.accessibilityTree` | Get a structured accessibility tree. |
+| Page | `page.ariaSnapshot` | Get a compact ARIA role/name snapshot for LLM perception. |
 | Page | `page.screenshot` | Capture a page screenshot. |
 | Page | `page.domSnapshot` | Get a CDP DOM snapshot. |
 | Interactive | `locator.allTextContents` | Extract text from all matching locators. |

@@ -546,6 +546,10 @@ async function dispatchRpc(request) {
       return pageHandlers.pageReadText(params);
     case 'page.accessibilityTree':
       return pageHandlers.pageAccessibilityTree(params);
+    case 'page.ariaSnapshot':
+      return pageHandlers.pageAriaSnapshot(params);
+    case 'expect.page.toMatchAriaSnapshot':
+      return pageHandlers.pageExpectAriaSnapshot(params);
     case 'page.screenshot':
       return pageHandlers.pageScreenshot(params);
     case 'page.executeJavaScript':
@@ -736,6 +740,8 @@ async function extensionInfo() {
       'page.waitForText',
       'page.readText',
       'page.accessibilityTree',
+      'page.ariaSnapshot',
+      'expect.page.toMatchAriaSnapshot',
       'page.screenshot',
       'page.executeJavaScript',
       'page.domSnapshot',
