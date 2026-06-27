@@ -2013,6 +2013,27 @@ export function createLocatorHandlers({
     return Object.fromEntries(Object.entries(locator).filter(([, value]) => value !== null));
   }
 
+  async function locatorBoundingBox(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.boundingBox');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    // summarize only requires the element to exist; do not scroll the page.
+    const result = await runLocatorScript(tabId, { ...params, index, scrollIntoView: false }, 'summarize', frameTarget);
+    const rect = result.element?.rect || null;
+    return { boundingBox: rect, element: result.element, frame: frameTarget.frame };
+  }
+
+  async function locatorFocus(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.focus');
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const result = await runLocatorScript(tabId, { ...params, index, force: true }, 'focus', frameTarget);
+    await recordAction(tabId, 'locator.focus', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
+    return { ok: true, element: result.element, frame: frameTarget.frame };
+  }
+
   return {
     locatorCount,
     locatorTextContent,
@@ -2023,6 +2044,8 @@ export function createLocatorHandlers({
     locatorFirst,
     locatorLast,
     locatorWaitFor,
+    locatorBoundingBox,
+    locatorFocus,
     expectLocatorToBeVisible,
     expectLocatorToBeHidden,
     expectLocatorToBeEnabled,

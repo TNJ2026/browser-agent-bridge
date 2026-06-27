@@ -820,6 +820,25 @@ different value, use the nested form.
 { "tabId": 123, "label": "Search", "text": "browser bridge" }
 ```
 
+### `locator.focus`
+
+Focuses the matched element (without clicking) and records the action. Accepts
+the usual locator fields and `index`.
+
+```json
+{ "tabId": 123, "selector": "input[name=q]" }
+```
+
+### `locator.boundingBox`
+
+Returns the matched element's `boundingBox` (`getBoundingClientRect`, in the
+element's frame viewport coordinates) plus the element summary. Read-only — it
+does not scroll the page or focus the element.
+
+```json
+{ "tabId": 123, "role": "button", "name": "Submit" }
+```
+
 ```json
 { "tabId": 123, "locator": { "text": "Search" }, "value": "browser bridge" }
 ```

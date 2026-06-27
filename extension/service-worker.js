@@ -248,6 +248,8 @@ const rpcRouter = {
   'locator.first': (params) => locatorHandlers.locatorFirst(params),
   'locator.last': (params) => locatorHandlers.locatorLast(params),
   'locator.waitFor': (params) => locatorHandlers.locatorWaitFor(params),
+  'locator.boundingBox': (params) => locatorHandlers.locatorBoundingBox(params),
+  'locator.focus': (params) => locatorHandlers.locatorFocus(params),
 
   // locator assertions
   'expect.locator.toBeVisible': (params) => locatorHandlers.expectLocatorToBeVisible(params),
@@ -731,6 +733,7 @@ async function extensionInfo() {
     name: chrome.runtime.getManifest().name,
     version: chrome.runtime.getManifest().version,
     extensionId: chrome.runtime.id,
+    nativeStatus,
     tools: Object.keys(rpcRouter).filter(method => method !== 'permission.check')
   };
 }
@@ -1237,6 +1240,7 @@ function getMethodCategory(method, params = {}) {
   if (
     method === 'dom.type' ||
     method === 'locator.fill' ||
+    method === 'locator.focus' ||
     method === 'locator.press' ||
     method === 'locator.pressSequentially' ||
     method === 'computer.type' ||
