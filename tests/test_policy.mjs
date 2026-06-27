@@ -50,15 +50,16 @@ test('assertUrlAllowed blocks chrome:// by default and reports matched pattern',
   await h.assertUrlAllowed('https://example.com/', 'navigate'); // not blocked
 });
 
-test('KNOWN GAP: default chromewebstore pattern does NOT block real https URLs', async () => {
-  // urlPatternMatches anchors ^...$, and the default pattern lacks a scheme
-  // wildcard, so `chromewebstore.google.com/*` never matches a full URL like
-  // `https://chromewebstore.google.com/...`. The default web-store block is
-  // therefore ineffective. Pinned here as current behavior; flip if fixed to
-  // e.g. `*://chromewebstore.google.com/*`.
+test('default chromewebstore pattern blocks real https URLs', async () => {
+  // The default blockedUrlPatterns entry `*://chromewebstore.google.com/*` has a
+  // scheme wildcard so urlPatternMatches (^...$ anchored) matches full URLs like
+  // `https://chromewebstore.google.com/...`. assertUrlAllowed must reject them.
   const { createPolicyHandlers } = await importPolicyModule();
   const h = createPolicyHandlers({ chromeApi: fakeChrome() });
-  await h.assertUrlAllowed('https://chromewebstore.google.com/detail/foo', 'navigate');
+  await assert.rejects(
+    () => h.assertUrlAllowed('https://chromewebstore.google.com/detail/foo', 'navigate'),
+    /blocked by policy.*matched \*:\/\/chromewebstore\.google\.com\/\*/
+  );
 });
 
 test('allowedUrlPatterns override blockedUrlPatterns', async () => {
