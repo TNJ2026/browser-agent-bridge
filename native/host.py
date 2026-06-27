@@ -161,7 +161,11 @@ def handle_native_message(message):
 
     # Check ping
     if message.get("type") == "ping":
-        write_native_message({"type": "pong"})
+        write_native_message({
+            "type": "pong",
+            "timestamp": message.get("timestamp"),
+            "now": int(time.time() * 1000)
+        })
 
 def native_reader_loop():
     while True:

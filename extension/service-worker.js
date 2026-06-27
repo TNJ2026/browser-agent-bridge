@@ -19,11 +19,15 @@ const DEFAULT_TIMEOUT_MS = 30000;
 const PERMISSION_PROMPT_TIMEOUT_MS = 60000;
 const APPROVAL_NOTIFICATION_ID = 'browser-agent-bridge-permission-approval';
 const APPROVAL_POPUP_PATH = 'approval.html';
+const NATIVE_HEARTBEAT_ALARM = 'browser-agent-bridge-native-heartbeat';
+const NATIVE_HEARTBEAT_PERIOD_MINUTES = 0.5;
+const NATIVE_HEARTBEAT_STALE_MS = 90000;
 
 let nativePort = null;
 let nextRequestId = 1;
 let reconnectTimer = null;
 let bridgeEnabledCache = false;
+let lastNativePongAt = null;
 let nativeStatus = {
   state: 'stopped',
   hostName: NATIVE_HOST,
@@ -360,6 +364,9 @@ chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === CSP_BYPASS_ALARM) {
     cspHandlers.clearTemporaryCspBypass().catch(err => console.error('Error clearing temporary CSP bypass:', err));
   }
+  if (alarm.name === NATIVE_HEARTBEAT_ALARM) {
+    nativeHeartbeatTick().catch(err => console.error('Error running native heartbeat:', err));
+  }
 });
 
 chrome.notifications.onClicked.addListener(notificationId => {
@@ -472,10 +479,12 @@ async function connectNative() {
 
   const result = await chrome.storage.local.get('agreedToDisclaimer');
   if (result.agreedToDisclaimer !== true) {
+    await clearNativeHeartbeatAlarm();
     setNativeStatus('disconnected', 'Pending disclaimer agreement');
     return;
   }
   if (!await getBridgeEnabled()) {
+    await clearNativeHeartbeatAlarm();
     setNativeStatus('stopped', 'Bridge stopped');
     return;
   }
@@ -490,6 +499,10 @@ async function connectNative() {
 
   setNativeStatus('connected');
   nativePort.onMessage.addListener(message => {
+    if (message && message.type === 'pong') {
+      markNativePong();
+      return;
+    }
     if (message && message.jsonrpc === '2.0' && 'id' in message && !('method' in message)) {
       settleNativeResponse(message);
       return;
@@ -519,6 +532,7 @@ async function connectNative() {
         setNativeStatus('disconnected', error);
         scheduleReconnect();
       } else {
+        clearNativeHeartbeatAlarm().catch(() => {});
         setNativeStatus('stopped', 'Bridge stopped');
       }
     }).catch(() => {
@@ -528,6 +542,8 @@ async function connectNative() {
 
   const portResult = await chrome.storage.local.get('bridgePort');
   const port = Number.isInteger(portResult.bridgePort) ? portResult.bridgePort : 8765;
+  lastNativePongAt = Date.now();
+  await ensureNativeHeartbeatAlarm();
 
   sendNativeNotification('extension.ready', {
     version: chrome.runtime.getManifest().version,
@@ -536,6 +552,7 @@ async function connectNative() {
   });
 
   await pushSettingsToNative();
+  sendNativePing();
 }
 
 async function pushSettingsToNative() {
@@ -557,12 +574,54 @@ function scheduleReconnect() {
   }, 3000);
 }
 
+async function ensureNativeHeartbeatAlarm() {
+  await chrome.alarms.create(NATIVE_HEARTBEAT_ALARM, { periodInMinutes: NATIVE_HEARTBEAT_PERIOD_MINUTES }).catch(() => {});
+}
+
+async function clearNativeHeartbeatAlarm() {
+  await chrome.alarms.clear(NATIVE_HEARTBEAT_ALARM).catch(() => {});
+}
+
+async function nativeHeartbeatTick() {
+  if (!await getBridgeEnabled()) {
+    await clearNativeHeartbeatAlarm();
+    return;
+  }
+  await connectNative();
+  if (!nativePort) return;
+  if (lastNativePongAt && Date.now() - lastNativePongAt > NATIVE_HEARTBEAT_STALE_MS) {
+    setNativeStatus('disconnected', 'Native heartbeat timed out');
+  }
+  sendNativePing();
+}
+
+function sendNativePing() {
+  if (!nativePort) return;
+  try {
+    nativePort.postMessage({ type: 'ping', timestamp: Date.now() });
+  } catch {}
+}
+
+function markNativePong() {
+  lastNativePongAt = Date.now();
+  nativeStatus = {
+    ...nativeStatus,
+    state: 'connected',
+    lastChecked: lastNativePongAt,
+    lastHeartbeatAt: lastNativePongAt
+  };
+  delete nativeStatus.error;
+  chrome.storage.local.set({ nativeStatus }).catch(() => {});
+  chrome.runtime.sendMessage({ type: 'NATIVE_STATUS_CHANGED', status: nativeStatus }).catch(() => {});
+}
+
 function setNativeStatus(state, error) {
   nativeStatus = {
     state,
     hostName: NATIVE_HOST,
     bridgeEnabled: bridgeEnabledCache,
     lastChecked: Date.now(),
+    ...(lastNativePongAt ? { lastHeartbeatAt: lastNativePongAt } : {}),
     ...(error ? { error } : {})
   };
   chrome.storage.local.set({ nativeStatus }).catch(() => {});
@@ -618,12 +677,14 @@ async function handleRuntimeMessage(message, sender) {
 async function startBridge() {
   await chrome.storage.local.set({ bridgeEnabled: true });
   bridgeEnabledCache = true;
+  await ensureNativeHeartbeatAlarm();
   await connectNative();
   return nativeStatus;
 }
 
 async function stopBridge() {
   clearTimeout(reconnectTimer);
+  await clearNativeHeartbeatAlarm();
   await chrome.storage.local.set({ bridgeEnabled: false });
   bridgeEnabledCache = false;
   if (nativePort) {

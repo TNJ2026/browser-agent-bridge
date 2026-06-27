@@ -155,6 +155,17 @@ class TestHostUtilities(unittest.TestCase):
             })
             self.assertEqual(host.EXTENSION_ID, "")
 
+    def test_native_ping_replies_with_pong(self):
+        sent = []
+        host.write_native_message = sent.append
+
+        host.handle_native_message({"type": "ping", "timestamp": 1234})
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["type"], "pong")
+        self.assertEqual(sent[0]["timestamp"], 1234)
+        self.assertIsInstance(sent[0]["now"], int)
+
     def test_get_site_patterns(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
