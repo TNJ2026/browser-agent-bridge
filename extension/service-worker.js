@@ -248,6 +248,8 @@ const rpcRouter = {
   'locator.first': (params) => locatorHandlers.locatorFirst(params),
   'locator.last': (params) => locatorHandlers.locatorLast(params),
   'locator.waitFor': (params) => locatorHandlers.locatorWaitFor(params),
+  'locator.boundingBox': (params) => locatorHandlers.locatorBoundingBox(params),
+  'locator.focus': (params) => locatorHandlers.locatorFocus(params),
 
   // locator assertions
   'expect.locator.toBeVisible': (params) => locatorHandlers.expectLocatorToBeVisible(params),
@@ -797,6 +799,8 @@ async function extensionInfo() {
       'locator.first',
       'locator.last',
       'locator.waitFor',
+      'locator.boundingBox',
+      'locator.focus',
       'expect.locator.toBeVisible',
       'expect.locator.toBeHidden',
       'expect.locator.toBeEnabled',
@@ -1351,6 +1355,7 @@ function getMethodCategory(method, params = {}) {
   if (
     method === 'dom.type' ||
     method === 'locator.fill' ||
+    method === 'locator.focus' ||
     method === 'locator.press' ||
     method === 'locator.pressSequentially' ||
     method === 'computer.type' ||
