@@ -321,6 +321,12 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Page | `page.ariaSnapshot` | Get a compact ARIA role/name snapshot for LLM perception. |
 | Page | `page.screenshot` | Capture a page screenshot. |
 | Page | `page.domSnapshot` | Get a CDP DOM snapshot. |
+| Page | `page.setViewport` | Emulate viewport size and device scale. |
+| Page | `page.emulateMedia` | Emulate color scheme, media type, reduced motion. |
+| Page | `page.setGeolocation` | Override the tab's geolocation. |
+| Page | `page.setLocale` | Override locale and timezone. |
+| Page | `page.setOffline` | Toggle offline network emulation. |
+| Page | `page.clearEmulation` | Clear emulation overrides. |
 | Interactive | `locator.allTextContents` | Extract text from all matching locators. |
 | Interactive | `locator.first` | Get first/last/nth locator summaries. |
 | Interactive | `expect.locator.toHaveText` | Wait for locator assertions to pass. |

@@ -564,6 +564,18 @@ async function dispatchRpc(request) {
       return pageHandlers.pageExecuteJavaScript(params);
     case 'page.domSnapshot':
       return pageHandlers.pageDomSnapshot(params);
+    case 'page.setViewport':
+      return pageHandlers.pageSetViewport(params);
+    case 'page.emulateMedia':
+      return pageHandlers.pageEmulateMedia(params);
+    case 'page.setGeolocation':
+      return pageHandlers.pageSetGeolocation(params);
+    case 'page.setLocale':
+      return pageHandlers.pageSetLocale(params);
+    case 'page.setOffline':
+      return pageHandlers.pageSetOffline(params);
+    case 'page.clearEmulation':
+      return pageHandlers.pageClearEmulation(params);
     case 'dom.query':
       return domHandlers.domQuery(params);
     case 'dom.click':
@@ -769,6 +781,12 @@ async function extensionInfo() {
       'page.screenshot',
       'page.executeJavaScript',
       'page.domSnapshot',
+      'page.setViewport',
+      'page.emulateMedia',
+      'page.setGeolocation',
+      'page.setLocale',
+      'page.setOffline',
+      'page.clearEmulation',
       'dom.query',
       'dom.click',
       'dom.dragTo',
