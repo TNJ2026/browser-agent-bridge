@@ -12,6 +12,7 @@ import { createTraceHandlers } from './sw/tracing.js';
 import { createFrameTargetResolver } from './sw/frames.js';
 import { createKeyboardDispatcher, createKeyboardHandlers } from './sw/keyboard.js';
 import { createNetworkInterceptorController } from './sw/network-interceptors.js';
+import { isTabTargetedMethod } from './sw/tab-scope.js';
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
@@ -903,22 +904,6 @@ function normalizeTab(tab) {
     url: tab.url,
     status: tab.status
   };
-}
-
-function isTabTargetedMethod(method) {
-  return (
-    method.startsWith('page.') ||
-    method.startsWith('expect.page.') ||
-    method.startsWith('dom.') ||
-    method.startsWith('locator.') ||
-    method.startsWith('expect.locator.') ||
-    method.startsWith('computer.') ||
-    method.startsWith('keyboard.') ||
-    method.startsWith('network.') ||
-    method.startsWith('console.') ||
-    method === 'indicator.set' ||
-    method === 'cookies.get'
-  );
 }
 
 async function assertRpcTabIsolation(method, params = {}) {
