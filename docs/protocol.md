@@ -1085,6 +1085,24 @@ Retrieves collected network request events for the specified tab.
 { "tabId": 123, "limit": 100 }
 ```
 
+### `cookies.get`
+
+Reads cookies for a tab via CDP `Network.getCookies`. **Sensitive and
+read-only**: it can return httpOnly session tokens (which page JavaScript cannot
+read), so it uses its own `cookies` approval category that is **never
+auto-allowed inside the Agent boundary** — every call prompts for approval
+(unless runtime approval is disabled or the category was session-allowed). There
+are intentionally no cookie write/delete methods.
+
+Each cookie returns `name`, `domain`, `path`, `expires`, `size`, `httpOnly`,
+`secure`, `sameSite`, and `session`. Values are **redacted by default**
+(`valueLength` only); pass `includeValues:true` to receive the raw `value`.
+Optional `urls` (array) scopes the query; `name`/`domain` filter the result.
+
+```json
+{ "tabId": 123, "name": "session_id", "includeValues": false }
+```
+
 ### `network.setBlockedUrls`
 
 Blocks network requests matching specified URL patterns for the target tab. Pass an empty array `[]` to clear all blocked URLs.

@@ -390,4 +390,5 @@ check on every pull request.
 - If the side panel is closed, sensitive calls trigger a Chrome notification and open an extension approval popup.
 - The Native Messaging host is not started by default. Use Start Bridge in the side panel to run it, and Stop Bridge to disconnect it and pause automatic reconnects.
 - Workflow recordings redact typed text by default unless `includeText: true` is explicitly used.
+- `cookies.get` (read-only) can expose httpOnly session tokens, so it always requires approval (its own `cookies` category is never auto-allowed in-boundary) and redacts cookie values unless `includeValues: true`.
 - The default policy blocks automation on `chrome://*`, `chrome-extension://*`, and Chrome Web Store pages.

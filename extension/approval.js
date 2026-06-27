@@ -23,6 +23,10 @@ function getCategoryLabel(category) {
       zh: '读取标签页列表 (获取您当前打开的所有标签页标题和网址)',
       en: 'Read tab list (access titles and URLs of all your open tabs)'
     },
+    cookies: {
+      zh: '读取该页面的 Cookie，包括 httpOnly 会话令牌（敏感）',
+      en: 'Read this page\'s cookies, including httpOnly session tokens (sensitive)'
+    },
     tab_control: {
       zh: '关闭或停止 Agent 管理的标签页/会话',
       en: 'Close tabs or stop browser sessions managed by the Agent'
