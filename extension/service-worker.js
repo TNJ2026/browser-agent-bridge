@@ -905,6 +905,22 @@ function normalizeTab(tab) {
   };
 }
 
+function isTabTargetedMethod(method) {
+  return (
+    method.startsWith('page.') ||
+    method.startsWith('expect.page.') ||
+    method.startsWith('dom.') ||
+    method.startsWith('locator.') ||
+    method.startsWith('expect.locator.') ||
+    method.startsWith('computer.') ||
+    method.startsWith('keyboard.') ||
+    method.startsWith('network.') ||
+    method.startsWith('console.') ||
+    method === 'indicator.set' ||
+    method === 'cookies.get'
+  );
+}
+
 async function assertRpcTabIsolation(method, params = {}) {
   if (method === 'tabs.list') {
     if (typeof params.query?.groupId !== 'number') {
@@ -955,34 +971,7 @@ async function assertRpcTabIsolation(method, params = {}) {
     return;
   }
 
-
-
-  if (method === 'indicator.set') {
-    await assertAgentManagedTabs([assertTabId(params.tabId)], method);
-    return;
-  }
-
-  if (method === 'cookies.get') {
-    await assertAgentManagedTabs([assertTabId(params.tabId)], method);
-    return;
-  }
-
-  if (
-    method.startsWith('page.') ||
-    method.startsWith('dom.') ||
-    method.startsWith('locator.') ||
-    method.startsWith('computer.') ||
-    method === 'console.read' ||
-    method === 'network.read' ||
-    method === 'network.getResponseBody' ||
-    method === 'network.setBlockedUrls' ||
-    method === 'network.setInterceptors' ||
-    method === 'network.routeFromHAR' ||
-    method === 'network.interceptors.clear' ||
-    method === 'network.interceptors.events' ||
-    method === 'network.interceptors.clearEvents' ||
-    method === 'network.interceptors.status'
-  ) {
+  if (isTabTargetedMethod(method)) {
     await assertAgentManagedTabs([assertTabId(params.tabId)], method);
   }
 }
@@ -1333,23 +1322,10 @@ async function isAgentTabGroupOperation(method, params = {}) {
     const tabIds = Array.isArray(params.tabIds) ? params.tabIds : [params.tabId];
     return sessionsHandlers.areAgentManagedTabs(tabIds);
   }
-  if (
-    method.startsWith('page.') ||
-    method.startsWith('dom.') ||
-    method.startsWith('locator.') ||
-    method.startsWith('computer.') ||
-    method === 'console.read' ||
-    method === 'network.read' ||
-    method === 'network.getResponseBody' ||
-    method === 'network.setBlockedUrls' ||
-    method === 'network.setInterceptors' ||
-    method === 'network.routeFromHAR' ||
-    method === 'network.interceptors.clear' ||
-    method === 'network.interceptors.events' ||
-    method === 'network.interceptors.clearEvents' ||
-    method === 'network.interceptors.status' ||
-    method === 'indicator.set'
-  ) {
+  if (isTabTargetedMethod(method)) {
+    // cookies.get exposes sensitive httpOnly session tokens, so we never
+    // auto-allow it in-boundary without prompting for approval.
+    if (method === 'cookies.get') return false;
     if (params.tabId == null) return false;
     return sessionsHandlers.areAgentManagedTabs([params.tabId]);
   }
