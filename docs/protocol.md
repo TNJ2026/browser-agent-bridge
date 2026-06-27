@@ -276,7 +276,10 @@ Closes one tab from an Agent session and removes it from the session metadata.
 
 ### `session.stop`
 
-Ungroups tabs by default. Set `closeTabs` to close managed tabs.
+Ungroups tabs by default. Set `closeTabs` to close managed tabs. When tabs stay
+open, their CDP debugger is detached so the "DevTools is debugging this browser"
+banner clears. Clicking Stop Bridge detaches every attached tab for the same
+reason.
 
 ```json
 { "sessionId": "uuid", "closeTabs": false }
