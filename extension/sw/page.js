@@ -1065,6 +1065,37 @@ export function createPageHandlers({
     return { ok: true };
   }
 
+  async function pageSetExtraHTTPHeaders(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.setExtraHTTPHeaders');
+    if (!params.headers || typeof params.headers !== 'object' || Array.isArray(params.headers)) {
+      throw new Error('page.setExtraHTTPHeaders requires a headers object');
+    }
+    const headers = {};
+    for (const [name, value] of Object.entries(params.headers)) {
+      if (typeof name === 'string' && name) headers[name] = String(value);
+    }
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Network.enable').catch(() => {});
+    await cdp(tabId, 'Network.setExtraHTTPHeaders', { headers });
+    // Record header names only; values may be auth tokens.
+    await recordAction(tabId, 'page.setExtraHTTPHeaders', { headers: Object.keys(headers) });
+    return { ok: true, headers: Object.keys(headers) };
+  }
+
+  async function pageSetUserAgent(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.setUserAgent');
+    assertString(params.userAgent, 'userAgent');
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Emulation.setUserAgentOverride', {
+      userAgent: params.userAgent,
+      ...(typeof params.acceptLanguage === 'string' && params.acceptLanguage ? { acceptLanguage: params.acceptLanguage } : {}),
+      ...(typeof params.platform === 'string' && params.platform ? { platform: params.platform } : {})
+    });
+    return { ok: true };
+  }
+
   async function waitForTabUpdateMatch(tabId, timeoutMs, intervalMs, predicate) {
     const eventApi = chromeApi.tabs?.onUpdated;
     if (!eventApi?.addListener || !eventApi?.removeListener) {
@@ -1169,7 +1200,9 @@ export function createPageHandlers({
     pageSetGeolocation,
     pageSetLocale,
     pageSetOffline,
-    pageClearEmulation
+    pageClearEmulation,
+    pageSetExtraHTTPHeaders,
+    pageSetUserAgent
   };
 }
 

@@ -327,6 +327,8 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Page | `page.setLocale` | Override locale and timezone. |
 | Page | `page.setOffline` | Toggle offline network emulation. |
 | Page | `page.clearEmulation` | Clear emulation overrides. |
+| Page | `page.setExtraHTTPHeaders` | Add extra HTTP headers to the tab's requests. |
+| Page | `page.setUserAgent` | Override the tab's user agent. |
 | Interactive | `locator.allTextContents` | Extract text from all matching locators. |
 | Interactive | `locator.first` | Get first/last/nth locator summaries. |
 | Interactive | `expect.locator.toHaveText` | Wait for locator assertions to pass. |

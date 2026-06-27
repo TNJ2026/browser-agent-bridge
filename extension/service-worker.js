@@ -226,6 +226,8 @@ const rpcRouter = {
   'page.setLocale': (params) => pageHandlers.pageSetLocale(params),
   'page.setOffline': (params) => pageHandlers.pageSetOffline(params),
   'page.clearEmulation': (params) => pageHandlers.pageClearEmulation(params),
+  'page.setExtraHTTPHeaders': (params) => pageHandlers.pageSetExtraHTTPHeaders(params),
+  'page.setUserAgent': (params) => pageHandlers.pageSetUserAgent(params),
 
   // dom
   'dom.query': (params) => domHandlers.domQuery(params),
@@ -779,6 +781,8 @@ async function extensionInfo() {
       'page.setLocale',
       'page.setOffline',
       'page.clearEmulation',
+      'page.setExtraHTTPHeaders',
+      'page.setUserAgent',
       'dom.query',
       'dom.click',
       'dom.dragTo',

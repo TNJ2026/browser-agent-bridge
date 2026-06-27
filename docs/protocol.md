@@ -514,10 +514,19 @@ resets device metrics, geolocation, media, and network conditions.
 - `page.setLocale` — `Emulation.setLocaleOverride` + `setTimezoneOverride`
   (`locale`, `timezone`).
 - `page.setOffline` — `Network.emulateNetworkConditions` (`offline`).
-- `page.clearEmulation` — clears the above overrides.
+- `page.setExtraHTTPHeaders` — `Network.setExtraHTTPHeaders` (`headers` object
+  added to every request for the tab; the result and recordings list header
+  names only, since values may be auth tokens).
+- `page.setUserAgent` — `Emulation.setUserAgentOverride` (`userAgent`, optional
+  `acceptLanguage`, `platform`).
+- `page.clearEmulation` — clears the device/geolocation/media/network overrides.
 
 ```json
 { "tabId": 123, "width": 390, "height": 844, "deviceScaleFactor": 3, "mobile": true }
+```
+
+```json
+{ "tabId": 123, "headers": { "X-Tenant": "acme" } }
 ```
 
 ```json
