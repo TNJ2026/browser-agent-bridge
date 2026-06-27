@@ -1706,36 +1706,18 @@ export function createLocatorHandlers({
           ].join(',');
         }
 
-        function cssEscape(value) {
-          if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
-          return String(value).replace(/["\\]/g, '\\$&');
-        }
-
+        // Deep DOM query helpers live in the shared dom-a11y atom; delegate so
+        // the logic has a single, unit-tested home.
         function querySelectorDeep(root, selector) {
-          return querySelectorAllDeep(root, selector)[0] || null;
+          return domA11y.querySelectorDeep(root, selector);
         }
 
         function querySelectorAllDeep(root, selector) {
-          const results = [];
-          const visited = new Set();
-          visitRoot(root);
-          return results;
-
-          function visitRoot(currentRoot) {
-            if (!currentRoot || visited.has(currentRoot)) return;
-            visited.add(currentRoot);
-            if (typeof currentRoot.querySelectorAll === 'function') {
-              results.push(...currentRoot.querySelectorAll(selector));
-              for (const element of currentRoot.querySelectorAll('*')) {
-                if (element.shadowRoot) visitRoot(element.shadowRoot);
-              }
-            }
-          }
+          return domA11y.querySelectorAllDeep(root, selector);
         }
 
         function getElementByIdDeep(root, id) {
-          const escaped = cssEscape(id);
-          return querySelectorDeep(root, `#${escaped}`);
+          return domA11y.getElementByIdDeep(root, id);
         }
 
         function describeLocator(locator) {

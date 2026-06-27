@@ -148,6 +148,10 @@
     implicitRole,
     firstExplicitRole,
     visibleText,
-    isAriaHidden
+    isAriaHidden,
+    cssEscape,
+    querySelectorDeep,
+    querySelectorAllDeep,
+    getElementByIdDeep
   };
 })();
