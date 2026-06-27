@@ -492,49 +492,36 @@ export function createLocatorHandlers({
     const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
     const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
     const started = Date.now();
-    let previousRect = null;
-    let last = null;
-
-    while (Date.now() - started <= timeoutMs) {
-      const result = await runLocatorScript(tabId, { ...params, actionKind }, 'actionability', frameTarget);
-      last = result;
-
-      if (params.strict === true && result.count !== 1) {
-        last = {
-          ...result,
-          actionability: {
-            ...(result.actionability || {}),
-            stable: false,
-            reasons: [`strict mode expected 1 match, got ${result.count}`]
-          }
-        };
-        await sleep(intervalMs);
-        continue;
+    const last = await runLocatorScript(tabId, {
+      ...params,
+      actionKind,
+      wait: {
+        kind: 'actionability',
+        actionKind,
+        timeoutMs,
+        intervalMs,
+        strict: params.strict === true,
+        requireStable: params.stable !== false
       }
+    }, 'actionability', frameTarget);
 
-      const rect = result.element?.rect || null;
-      const stable = params.stable === false || (rect && previousRect && rectsAlmostEqual(rect, previousRect));
-      const checks = result.actionability || {};
-      last = { ...result, actionability: { ...checks, stable: stable === true } };
-      const ready = result.found &&
-        checks.visible === true &&
-        (actionKind === 'screenshot' || checks.enabled === true) &&
-        (actionKind !== 'click' || checks.receivesEvents === true) &&
-        stable === true &&
-        (actionKind !== 'fill' || checks.editable === true) &&
-        (actionKind !== 'select' || checks.selectable === true);
+    const checks = last?.actionability || {};
+    const ready = last?.found &&
+      checks.visible === true &&
+      (actionKind === 'screenshot' || checks.enabled === true) &&
+      (actionKind !== 'click' || checks.receivesEvents === true) &&
+      checks.stable === true &&
+      (actionKind !== 'fill' || checks.editable === true) &&
+      (actionKind !== 'select' || checks.selectable === true) &&
+      (params.strict !== true || last.count === 1);
 
-      if (ready) {
-        return {
-          ok: true,
-          elapsedMs: Date.now() - started,
-          element: result.element,
-          actionability: { ...checks, stable: true, strict: params.strict === true }
-        };
-      }
-
-      if (rect) previousRect = rect;
-      await sleep(intervalMs);
+    if (ready) {
+      return {
+        ok: true,
+        elapsedMs: Date.now() - started,
+        element: last.element,
+        actionability: { ...checks, stable: true, strict: params.strict === true }
+      };
     }
 
     if (params.strict === true && (last?.count ?? 0) > 1) {
@@ -729,13 +716,6 @@ export function createLocatorHandlers({
       world: 'MAIN'
     });
     return typeof result === 'number' && result > 0 ? result : 1;
-  }
-
-  function rectsAlmostEqual(a, b) {
-    return Math.abs(a.x - b.x) < 0.5 &&
-      Math.abs(a.y - b.y) < 0.5 &&
-      Math.abs(a.width - b.width) < 0.5 &&
-      Math.abs(a.height - b.height) < 0.5;
   }
 
   async function dispatchRealClick(tabId, point, params) {
@@ -985,6 +965,7 @@ export function createLocatorHandlers({
             const observers = [];
             let done = false;
             let last = null;
+            let previousRect = null;
             let checkQueued = false;
             let observedRoots = new Set();
 
@@ -1045,6 +1026,11 @@ export function createLocatorHandlers({
               try {
                 observeCurrentRoots(root);
                 last = locatorSnapshot(root, options);
+                if (options.wait.kind === 'actionability') {
+                  const annotated = annotateActionabilitySnapshot(last, options.wait, previousRect);
+                  last = annotated.snapshot;
+                  previousRect = annotated.nextRect;
+                }
                 if (locatorWaitSatisfied(last, options.wait)) finish(last);
                 else if (Date.now() - started >= timeoutMs) finish(last);
               } catch (error) {
@@ -1069,14 +1055,58 @@ export function createLocatorHandlers({
             return { ...base, texts: matches.slice(0, options.limit).map(item => item.innerText || item.textContent || '') };
           }
           const element = matches[options.index];
-          if (!element) return { ...base, element: null, value: null, text: null };
+          if (!element) {
+            if (options.action === 'actionability') {
+              return {
+                ...base,
+                found: false,
+                element: null,
+                actionability: { visible: false, enabled: false, editable: false, reasons: ['not found'] }
+              };
+            }
+            return { ...base, element: null, value: null, text: null };
+          }
           if (options.action === 'textContent') {
             return { ...base, text: (element.innerText || element.textContent || '').trim(), element: summarizeElement(element, options.index) };
           }
           if (options.action === 'getAttribute') {
             return { ...base, value: element.getAttribute(options.attributeName), element: summarizeElement(element, options.index) };
           }
+          if (options.action === 'actionability') {
+            const actionability = getActionability(element, options.actionKind);
+            return {
+              ...base,
+              found: true,
+              element: summarizeElement(element, options.index),
+              actionability
+            };
+          }
           return { ...base, element: summarizeElement(element, options.index) };
+        }
+
+        function annotateActionabilitySnapshot(snapshot, wait, previousRect) {
+          if (wait.strict === true && snapshot.count !== 1) {
+            return {
+              snapshot: {
+                ...snapshot,
+                actionability: {
+                  ...(snapshot.actionability || {}),
+                  stable: false,
+                  reasons: [`strict mode expected 1 match, got ${snapshot.count}`]
+                }
+              },
+              nextRect: snapshot.element?.rect || previousRect
+            };
+          }
+          const rect = snapshot.element?.rect || null;
+          const stable = wait.requireStable === false || (rect && previousRect && rectsAlmostEqualInPage(rect, previousRect));
+          return {
+            snapshot: {
+              ...snapshot,
+              actionability: { ...(snapshot.actionability || {}), stable: stable === true }
+            },
+            nextRect: rect || previousRect
+          };
         }
 
         function locatorWaitSatisfied(snapshot, wait) {
@@ -1105,7 +1135,25 @@ export function createLocatorHandlers({
             if (wait.assertion === 'toBeChecked') return element.checked === wait.expected;
             if (wait.assertion === 'toHaveValue') return matchesExpectedTextInPage(element.value || '', wait.expected, wait.match || {});
           }
+          if (wait.kind === 'actionability') {
+            const checks = snapshot.actionability || {};
+            return snapshot.found === true &&
+              checks.visible === true &&
+              (wait.actionKind === 'screenshot' || checks.enabled === true) &&
+              (wait.actionKind !== 'click' || checks.receivesEvents === true) &&
+              checks.stable === true &&
+              (wait.actionKind !== 'fill' || checks.editable === true) &&
+              (wait.actionKind !== 'select' || checks.selectable === true) &&
+              (wait.strict !== true || snapshot.count === 1);
+          }
           return false;
+        }
+
+        function rectsAlmostEqualInPage(a, b) {
+          return Math.abs(a.x - b.x) < 0.5 &&
+            Math.abs(a.y - b.y) < 0.5 &&
+            Math.abs(a.width - b.width) < 0.5 &&
+            Math.abs(a.height - b.height) < 0.5;
         }
 
         function matchesExpectedTextInPage(actual, expected, options) {

@@ -40,7 +40,7 @@ async function setup() {
     defaultTimeoutMs: 50,
     chromeApi: {
       scripting: {
-        executeScript: async (opts) => { calls.scripts.push(opts.args?.[0]?.action); return [{ result: readyResult() }]; }
+        executeScript: async (opts) => { calls.scripts.push(opts.args?.[0]); return [{ result: readyResult() }]; }
       }
     }
   });
@@ -55,7 +55,10 @@ test('locator.press focuses then dispatches the key', async () => {
   assert.equal(calls.press.length, 1);
   assert.equal(calls.press[0].key, 'Enter');
   assert.equal(calls.press[0].tabId, 1);
-  assert.ok(calls.scripts.includes('focus'), 'expected a focus action before the keypress');
+  assert.ok(calls.scripts.some(script => script.action === 'focus'), 'expected a focus action before the keypress');
+  const waitScript = calls.scripts.find(script => script.action === 'actionability');
+  assert.equal(waitScript.wait.kind, 'actionability');
+  assert.equal(waitScript.wait.actionKind, 'press');
   assert.equal(calls.record[0].action, 'locator.press');
   assert.equal(calls.record[0].meta.key, 'Enter');
 });
@@ -72,7 +75,7 @@ test('locator.pressSequentially focuses then types the text', async () => {
   assert.equal(res.ok, true);
   assert.equal(calls.typeText.length, 1);
   assert.equal(calls.typeText[0].text, 'hello');
-  assert.ok(calls.scripts.includes('focus'), 'expected a focus action before typing');
+  assert.ok(calls.scripts.some(script => script.action === 'focus'), 'expected a focus action before typing');
   assert.equal(calls.record[0].action, 'locator.pressSequentially');
   assert.equal(calls.record[0].meta.text, 'hello');
 });
