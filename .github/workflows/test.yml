@@ -1,0 +1,41 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # No package.json / requirements.txt: the extension is plain ES modules
+      # and the native host is stdlib-only, so there is nothing to install.
+
+      - name: Syntax-check extension JavaScript
+        run: |
+          for f in $(find extension -name '*.js'); do
+            node --check "$f"
+          done
+
+      - name: Syntax-check native host
+        run: python3 -m py_compile native/host.py
+
+      - name: Node tests
+        run: node --test tests/*.mjs
+
+      - name: Python tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
