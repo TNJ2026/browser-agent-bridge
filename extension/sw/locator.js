@@ -1202,6 +1202,22 @@ export function createLocatorHandlers({
         }
 
         function findLocatorMatches(root, locator) {
+          if (locator.within) {
+            // locator.locator() scoping: resolve the parent(s) first, then match
+            // the child within each parent subtree (descendants only), deduped.
+            const parents = findLocatorMatches(root, locator.within);
+            const childLocator = { ...locator, within: null };
+            const seen = new Set();
+            const out = [];
+            for (const parent of parents) {
+              for (const match of findLocatorMatches(parent, childLocator)) {
+                if (seen.has(match)) continue;
+                seen.add(match);
+                out.push(match);
+              }
+            }
+            return out;
+          }
           if (locator.label) return findByLabel(root, locator).filter(element => matchesLocator(element, locator, true));
           const candidates = locator.selector
             ? querySelectorAllDeep(root, locator.selector)
@@ -1814,7 +1830,9 @@ export function createLocatorHandlers({
   function normalizeLocatorParams(params) {
     const nested = params.locator && typeof params.locator === 'object' ? params.locator : {};
     const pickString = key => stringOrNull(params[key]) || stringOrNull(nested[key]);
+    const withinSource = objectOrNull(params.within, nested.within);
     const locator = {
+      within: withinSource ? normalizeLocatorParams({ locator: withinSource }) : null,
       selector: pickString('selector'),
       text: params._ignoreTopLevelTextLocator ? stringOrNull(nested.text) : pickString('text'),
       hasText: pickString('hasText'),

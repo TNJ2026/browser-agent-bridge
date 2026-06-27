@@ -696,11 +696,15 @@ passed directly or under `locator`. Supported fields are `selector`, `text`,
 `role`, `name`, `label`, `placeholder`, `hasText`, `hasNotText`,
 `hasAttribute`, `hasNotAttribute`, `exact`, `regex`, `caseSensitive`, `visible`,
 `includeHidden`, `checked`, `disabled`, `expanded`, `pressed`, `selected`,
-`level`, `frameId`, `frameUrl`, and `frameSelector`. With `regex:true` the text
-matchers (`text`, `hasText`, `hasNotText`, `name`, `label`, `placeholder`) treat
-their value as a regular expression (case-insensitive unless `caseSensitive`),
-which is the precise way to narrow "matched too many"; an invalid pattern simply
-never matches. Role/name matching uses implicit HTML roles,
+`level`, `frameId`, `frameUrl`, `frameSelector`, and `within`. With `regex:true`
+the text matchers (`text`, `hasText`, `hasNotText`, `name`, `label`,
+`placeholder`) treat their value as a regular expression (case-insensitive
+unless `caseSensitive`), which is the precise way to narrow "matched too many";
+an invalid pattern simply never matches. `within` takes a nested locator
+(same fields, may itself nest `within`) and scopes the match to descendants of
+the parent locator's matches — the equivalent of Playwright's
+`page.locator(parent).locator(child)`. The parent must carry its own matcher.
+Role/name matching uses implicit HTML roles,
 explicit ARIA roles, `aria-label`, `aria-labelledby`, associated labels,
 heading levels, and common ARIA state filters. Locator matching pierces open
 shadow roots by default. Closed shadow roots remain inaccessible.
@@ -711,6 +715,10 @@ shadow roots by default. Closed shadow roots remain inaccessible.
 
 ```json
 { "tabId": 123, "role": "heading", "name": "Account", "level": 2 }
+```
+
+```json
+{ "tabId": 123, "role": "button", "name": "Save", "within": { "selector": ".card", "hasText": "Billing" } }
 ```
 
 ### `locator.textContent`
