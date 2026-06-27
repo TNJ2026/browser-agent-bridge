@@ -542,6 +542,14 @@ async function dispatchRpc(request) {
       return pageHandlers.pageWaitForSelector(params);
     case 'page.waitForText':
       return pageHandlers.pageWaitForText(params);
+    case 'page.waitForFunction':
+      return pageHandlers.pageWaitForFunction(params);
+    case 'expect.page.toHaveTitle':
+      return pageHandlers.pageExpectTitle(params);
+    case 'page.addInitScript':
+      return pageHandlers.pageAddInitScript(params);
+    case 'page.removeInitScript':
+      return pageHandlers.pageRemoveInitScript(params);
     case 'page.readText':
       return pageHandlers.pageReadText(params);
     case 'page.accessibilityTree':
@@ -590,6 +598,18 @@ async function dispatchRpc(request) {
       return locatorHandlers.locatorWaitFor(params);
     case 'expect.locator.toBeVisible':
       return locatorHandlers.expectLocatorToBeVisible(params);
+    case 'expect.locator.toBeHidden':
+      return locatorHandlers.expectLocatorToBeHidden(params);
+    case 'expect.locator.toBeEnabled':
+      return locatorHandlers.expectLocatorToBeEnabled(params);
+    case 'expect.locator.toBeDisabled':
+      return locatorHandlers.expectLocatorToBeDisabled(params);
+    case 'expect.locator.toBeEditable':
+      return locatorHandlers.expectLocatorToBeEditable(params);
+    case 'expect.locator.toBeChecked':
+      return locatorHandlers.expectLocatorToBeChecked(params);
+    case 'expect.locator.toHaveValue':
+      return locatorHandlers.expectLocatorToHaveValue(params);
     case 'expect.locator.toHaveCount':
       return locatorHandlers.expectLocatorToHaveCount(params);
     case 'expect.locator.toHaveText':
@@ -734,6 +754,10 @@ async function extensionInfo() {
       'page.frames',
       'page.waitForSelector',
       'page.waitForText',
+      'page.waitForFunction',
+      'expect.page.toHaveTitle',
+      'page.addInitScript',
+      'page.removeInitScript',
       'page.readText',
       'page.accessibilityTree',
       'page.screenshot',
@@ -758,6 +782,12 @@ async function extensionInfo() {
       'locator.last',
       'locator.waitFor',
       'expect.locator.toBeVisible',
+      'expect.locator.toBeHidden',
+      'expect.locator.toBeEnabled',
+      'expect.locator.toBeDisabled',
+      'expect.locator.toBeEditable',
+      'expect.locator.toBeChecked',
+      'expect.locator.toHaveValue',
       'expect.locator.toHaveCount',
       'expect.locator.toHaveText',
       'expect.locator.toHaveAttribute',
@@ -1226,7 +1256,12 @@ function getMethodCategory(method, params = {}) {
   if (method === 'downloads.list' || method === 'downloads.waitFor' || method === 'downloads.download') {
     return 'read_downloads';
   }
-  if (method === 'page.executeJavaScript') {
+  if (
+    method === 'page.executeJavaScript' ||
+    method === 'page.waitForFunction' ||
+    method === 'page.addInitScript' ||
+    method === 'page.removeInitScript'
+  ) {
     return 'page_script';
   }
   if (method === 'page.screenshot' || method === 'page.domSnapshot' || method === 'locator.screenshot') {

@@ -625,6 +625,107 @@ export function createPageHandlers({
     return { value: result, frame: frameTarget.frame };
   }
 
+  async function pageWaitForFunction(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.waitForFunction');
+    const expression = typeof params.expression === 'string' && params.expression
+      ? params.expression
+      : params.script;
+    assertString(expression, 'expression');
+    await maybeEnableTemporaryCspBypass(tabId, params);
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
+    const started = Date.now();
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    const arg = params.arg ?? null;
+    let last = null;
+
+    while (Date.now() - started <= timeoutMs) {
+      const [{ result }] = await chromeApi.scripting.executeScript({
+        target: frameTarget.target,
+        func: (expression, arg) => {
+          try {
+            const evaluated = (0, eval)(`(${expression})`);
+            const value = typeof evaluated === 'function' ? evaluated(arg) : evaluated;
+            const safe = value === null || ['string', 'number', 'boolean'].includes(typeof value) ? value : undefined;
+            return { ok: true, truthy: !!value, value: safe };
+          } catch (error) {
+            return { ok: false, error: String((error && error.message) || error) };
+          }
+        },
+        args: [expression, arg],
+        world: params.world === 'isolated' ? 'ISOLATED' : 'MAIN'
+      });
+      last = result;
+      if (result?.ok && result.truthy) {
+        return { ok: true, value: result.value, frame: frameTarget.frame, elapsedMs: Date.now() - started };
+      }
+      await sleep(intervalMs);
+    }
+    throw createPageWaitTimeoutError({
+      type: 'PageWaitForFunctionTimeout',
+      code: 'PAGE_WAIT_FOR_FUNCTION_TIMEOUT',
+      method: 'page.waitForFunction',
+      elapsedMs: Date.now() - started,
+      timeoutMs,
+      lastError: last && last.ok === false ? last.error : null,
+      frame: frameTarget?.frame || null,
+      summary: last && last.ok === false ? `predicate threw: ${last.error}` : 'predicate did not become truthy'
+    });
+  }
+
+  async function pageExpectTitle(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'expect.page.toHaveTitle');
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 100;
+    const started = Date.now();
+    let lastTitle = '';
+
+    while (Date.now() - started <= timeoutMs) {
+      const tab = await chromeApi.tabs.get(tabId);
+      lastTitle = tab.title || '';
+      if (matchesTitlePattern(lastTitle, params)) {
+        return { ok: true, assertion: 'toHaveTitle', title: lastTitle, elapsedMs: Date.now() - started };
+      }
+      await sleep(intervalMs);
+    }
+    throw createPageWaitTimeoutError({
+      type: 'PageExpectTitleTimeout',
+      code: 'PAGE_EXPECT_TITLE_TIMEOUT',
+      method: 'expect.page.toHaveTitle',
+      elapsedMs: Date.now() - started,
+      timeoutMs,
+      actual: lastTitle,
+      expected: params.title ?? params.titleContains ?? params.titleRegex ?? null,
+      summary: `title did not match (current="${lastTitle}")`
+    });
+  }
+
+  async function pageAddInitScript(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.addInitScript');
+    assertString(params.script, 'script');
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Page.enable').catch(() => {});
+    const result = await cdp(tabId, 'Page.addScriptToEvaluateOnNewDocument', {
+      source: params.script,
+      ...(typeof params.worldName === 'string' && params.worldName ? { worldName: params.worldName } : {}),
+      runImmediately: params.runImmediately === true
+    });
+    await recordAction(tabId, 'page.addInitScript', { script: params.script });
+    return { ok: true, identifier: result?.identifier || null };
+  }
+
+  async function pageRemoveInitScript(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.removeInitScript');
+    assertString(params.identifier, 'identifier');
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Page.removeScriptToEvaluateOnNewDocument', { identifier: params.identifier });
+    return { ok: true, identifier: params.identifier };
+  }
+
   async function pageDomSnapshot(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'page.domSnapshot');
@@ -651,12 +752,29 @@ export function createPageHandlers({
     pageFrames,
     pageWaitForSelector,
     pageWaitForText,
+    pageWaitForFunction,
+    pageExpectTitle,
+    pageAddInitScript,
+    pageRemoveInitScript,
     pageReadText,
     pageAccessibilityTree,
     pageScreenshot,
     pageExecuteJavaScript,
     pageDomSnapshot
   };
+}
+
+function matchesTitlePattern(title, params) {
+  if (typeof params.title === 'string') return title === params.title;
+  if (typeof params.titleContains === 'string') return title.includes(params.titleContains);
+  if (typeof params.titleRegex === 'string') {
+    try {
+      return new RegExp(params.titleRegex).test(title);
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 function responseMetadataMatches(event, events, options, index) {

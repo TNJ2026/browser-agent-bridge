@@ -187,3 +187,85 @@ test('waitForDialog timeout reports a unified diagnostic', async () => {
     method: 'page.waitForDialog'
   });
 });
+
+test('waitForFunction resolves when the predicate becomes truthy', async () => {
+  const { createPageHandlers } = await importPageModule();
+  const handlers = createPageHandlers(makeDeps({
+    chromeApi: {
+      tabs: { get: async () => ({ id: 1, url: 'https://example.com', status: 'complete' }) },
+      scripting: { executeScript: async () => [{ result: { ok: true, truthy: true, value: 42 } }] }
+    }
+  }));
+  const res = await handlers.pageWaitForFunction({ tabId: 1, expression: '() => 42', timeoutMs: 30, intervalMs: 10 });
+  assert.equal(res.ok, true);
+  assert.equal(res.value, 42);
+});
+
+test('waitForFunction times out when the predicate stays falsy', async () => {
+  const { createPageHandlers } = await importPageModule();
+  const handlers = createPageHandlers(makeDeps({
+    chromeApi: {
+      tabs: { get: async () => ({ id: 1, url: 'https://example.com', status: 'complete' }) },
+      scripting: { executeScript: async () => [{ result: { ok: true, truthy: false, value: false } }] }
+    }
+  }));
+  const error = await captureRejection(handlers.pageWaitForFunction({ tabId: 1, expression: '() => false', timeoutMs: 25, intervalMs: 10 }));
+  assert.equal(error.code, 'PAGE_WAIT_FOR_FUNCTION_TIMEOUT');
+});
+
+test('waitForFunction reports a thrown predicate error', async () => {
+  const { createPageHandlers } = await importPageModule();
+  const handlers = createPageHandlers(makeDeps({
+    chromeApi: {
+      tabs: { get: async () => ({ id: 1, url: 'https://example.com', status: 'complete' }) },
+      scripting: { executeScript: async () => [{ result: { ok: false, error: 'boom' } }] }
+    }
+  }));
+  const error = await captureRejection(handlers.pageWaitForFunction({ tabId: 1, expression: '() => x.y', timeoutMs: 25, intervalMs: 10 }));
+  assert.equal(error.code, 'PAGE_WAIT_FOR_FUNCTION_TIMEOUT');
+  assert.equal(error.diagnostic.lastError, 'boom');
+});
+
+test('expect.page.toHaveTitle matches the tab title', async () => {
+  const { createPageHandlers } = await importPageModule();
+  const handlers = createPageHandlers(makeDeps({
+    chromeApi: { tabs: { get: async () => ({ id: 1, title: 'Dashboard — Home' }) }, scripting: { executeScript: async () => [{ result: {} }] } }
+  }));
+  const res = await handlers.pageExpectTitle({ tabId: 1, titleContains: 'Dashboard', timeoutMs: 30, intervalMs: 10 });
+  assert.equal(res.ok, true);
+  assert.equal(res.title, 'Dashboard — Home');
+});
+
+test('expect.page.toHaveTitle times out on a mismatch', async () => {
+  const { createPageHandlers } = await importPageModule();
+  const handlers = createPageHandlers(makeDeps({
+    chromeApi: { tabs: { get: async () => ({ id: 1, title: 'Login' }) }, scripting: { executeScript: async () => [{ result: {} }] } }
+  }));
+  const error = await captureRejection(handlers.pageExpectTitle({ tabId: 1, title: 'Dashboard', timeoutMs: 25, intervalMs: 10 }));
+  assert.equal(error.code, 'PAGE_EXPECT_TITLE_TIMEOUT');
+  assert.equal(error.diagnostic.actual, 'Login');
+});
+
+test('addInitScript registers a script and returns its identifier', async () => {
+  const { createPageHandlers } = await importPageModule();
+  const calls = [];
+  const handlers = createPageHandlers(makeDeps({
+    cdp: async (tabId, method, params) => { calls.push({ method, params }); return method === 'Page.addScriptToEvaluateOnNewDocument' ? { identifier: 'script-1' } : {}; }
+  }));
+  const res = await handlers.pageAddInitScript({ tabId: 1, script: 'window.__agent = true;' });
+  assert.equal(res.ok, true);
+  assert.equal(res.identifier, 'script-1');
+  const add = calls.find(c => c.method === 'Page.addScriptToEvaluateOnNewDocument');
+  assert.equal(add.params.source, 'window.__agent = true;');
+});
+
+test('removeInitScript removes a registered script', async () => {
+  const { createPageHandlers } = await importPageModule();
+  const calls = [];
+  const handlers = createPageHandlers(makeDeps({
+    cdp: async (tabId, method, params) => { calls.push({ method, params }); return {}; }
+  }));
+  const res = await handlers.pageRemoveInitScript({ tabId: 1, identifier: 'script-1' });
+  assert.equal(res.ok, true);
+  assert.ok(calls.some(c => c.method === 'Page.removeScriptToEvaluateOnNewDocument' && c.params.identifier === 'script-1'));
+});

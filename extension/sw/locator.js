@@ -174,6 +174,76 @@ export function createLocatorHandlers({
     });
   }
 
+  async function expectLocatorElementState(params, assertion, predicate, actualOf, expected) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, `expect.locator.${assertion}`);
+    const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
+    const started = Date.now();
+    const frameTarget = await resolveFrameTarget(tabId, params);
+    let lastElement = null;
+
+    while (Date.now() - started <= timeoutMs) {
+      let element = null;
+      try {
+        const result = await runLocatorScript(tabId, { ...params, index }, 'summarize', frameTarget);
+        element = result.element;
+      } catch {
+        element = null; // element not present yet; keep polling
+      }
+      lastElement = element;
+      if (element && predicate(element)) {
+        return { ok: true, assertion, expected, actual: actualOf(element), elapsedMs: Date.now() - started, frame: frameTarget.frame };
+      }
+      await sleep(intervalMs);
+    }
+    throw createLocatorExpectTimeoutError(params, assertion, frameTarget, {
+      expected,
+      actual: lastElement ? actualOf(lastElement) : null,
+      elapsedMs: Date.now() - started,
+      last: { element: lastElement }
+    });
+  }
+
+  async function expectLocatorToBeEnabled(params) {
+    const want = params.enabled !== false;
+    return expectLocatorElementState(params, 'toBeEnabled', el => (el.disabled === false) === want, el => el.disabled === false, want);
+  }
+
+  async function expectLocatorToBeDisabled(params) {
+    return expectLocatorElementState(params, 'toBeDisabled', el => el.disabled === true, el => el.disabled === true, true);
+  }
+
+  async function expectLocatorToBeEditable(params) {
+    const want = params.editable !== false;
+    return expectLocatorElementState(params, 'toBeEditable', el => (el.editable === true) === want, el => el.editable === true, want);
+  }
+
+  async function expectLocatorToBeChecked(params) {
+    const want = params.checked !== false;
+    return expectLocatorElementState(params, 'toBeChecked', el => el.checked === want, el => el.checked, want);
+  }
+
+  async function expectLocatorToHaveValue(params) {
+    const expected = params.expectedValue ?? params.expected ?? params.value;
+    if (typeof expected !== 'string') throw new Error('expect.locator.toHaveValue requires expectedValue, expected, or value');
+    return expectLocatorElementState(
+      params,
+      'toHaveValue',
+      el => matchesExpectedText(el.value || '', expected, params),
+      el => el.value || '',
+      expected
+    );
+  }
+
+  async function expectLocatorToBeHidden(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'expect.locator.toBeHidden');
+    const result = await locatorWaitFor({ ...params, state: 'hidden' });
+    return { ok: true, assertion: 'toBeHidden', ...result };
+  }
+
   async function expectLocatorToHaveAttribute(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'expect.locator.toHaveAttribute');
@@ -1716,6 +1786,12 @@ export function createLocatorHandlers({
     locatorLast,
     locatorWaitFor,
     expectLocatorToBeVisible,
+    expectLocatorToBeHidden,
+    expectLocatorToBeEnabled,
+    expectLocatorToBeDisabled,
+    expectLocatorToBeEditable,
+    expectLocatorToBeChecked,
+    expectLocatorToHaveValue,
     expectLocatorToHaveCount,
     expectLocatorToHaveText,
     expectLocatorToHaveAttribute,
