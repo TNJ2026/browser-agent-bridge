@@ -493,6 +493,33 @@ Uses CDP `DOMSnapshot.captureSnapshot`.
 { "tabId": 123, "computedStyles": [], "includeDOMRects": true }
 ```
 
+### `page.ariaSnapshot`
+
+Returns a compact accessibility snapshot built from CDP
+`Accessibility.getFullAXTree`: a nested `tree` of `{role, name, <props>, children}`
+plus a stable, diff-friendly `snapshot` string (one `- role "name"[prop=val]`
+line per node). Ignored nodes and transparent wrappers (`generic`/`none`/
+`presentation`/`group`) are dropped and their children promoted, so the output
+is a clean perception layer for an LLM. Use `maxDepth` to cap nesting and
+`interestingOnly:false` to keep wrapper roles.
+
+```json
+{ "tabId": 123, "maxDepth": 12 }
+```
+
+### `expect.page.toMatchAriaSnapshot`
+
+Retries until the page's aria snapshot matches `expected` (alias `snapshot`).
+Matching is an ordered subset: each non-empty expected line must appear, in
+order, as a substring of an actual snapshot line — so a partial expected tree
+asserts presence and ordering without pinning the whole page. On timeout:
+`data.code: "PAGE_EXPECT_ARIA_SNAPSHOT_TIMEOUT"` with `missing` (unmatched
+expected lines) and an `actualPreview`.
+
+```json
+{ "tabId": 123, "expected": "- heading \"Welcome\"\n- button \"Save\"" }
+```
+
 ### `page.screenshot`
 
 Captures the visible tab and returns a `dataUrl`.

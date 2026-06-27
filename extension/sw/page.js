@@ -600,6 +600,55 @@ export function createPageHandlers({
     return tree;
   }
 
+  async function pageAriaSnapshot(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.ariaSnapshot');
+    const { nodes, tree } = await collectAriaTree(tabId, params);
+    return { snapshot: renderAriaSnapshot(tree), tree, nodeCount: countAriaNodes(tree), axNodeCount: nodes.length };
+  }
+
+  async function pageExpectAriaSnapshot(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'expect.page.toMatchAriaSnapshot');
+    const expected = typeof params.expected === 'string' && params.expected ? params.expected : params.snapshot;
+    assertString(expected, 'expected');
+    const timeoutMs = Number.isInteger(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : defaultTimeoutMs;
+    const intervalMs = Number.isInteger(params.intervalMs) && params.intervalMs > 0 ? params.intervalMs : 250;
+    const started = Date.now();
+    let actual = '';
+
+    while (Date.now() - started <= timeoutMs) {
+      const { tree } = await collectAriaTree(tabId, params);
+      actual = renderAriaSnapshot(tree);
+      if (ariaSnapshotMatches(actual, expected)) {
+        return { ok: true, assertion: 'toMatchAriaSnapshot', elapsedMs: Date.now() - started };
+      }
+      await sleep(intervalMs);
+    }
+    throw createPageWaitTimeoutError({
+      type: 'PageExpectAriaSnapshotTimeout',
+      code: 'PAGE_EXPECT_ARIA_SNAPSHOT_TIMEOUT',
+      method: 'expect.page.toMatchAriaSnapshot',
+      elapsedMs: Date.now() - started,
+      timeoutMs,
+      missing: ariaSnapshotMissingLines(actual, expected),
+      actualPreview: actual.slice(0, 2000),
+      summary: 'aria snapshot did not match'
+    });
+  }
+
+  async function collectAriaTree(tabId, params) {
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Accessibility.enable').catch(() => {});
+    const result = await cdp(tabId, 'Accessibility.getFullAXTree', {});
+    const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
+    const tree = buildAriaTree(nodes, {
+      interestingOnly: params.interestingOnly !== false,
+      maxDepth: Number.isInteger(params.maxDepth) && params.maxDepth > 0 ? params.maxDepth : null
+    });
+    return { nodes, tree };
+  }
+
   async function pageScreenshot(params) {
     const tabId = assertTabId(params.tabId);
     const tab = await chromeApi.tabs.get(tabId);
@@ -758,6 +807,8 @@ export function createPageHandlers({
     pageRemoveInitScript,
     pageReadText,
     pageAccessibilityTree,
+    pageAriaSnapshot,
+    pageExpectAriaSnapshot,
     pageScreenshot,
     pageExecuteJavaScript,
     pageDomSnapshot
@@ -777,6 +828,91 @@ function matchesTitlePattern(title, params) {
   return false;
 }
 
+// --- ARIA snapshot (built from CDP Accessibility.getFullAXTree) ---
+
+const ARIA_TRANSPARENT_ROLES = new Set(['generic', 'none', 'presentation', 'InlineTextBox', 'LineBreak', 'group']);
+const ARIA_SNAPSHOT_PROPS = ['level', 'checked', 'expanded', 'selected', 'pressed', 'disabled', 'required'];
+
+// Transform the flat AX node list into a compact nested {role, name, props, children}
+// tree, dropping ignored nodes and transparent wrappers (their children are promoted).
+function buildAriaTree(axNodes, options = {}) {
+  const byId = new Map();
+  for (const node of axNodes) byId.set(node.nodeId, node);
+  const childIds = new Set();
+  for (const node of axNodes) for (const id of node.childIds || []) childIds.add(id);
+  const roots = axNodes.filter(node => !childIds.has(node.nodeId));
+  const maxDepth = Number.isInteger(options.maxDepth) ? options.maxDepth : null;
+
+  function visit(node, depth) {
+    if (!node) return [];
+    const children = (maxDepth !== null && depth >= maxDepth)
+      ? []
+      : (node.childIds || []).flatMap(id => visit(byId.get(id), depth + 1));
+    const role = node.role?.value || '';
+    const ignored = node.ignored === true;
+    if (ignored || (options.interestingOnly !== false && ARIA_TRANSPARENT_ROLES.has(role))) {
+      return children; // promote children, drop the wrapper
+    }
+    const name = typeof node.name?.value === 'string' ? node.name.value.trim() : '';
+    if (role === 'StaticText' || role === 'text') {
+      return name ? [{ role: 'text', name, children: [] }] : children;
+    }
+    return [{ role: role || 'unknown', name, ...extractAriaProps(node), children }];
+  }
+  return roots.flatMap(node => visit(node, 0));
+}
+
+function extractAriaProps(node) {
+  const out = {};
+  for (const prop of node.properties || []) {
+    if (!ARIA_SNAPSHOT_PROPS.includes(prop.name)) continue;
+    const value = prop.value?.value;
+    if (value === undefined || value === false || value === 'false') continue;
+    out[prop.name] = value === 'true' ? true : value;
+  }
+  return out;
+}
+
+function renderAriaSnapshot(tree, indent = 0) {
+  return tree.map(node => {
+    const name = node.name ? ` "${node.name}"` : '';
+    const props = ARIA_SNAPSHOT_PROPS
+      .filter(prop => node[prop] !== undefined)
+      .map(prop => (node[prop] === true ? `[${prop}]` : `[${prop}=${node[prop]}]`))
+      .join('');
+    const head = `${'  '.repeat(indent)}- ${node.role}${name}${props}`;
+    const kids = node.children && node.children.length ? `\n${renderAriaSnapshot(node.children, indent + 1)}` : '';
+    return head + kids;
+  }).join('\n');
+}
+
+function countAriaNodes(tree) {
+  return tree.reduce((sum, node) => sum + 1 + countAriaNodes(node.children || []), 0);
+}
+
+function normalizeAriaLines(text) {
+  return String(text).split('\n').map(line => line.replace(/^\s*-?\s*/, '').trim()).filter(Boolean);
+}
+
+// Expected lines must appear, in order, as substrings of actual lines (subsequence).
+function ariaSnapshotMatches(actual, expected) {
+  return ariaSnapshotMissingLines(actual, expected).length === 0;
+}
+
+function ariaSnapshotMissingLines(actual, expected) {
+  const have = normalizeAriaLines(actual);
+  const want = normalizeAriaLines(expected);
+  const missing = [];
+  let cursor = 0;
+  for (const wantLine of want) {
+    let found = false;
+    for (let i = cursor; i < have.length; i += 1) {
+      if (have[i].includes(wantLine)) { cursor = i + 1; found = true; break; }
+    }
+    if (!found) missing.push(wantLine);
+  }
+  return missing;
+}
 function responseMetadataMatches(event, events, options, index) {
   if (event.method !== 'Network.responseReceived') return false;
   const params = event.params || {};
