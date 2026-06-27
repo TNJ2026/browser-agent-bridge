@@ -162,6 +162,161 @@ const devtoolsHandlers = createDevtoolsHandlers({
 const downloadsHandlers = createDownloadsHandlers({});
 downloadsHandlers.initDownloadEvents();
 
+const rpcRouter = {
+  'permission.check': () => ({ allowed: true }),
+  'extension.info': () => extensionInfo(),
+  'extension.reload': () => extensionReload(),
+  'extension.getCspBypass': () => cspHandlers.extensionGetCspBypass(),
+  'native.status': () => nativeStatus,
+  'native.sitePatterns': (params) => nativeRequest('native.sitePatterns', params),
+
+  // sessions / tabs
+  'tabs.list': (params) => sessionsHandlers.tabsList(params),
+  'tabs.create': (params) => sessionsHandlers.tabsCreate(params),
+  'tabs.activate': (params) => sessionsHandlers.tabsActivate(params),
+  'tabs.close': (params) => sessionsHandlers.tabsClose(params),
+  'tabs.group': (params) => sessionsHandlers.tabsGroup(params),
+  'session.start': (params) => sessionsHandlers.sessionStart(params),
+  'session.list': () => sessionsHandlers.sessionList(),
+  'session.get': (params) => sessionsHandlers.sessionGet(params),
+  'session.createTab': (params) => sessionsHandlers.sessionCreateTab(params),
+  'session.addTab': (params) => sessionsHandlers.sessionAddTab(params),
+  'session.closeTab': (params) => sessionsHandlers.sessionCloseTab(params),
+  'session.stop': (params) => sessionsHandlers.sessionStop(params),
+
+  // page
+  'page.navigate': (params) => pageHandlers.pageNavigate(params),
+  'page.waitForLoad': (params) => pageHandlers.pageWaitForLoad(params),
+  'page.waitForNavigation': (params) => pageHandlers.pageWaitForNavigation(params),
+  'page.waitForResponse': (params) => pageHandlers.pageWaitForResponse(params),
+  'page.waitForRequest': (params) => pageHandlers.pageWaitForRequest(params),
+  'page.waitForURL': (params) => pageHandlers.pageWaitForURL(params),
+  'page.waitForNetworkIdle': (params) => pageHandlers.pageWaitForNetworkIdle(params),
+  'page.waitForDialog': (params) => pageHandlers.pageWaitForDialog(params),
+  'page.acceptDialog': (params) => pageHandlers.pageAcceptDialog(params),
+  'page.dismissDialog': (params) => pageHandlers.pageDismissDialog(params),
+  'page.frames': (params) => pageHandlers.pageFrames(params),
+  'page.waitForSelector': (params) => pageHandlers.pageWaitForSelector(params),
+  'page.waitForText': (params) => pageHandlers.pageWaitForText(params),
+  'page.waitForFunction': (params) => pageHandlers.pageWaitForFunction(params),
+  'expect.page.toHaveTitle': (params) => pageHandlers.pageExpectTitle(params),
+  'page.addInitScript': (params) => pageHandlers.pageAddInitScript(params),
+  'page.removeInitScript': (params) => pageHandlers.pageRemoveInitScript(params),
+  'page.readText': (params) => pageHandlers.pageReadText(params),
+  'page.accessibilityTree': (params) => pageHandlers.pageAccessibilityTree(params),
+  'page.ariaSnapshot': (params) => pageHandlers.pageAriaSnapshot(params),
+  'expect.page.toMatchAriaSnapshot': (params) => pageHandlers.pageExpectAriaSnapshot(params),
+  'page.screenshot': (params) => pageHandlers.pageScreenshot(params),
+  'page.executeJavaScript': (params) => pageHandlers.pageExecuteJavaScript(params),
+  'page.domSnapshot': (params) => pageHandlers.pageDomSnapshot(params),
+  'page.setViewport': (params) => pageHandlers.pageSetViewport(params),
+  'page.emulateMedia': (params) => pageHandlers.pageEmulateMedia(params),
+  'page.setGeolocation': (params) => pageHandlers.pageSetGeolocation(params),
+  'page.setLocale': (params) => pageHandlers.pageSetLocale(params),
+  'page.setOffline': (params) => pageHandlers.pageSetOffline(params),
+  'page.clearEmulation': (params) => pageHandlers.pageClearEmulation(params),
+
+  // dom
+  'dom.query': (params) => domHandlers.domQuery(params),
+  'dom.click': (params) => domHandlers.domClick(params),
+  'dom.dragTo': (params) => domHandlers.domDragTo(params),
+  'dom.dispatchDragDrop': (params) => domHandlers.domDispatchDragDrop(params),
+  'dom.type': (params) => domHandlers.domType(params),
+  'dom.select': (params) => domHandlers.domSelect(params),
+  'dom.setInputFiles': (params) => domHandlers.domSetInputFiles(params),
+  'dom.hover': (params) => domHandlers.domHover(params),
+  'dom.scroll': (params) => domHandlers.domScroll(params),
+
+  // locator
+  'locator.count': (params) => locatorHandlers.locatorCount(params),
+  'locator.textContent': (params) => locatorHandlers.locatorTextContent(params),
+  'locator.allTextContents': (params) => locatorHandlers.locatorAllTextContents(params),
+  'locator.allInnerTexts': (params) => locatorHandlers.locatorAllInnerTexts(params),
+  'locator.getAttribute': (params) => locatorHandlers.locatorGetAttribute(params),
+  'locator.nth': (params) => locatorHandlers.locatorNth(params),
+  'locator.first': (params) => locatorHandlers.locatorFirst(params),
+  'locator.last': (params) => locatorHandlers.locatorLast(params),
+  'locator.waitFor': (params) => locatorHandlers.locatorWaitFor(params),
+
+  // locator assertions
+  'expect.locator.toBeVisible': (params) => locatorHandlers.expectLocatorToBeVisible(params),
+  'expect.locator.toBeHidden': (params) => locatorHandlers.expectLocatorToBeHidden(params),
+  'expect.locator.toBeEnabled': (params) => locatorHandlers.expectLocatorToBeEnabled(params),
+  'expect.locator.toBeDisabled': (params) => locatorHandlers.expectLocatorToBeDisabled(params),
+  'expect.locator.toBeEditable': (params) => locatorHandlers.expectLocatorToBeEditable(params),
+  'expect.locator.toBeChecked': (params) => locatorHandlers.expectLocatorToBeChecked(params),
+  'expect.locator.toHaveValue': (params) => locatorHandlers.expectLocatorToHaveValue(params),
+  'expect.locator.toHaveCount': (params) => locatorHandlers.expectLocatorToHaveCount(params),
+  'expect.locator.toHaveText': (params) => locatorHandlers.expectLocatorToHaveText(params),
+  'expect.locator.toHaveAttribute': (params) => locatorHandlers.expectLocatorToHaveAttribute(params),
+
+  // locator actions
+  'locator.click': (params) => locatorHandlers.locatorClick(params),
+  'locator.dragTo': (params) => locatorHandlers.locatorDragTo(params),
+  'locator.dispatchDragDrop': (params) => locatorHandlers.locatorDispatchDragDrop(params),
+  'locator.screenshot': (params) => locatorHandlers.locatorScreenshot(params),
+  'locator.fill': (params) => locatorHandlers.locatorFill(params),
+  'locator.press': (params) => locatorHandlers.locatorPress(params),
+  'locator.pressSequentially': (params) => locatorHandlers.locatorPressSequentially(params),
+  'locator.check': (params) => locatorHandlers.locatorCheck(params),
+  'locator.uncheck': (params) => locatorHandlers.locatorUncheck(params),
+  'locator.selectOption': (params) => locatorHandlers.locatorSelectOption(params),
+  'locator.setInputFiles': (params) => locatorHandlers.locatorSetInputFiles(params),
+
+  // computer / OS input
+  'computer.click': (params) => computerHandlers.computerClick(params),
+  'computer.drag': (params) => computerHandlers.computerDrag(params),
+  'computer.type': (params) => computerHandlers.computerType(params),
+  'computer.key': (params) => computerHandlers.computerKey(params),
+  'computer.scroll': (params) => computerHandlers.computerScroll(params),
+  'computer.hover': (params) => computerHandlers.computerHover(params),
+
+  // keyboard
+  'keyboard.type': (params) => keyboardHandlers.keyboardType(params),
+  'keyboard.compose': (params) => keyboardHandlers.keyboardCompose(params),
+  'keyboard.press': (params) => keyboardHandlers.keyboardPress(params),
+  'keyboard.down': (params) => keyboardHandlers.keyboardDown(params),
+  'keyboard.up': (params) => keyboardHandlers.keyboardUp(params),
+
+  // devtools / console / network
+  'console.read': (params) => devtoolsHandlers.consoleRead(params),
+  'network.read': (params) => devtoolsHandlers.networkRead(params),
+  'network.setBlockedUrls': (params) => devtoolsHandlers.networkSetBlockedUrls(params),
+  'network.setInterceptors': (params) => devtoolsHandlers.networkSetInterceptors(params),
+  'network.routeFromHAR': (params) => devtoolsHandlers.networkRouteFromHAR(params),
+  'network.interceptors.clear': (params) => devtoolsHandlers.networkInterceptorsClear(params),
+  'network.interceptors.events': (params) => devtoolsHandlers.networkInterceptorsEvents(params),
+  'network.interceptors.clearEvents': (params) => devtoolsHandlers.networkInterceptorsClearEvents(params),
+  'network.interceptors.status': (params) => devtoolsHandlers.networkInterceptorsStatus(params),
+
+  // downloads
+  'downloads.list': (params) => downloadsHandlers.downloadsList(params),
+  'downloads.waitFor': (params) => downloadsHandlers.downloadsWaitFor(params),
+
+  // recording
+  'recording.start': (params) => recordingHandlers.recordingStart(params),
+  'recording.stop': (params) => recordingHandlers.recordingStop(params),
+  'recording.status': (params) => recordingHandlers.recordingStatus(params),
+  'recording.export': (params) => recordingHandlers.recordingExport(params),
+  'recording.clear': (params) => recordingHandlers.recordingClear(params),
+
+  // tracing
+  'trace.start': (params) => traceHandlers.traceStart(params),
+  'trace.stop': (params) => traceHandlers.traceStop(params),
+  'trace.status': (params) => traceHandlers.traceStatus(params),
+  'trace.export': (params) => traceHandlers.traceExport(params),
+  'trace.exportHtml': (params) => traceHandlers.traceExportHtml(params),
+  'trace.clear': (params) => traceHandlers.traceClear(params),
+
+  // indicator
+  'indicator.set': (params) => indicatorSet(params),
+
+  // policy
+  'policy.get': () => policyHandlers.policyGet(),
+  'policy.set': (params) => policyHandlers.policySet(params),
+  'policy.checkUrl': (params) => policyHandlers.policyCheckUrl(params)
+};
+
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.remove(['sessionPermissions', AGENT_TAB_GROUPS_STORAGE_KEY, SESSION_STORAGE_KEY]).catch(() => {});
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
@@ -484,258 +639,11 @@ async function dispatchRpc(request) {
   await assertOptionalPermissions(request.method, params);
   await assertRpcTabIsolation(request.method, params);
   await checkPermission(request.method, params);
-  switch (request.method) {
-    case 'permission.check':
-      return { allowed: true };
-    case 'extension.info':
-      return extensionInfo();
-    case 'extension.reload':
-      return extensionReload();
-    case 'extension.getCspBypass':
-      return cspHandlers.extensionGetCspBypass();
-    case 'native.status':
-      return nativeStatus;
-    case 'native.sitePatterns':
-      return nativeRequest('native.sitePatterns', params);
-    case 'tabs.list':
-      return sessionsHandlers.tabsList(params);
-    case 'tabs.create':
-      return sessionsHandlers.tabsCreate(params);
-    case 'tabs.activate':
-      return sessionsHandlers.tabsActivate(params);
-    case 'tabs.close':
-      return sessionsHandlers.tabsClose(params);
-    case 'tabs.group':
-      return sessionsHandlers.tabsGroup(params);
-    case 'session.start':
-      return sessionsHandlers.sessionStart(params);
-    case 'session.list':
-      return sessionsHandlers.sessionList();
-    case 'session.get':
-      return sessionsHandlers.sessionGet(params);
-    case 'session.createTab':
-      return sessionsHandlers.sessionCreateTab(params);
-    case 'session.addTab':
-      return sessionsHandlers.sessionAddTab(params);
-    case 'session.closeTab':
-      return sessionsHandlers.sessionCloseTab(params);
-    case 'session.stop':
-      return sessionsHandlers.sessionStop(params);
-    case 'page.navigate':
-      return pageHandlers.pageNavigate(params);
-    case 'page.waitForLoad':
-      return pageHandlers.pageWaitForLoad(params);
-    case 'page.waitForNavigation':
-      return pageHandlers.pageWaitForNavigation(params);
-    case 'page.waitForResponse':
-      return pageHandlers.pageWaitForResponse(params);
-    case 'page.waitForRequest':
-      return pageHandlers.pageWaitForRequest(params);
-    case 'page.waitForURL':
-      return pageHandlers.pageWaitForURL(params);
-    case 'page.waitForNetworkIdle':
-      return pageHandlers.pageWaitForNetworkIdle(params);
-    case 'page.waitForDialog':
-      return pageHandlers.pageWaitForDialog(params);
-    case 'page.acceptDialog':
-      return pageHandlers.pageAcceptDialog(params);
-    case 'page.dismissDialog':
-      return pageHandlers.pageDismissDialog(params);
-    case 'page.frames':
-      return pageHandlers.pageFrames(params);
-    case 'page.waitForSelector':
-      return pageHandlers.pageWaitForSelector(params);
-    case 'page.waitForText':
-      return pageHandlers.pageWaitForText(params);
-    case 'page.waitForFunction':
-      return pageHandlers.pageWaitForFunction(params);
-    case 'expect.page.toHaveTitle':
-      return pageHandlers.pageExpectTitle(params);
-    case 'page.addInitScript':
-      return pageHandlers.pageAddInitScript(params);
-    case 'page.removeInitScript':
-      return pageHandlers.pageRemoveInitScript(params);
-    case 'page.readText':
-      return pageHandlers.pageReadText(params);
-    case 'page.accessibilityTree':
-      return pageHandlers.pageAccessibilityTree(params);
-    case 'page.ariaSnapshot':
-      return pageHandlers.pageAriaSnapshot(params);
-    case 'expect.page.toMatchAriaSnapshot':
-      return pageHandlers.pageExpectAriaSnapshot(params);
-    case 'page.screenshot':
-      return pageHandlers.pageScreenshot(params);
-    case 'page.executeJavaScript':
-      return pageHandlers.pageExecuteJavaScript(params);
-    case 'page.domSnapshot':
-      return pageHandlers.pageDomSnapshot(params);
-    case 'page.setViewport':
-      return pageHandlers.pageSetViewport(params);
-    case 'page.emulateMedia':
-      return pageHandlers.pageEmulateMedia(params);
-    case 'page.setGeolocation':
-      return pageHandlers.pageSetGeolocation(params);
-    case 'page.setLocale':
-      return pageHandlers.pageSetLocale(params);
-    case 'page.setOffline':
-      return pageHandlers.pageSetOffline(params);
-    case 'page.clearEmulation':
-      return pageHandlers.pageClearEmulation(params);
-    case 'dom.query':
-      return domHandlers.domQuery(params);
-    case 'dom.click':
-      return domHandlers.domClick(params);
-    case 'dom.dragTo':
-      return domHandlers.domDragTo(params);
-    case 'dom.dispatchDragDrop':
-      return domHandlers.domDispatchDragDrop(params);
-    case 'dom.type':
-      return domHandlers.domType(params);
-    case 'dom.select':
-      return domHandlers.domSelect(params);
-    case 'dom.setInputFiles':
-      return domHandlers.domSetInputFiles(params);
-    case 'dom.hover':
-      return domHandlers.domHover(params);
-    case 'dom.scroll':
-      return domHandlers.domScroll(params);
-    case 'locator.count':
-      return locatorHandlers.locatorCount(params);
-    case 'locator.textContent':
-      return locatorHandlers.locatorTextContent(params);
-    case 'locator.allTextContents':
-      return locatorHandlers.locatorAllTextContents(params);
-    case 'locator.allInnerTexts':
-      return locatorHandlers.locatorAllInnerTexts(params);
-    case 'locator.getAttribute':
-      return locatorHandlers.locatorGetAttribute(params);
-    case 'locator.nth':
-      return locatorHandlers.locatorNth(params);
-    case 'locator.first':
-      return locatorHandlers.locatorFirst(params);
-    case 'locator.last':
-      return locatorHandlers.locatorLast(params);
-    case 'locator.waitFor':
-      return locatorHandlers.locatorWaitFor(params);
-    case 'expect.locator.toBeVisible':
-      return locatorHandlers.expectLocatorToBeVisible(params);
-    case 'expect.locator.toBeHidden':
-      return locatorHandlers.expectLocatorToBeHidden(params);
-    case 'expect.locator.toBeEnabled':
-      return locatorHandlers.expectLocatorToBeEnabled(params);
-    case 'expect.locator.toBeDisabled':
-      return locatorHandlers.expectLocatorToBeDisabled(params);
-    case 'expect.locator.toBeEditable':
-      return locatorHandlers.expectLocatorToBeEditable(params);
-    case 'expect.locator.toBeChecked':
-      return locatorHandlers.expectLocatorToBeChecked(params);
-    case 'expect.locator.toHaveValue':
-      return locatorHandlers.expectLocatorToHaveValue(params);
-    case 'expect.locator.toHaveCount':
-      return locatorHandlers.expectLocatorToHaveCount(params);
-    case 'expect.locator.toHaveText':
-      return locatorHandlers.expectLocatorToHaveText(params);
-    case 'expect.locator.toHaveAttribute':
-      return locatorHandlers.expectLocatorToHaveAttribute(params);
-    case 'locator.click':
-      return locatorHandlers.locatorClick(params);
-    case 'locator.dragTo':
-      return locatorHandlers.locatorDragTo(params);
-    case 'locator.dispatchDragDrop':
-      return locatorHandlers.locatorDispatchDragDrop(params);
-    case 'locator.screenshot':
-      return locatorHandlers.locatorScreenshot(params);
-    case 'locator.fill':
-      return locatorHandlers.locatorFill(params);
-    case 'locator.press':
-      return locatorHandlers.locatorPress(params);
-    case 'locator.pressSequentially':
-      return locatorHandlers.locatorPressSequentially(params);
-    case 'locator.check':
-      return locatorHandlers.locatorCheck(params);
-    case 'locator.uncheck':
-      return locatorHandlers.locatorUncheck(params);
-    case 'locator.selectOption':
-      return locatorHandlers.locatorSelectOption(params);
-    case 'locator.setInputFiles':
-      return locatorHandlers.locatorSetInputFiles(params);
-    case 'computer.click':
-      return computerHandlers.computerClick(params);
-    case 'computer.drag':
-      return computerHandlers.computerDrag(params);
-    case 'computer.type':
-      return computerHandlers.computerType(params);
-    case 'computer.key':
-      return computerHandlers.computerKey(params);
-    case 'computer.scroll':
-      return computerHandlers.computerScroll(params);
-    case 'computer.hover':
-      return computerHandlers.computerHover(params);
-    case 'keyboard.type':
-      return keyboardHandlers.keyboardType(params);
-    case 'keyboard.compose':
-      return keyboardHandlers.keyboardCompose(params);
-    case 'keyboard.press':
-      return keyboardHandlers.keyboardPress(params);
-    case 'keyboard.down':
-      return keyboardHandlers.keyboardDown(params);
-    case 'keyboard.up':
-      return keyboardHandlers.keyboardUp(params);
-    case 'console.read':
-      return devtoolsHandlers.consoleRead(params);
-    case 'network.read':
-      return devtoolsHandlers.networkRead(params);
-    case 'network.setBlockedUrls':
-      return devtoolsHandlers.networkSetBlockedUrls(params);
-    case 'network.setInterceptors':
-      return devtoolsHandlers.networkSetInterceptors(params);
-    case 'network.routeFromHAR':
-      return devtoolsHandlers.networkRouteFromHAR(params);
-    case 'network.interceptors.clear':
-      return devtoolsHandlers.networkInterceptorsClear(params);
-    case 'network.interceptors.events':
-      return devtoolsHandlers.networkInterceptorsEvents(params);
-    case 'network.interceptors.clearEvents':
-      return devtoolsHandlers.networkInterceptorsClearEvents(params);
-    case 'network.interceptors.status':
-      return devtoolsHandlers.networkInterceptorsStatus(params);
-    case 'downloads.list':
-      return downloadsHandlers.downloadsList(params);
-    case 'downloads.waitFor':
-      return downloadsHandlers.downloadsWaitFor(params);
-    case 'recording.start':
-      return recordingHandlers.recordingStart(params);
-    case 'recording.stop':
-      return recordingHandlers.recordingStop(params);
-    case 'recording.status':
-      return recordingHandlers.recordingStatus(params);
-    case 'recording.export':
-      return recordingHandlers.recordingExport(params);
-    case 'recording.clear':
-      return recordingHandlers.recordingClear(params);
-    case 'trace.start':
-      return traceHandlers.traceStart(params);
-    case 'trace.stop':
-      return traceHandlers.traceStop(params);
-    case 'trace.status':
-      return traceHandlers.traceStatus(params);
-    case 'trace.export':
-      return traceHandlers.traceExport(params);
-    case 'trace.exportHtml':
-      return traceHandlers.traceExportHtml(params);
-    case 'trace.clear':
-      return traceHandlers.traceClear(params);
-    case 'indicator.set':
-      return indicatorSet(params);
-    case 'policy.get':
-      return policyHandlers.policyGet();
-    case 'policy.set':
-      return policyHandlers.policySet(params);
-    case 'policy.checkUrl':
-      return policyHandlers.policyCheckUrl(params);
-    default:
-      throw new Error(`Unknown method: ${request.method}`);
+  const handler = rpcRouter[request.method];
+  if (!handler) {
+    throw new Error(`Unknown method: ${request.method}`);
   }
+  return handler(params);
 }
 
 async function extensionInfo() {
