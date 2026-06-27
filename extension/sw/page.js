@@ -860,6 +860,24 @@ export function createPageHandlers({
     return { dataUrl };
   }
 
+  async function pagePdf(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'page.pdf');
+    await attachDebugger(tabId);
+    const result = await cdp(tabId, 'Page.printToPDF', {
+      landscape: params.landscape === true,
+      printBackground: params.printBackground !== false,
+      preferCSSPageSize: params.preferCSSPageSize === true,
+      transferMode: 'ReturnAsBase64',
+      ...(Number.isFinite(params.scale) && params.scale > 0 ? { scale: params.scale } : {}),
+      ...(Number.isFinite(params.paperWidth) ? { paperWidth: params.paperWidth } : {}),
+      ...(Number.isFinite(params.paperHeight) ? { paperHeight: params.paperHeight } : {}),
+      ...(typeof params.pageRanges === 'string' && params.pageRanges ? { pageRanges: params.pageRanges } : {})
+    });
+    const data = typeof result?.data === 'string' ? result.data : '';
+    return { dataUrl: `data:application/pdf;base64,${data}`, mimeType: 'application/pdf' };
+  }
+
   async function pageExecuteJavaScript(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'page.executeJavaScript');
@@ -1192,6 +1210,7 @@ export function createPageHandlers({
     pageAriaSnapshot,
     pageExpectAriaSnapshot,
     pageScreenshot,
+    pagePdf,
     pageExecuteJavaScript,
     pageDomSnapshot,
     pageSetViewport,

@@ -322,6 +322,7 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Page | `page.accessibilityTree` | Get a structured accessibility tree. |
 | Page | `page.ariaSnapshot` | Get a compact ARIA role/name snapshot for LLM perception. |
 | Page | `page.screenshot` | Capture a page screenshot. |
+| Page | `page.pdf` | Render the page to a PDF data URL. |
 | Page | `page.domSnapshot` | Get a CDP DOM snapshot. |
 | Page | `page.setViewport` | Emulate viewport size and device scale. |
 | Page | `page.emulateMedia` | Emulate color scheme, media type, reduced motion. |

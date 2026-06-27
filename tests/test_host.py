@@ -36,6 +36,7 @@ class TestHostUtilities(unittest.TestCase):
         self.assertEqual(host.extension_for_mime("image/png"), ".png")
         self.assertEqual(host.extension_for_mime("image/jpeg"), ".jpg")
         self.assertEqual(host.extension_for_mime("application/json"), ".json")
+        self.assertEqual(host.extension_for_mime("application/pdf"), ".pdf")
         self.assertEqual(host.extension_for_mime("text/plain"), ".txt")
         self.assertEqual(host.extension_for_mime("unknown/mime"), ".bin")
 

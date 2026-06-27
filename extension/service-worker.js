@@ -221,6 +221,7 @@ const rpcRouter = {
   'page.ariaSnapshot': (params) => pageHandlers.pageAriaSnapshot(params),
   'expect.page.toMatchAriaSnapshot': (params) => pageHandlers.pageExpectAriaSnapshot(params),
   'page.screenshot': (params) => pageHandlers.pageScreenshot(params),
+  'page.pdf': (params) => pageHandlers.pagePdf(params),
   'page.executeJavaScript': (params) => pageHandlers.pageExecuteJavaScript(params),
   'page.domSnapshot': (params) => pageHandlers.pageDomSnapshot(params),
   'page.setViewport': (params) => pageHandlers.pageSetViewport(params),
@@ -1240,7 +1241,7 @@ function getMethodCategory(method, params = {}) {
   ) {
     return 'page_script';
   }
-  if (method === 'page.screenshot' || method === 'page.domSnapshot' || method === 'locator.screenshot') {
+  if (method === 'page.screenshot' || method === 'page.pdf' || method === 'page.domSnapshot' || method === 'locator.screenshot') {
     return 'page_screenshot';
   }
   if (
