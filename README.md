@@ -56,7 +56,10 @@ practical differences for an agent:
 | Access scope | Hard-isolated to Agent-managed tab groups; calls to other tabs are rejected | The whole browser — every tab and target | The whole browser context it controls |
 | Consent & auth | Per-method runtime approval, a local bearer token, and origin checks | None — the debug port is unauthenticated | None — the test process has full control |
 | Agent perception | Built-in LLM-oriented primitives: ref-tagged accessibility tree, `format: "compact"` snapshots, `page.ariaSnapshot`, and post-action `whatChanged` deltas | You read the raw protocol and build perception yourself | Locators and the DOM; you build the LLM view yourself |
-| Acting | Playwright-style locators **plus** act-by-`ref` (`locator.*Ref`) on perceived nodes | Manual `Input.*` / `Runtime.*` calls | Locators with auto-waiting |
+| Acting | Playwright-style locators **plus** act-by-`ref` (`locator.*Ref`) on perceived nodes, and coordinate-based `computer.*` for canvas/non-DOM | Manual `Input.*` / `Runtime.*` calls | Locators with auto-waiting |
+| Authenticated extraction | Reads the user's logged-in pages directly — the real session (incl. httpOnly cookies) is already present | Re-create auth: a login script or injected cookies | Re-create auth via login or `storageState` |
+| Strict-CSP & payloads | Scoped per-origin CSP bypass (bounded TTL) lets injected reads/scripts run; `network.read` / `network.getResponseBody` capture XHR/JSON bodies | Drive the Network/Page domains yourself | Context-level CSP bypass; `route`/response APIs |
+| Action feedback | Each action returns a `whatChanged` delta (URL, popups, focus, optional a11y diff) for the agent loop | Subscribe to protocol events and correlate them yourself | Auto-waiting plus assertions you write |
 | Lifecycle | Lives with the user's browser; start/stop from the side panel | Tied to the debug session | Ephemeral context per run |
 
 In short: Playwright and CDP are excellent for **testing and scripted automation
