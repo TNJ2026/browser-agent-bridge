@@ -12,7 +12,10 @@
 // NOTE: every method matched here must carry `params.tabId`; the isolation gate
 // calls assertTabId(params.tabId) on a match. Adding a tab-less method under one
 // of these namespaces would make that gate throw.
-export function isTabTargetedMethod(method) {
+export function isTabTargetedMethod(method, params = {}) {
+  if (method === 'network.interceptors.status') {
+    return params.tabId != null;
+  }
   return (
     method.startsWith('page.') ||
     method.startsWith('expect.page.') ||

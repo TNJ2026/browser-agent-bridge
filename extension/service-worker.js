@@ -1050,7 +1050,7 @@ async function assertRpcTabIsolation(method, params = {}) {
     return;
   }
 
-  if (isTabTargetedMethod(method)) {
+  if (isTabTargetedMethod(method, params)) {
     await assertAgentManagedTabs([assertTabId(params.tabId)], method);
   }
 }
@@ -1270,7 +1270,7 @@ async function isAgentTabGroupOperation(method, params = {}) {
     const tabIds = Array.isArray(params.tabIds) ? params.tabIds : [params.tabId];
     return sessionsHandlers.areAgentManagedTabs(tabIds);
   }
-  if (isTabTargetedMethod(method)) {
+  if (isTabTargetedMethod(method, params)) {
     // cookies.get exposes sensitive httpOnly session tokens, so we never
     // auto-allow it in-boundary without prompting for approval.
     if (method === 'cookies.get') return false;
