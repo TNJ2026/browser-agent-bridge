@@ -9,6 +9,36 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent / "native"))
 import host
 
+
+def _ws_frame(opcode, payload, fin=True, mask=b"\x01\x02\x03\x04"):
+    """Build a masked client WebSocket frame (payload < 126 bytes)."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    assert len(payload) < 126, "test helper only encodes short payloads"
+    out = bytearray([(0x80 if fin else 0x00) | opcode, 0x80 | len(payload)])
+    out.extend(mask)
+    out.extend(byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    return bytes(out)
+
+
+class _StreamSock:
+    """A socket stub that serves a byte buffer across recv(n) calls."""
+
+    def __init__(self, data):
+        self.buf = bytearray(data)
+        self.sent = []
+
+    def recv(self, size):
+        if not self.buf:
+            raise ConnectionError("WebSocket connection closed")
+        chunk = bytes(self.buf[:size])
+        del self.buf[:size]
+        return chunk
+
+    def sendall(self, data):
+        self.sent.append(data)
+
+
 class TestHostUtilities(unittest.TestCase):
     def setUp(self):
         self._host_state = {
@@ -356,6 +386,50 @@ class TestHostUtilities(unittest.TestCase):
         host.unregister_websocket(all_sock)
         self.assertEqual(host.current_ws_subscription_status(), {"all": False, "tabIds": []})
         self.assertTrue(all(message["method"] == "bridge.subscriptionStatus" for message in published))
+
+    def test_websocket_recv_reassembles_fragmented_text(self):
+        sock = _StreamSock(
+            _ws_frame(0x1, "hel", fin=False) + _ws_frame(0x0, "lo", fin=True)
+        )
+        self.assertEqual(host.websocket_recv(sock), "hello")
+
+    def test_websocket_recv_handles_ping_interleaved_with_fragments(self):
+        sock = _StreamSock(
+            _ws_frame(0x1, "he", fin=False)
+            + _ws_frame(0x9, b"ping-payload", fin=True)  # control frame mid-message
+            + _ws_frame(0x0, "llo", fin=True)
+        )
+        self.assertEqual(host.websocket_recv(sock), "hello")
+        # A pong (opcode 0xA) echoing the ping payload was sent back.
+        self.assertEqual(len(sock.sent), 1)
+        self.assertEqual(sock.sent[0][0] & 0x0F, 0xA)
+
+    def test_websocket_recv_single_unfragmented_text(self):
+        sock = _StreamSock(_ws_frame(0x1, "ok", fin=True))
+        self.assertEqual(host.websocket_recv(sock), "ok")
+
+    def test_websocket_recv_returns_none_on_close(self):
+        sock = _StreamSock(_ws_frame(0x8, b"", fin=True))
+        self.assertIsNone(host.websocket_recv(sock))
+
+    def test_websocket_recv_rejects_oversized_reassembled_total(self):
+        import struct as _struct
+        # Two frames each within the per-frame cap but together over it: the
+        # first fills the cap, the continuation pushes one byte past it.
+        orig_cap = host.MAX_MESSAGE_BYTES
+        host.MAX_MESSAGE_BYTES = 8
+        try:
+            first = _ws_frame(0x2, b"abcdefgh", fin=False)  # exactly at cap
+            cont = _ws_frame(0x0, b"i", fin=True)           # one byte over
+            sock = _StreamSock(first + cont)
+            with self.assertRaises(ConnectionError):
+                host.websocket_recv(sock)
+        finally:
+            host.MAX_MESSAGE_BYTES = orig_cap
+        # A 1009 close frame was sent before raising.
+        self.assertTrue(sock.sent)
+        self.assertEqual(sock.sent[-1][0] & 0x0F, 0x8)
+        self.assertEqual(_struct.unpack("!H", sock.sent[-1][2:4])[0], 1009)
 
     def test_handle_native_request_rejects_unknown_methods(self):
         from unittest.mock import patch
