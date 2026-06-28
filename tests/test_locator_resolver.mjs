@@ -315,3 +315,115 @@ test('locator.clickRef rejects non-actionable refs with structured diagnostics',
     }
   );
 });
+
+test('locator.clickRef returns compact action effects', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const tabs = [
+    { url: 'https://example.test/form', title: 'Form', status: 'complete' },
+    { url: 'https://example.test/done', title: 'Done', status: 'loading' }
+  ];
+  const focus = [
+    { tagName: 'input', id: 'email', role: 'textbox', accessibleName: 'Email', value: '', text: '', rect: null },
+    { tagName: 'button', id: 'submit', role: 'button', accessibleName: 'Submit', value: '', text: 'Submit', rect: { x: 1, y: 2, width: 3, height: 4 } }
+  ];
+  const handlers = createLocatorHandlers({
+    assertTabId: id => id,
+    assertTabAllowed: async () => {},
+    assertString: () => {},
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async () => {},
+    resolveFrameTarget: async (tabId, params) => ({
+      target: { tabId, frameIds: [params.frameId] },
+      frameId: params.frameId,
+      frame: { frameId: params.frameId, url: 'about:test' },
+      frameOffset: null
+    }),
+    ensureContentScripts: async () => {},
+    chromeApi: {
+      tabs: {
+        async get() { return tabs.shift(); },
+        async sendMessage() {
+          return {
+            ok: true,
+            target: {
+              ref: 'ref_1',
+              snapshotId: 'snap_1',
+              element: { ref: 'ref_1', tagName: 'button', clickPoint: { x: 5, y: 6 } },
+              actionability: { actionable: true, visible: true, enabled: true, receivesEvents: true, reasons: [] }
+            }
+          };
+        }
+      },
+      scripting: {
+        async executeScript() { return [{ result: focus.shift() || null }]; }
+      }
+    }
+  });
+
+  const result = await handlers.locatorClickRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1' });
+
+  assert.deepEqual(result.effects, {
+    available: true,
+    changed: true,
+    urlChanged: true,
+    titleChanged: true,
+    statusChanged: true,
+    focusChanged: true,
+    url: 'https://example.test/done',
+    title: 'Done',
+    status: 'loading',
+    focused: {
+      tagName: 'button',
+      id: 'submit',
+      name: '',
+      role: 'button',
+      accessibleName: 'Submit',
+      type: '',
+      value: '',
+      text: 'Submit',
+      rect: { x: 1, y: 2, width: 3, height: 4 }
+    }
+  });
+});
+
+test('effects: false skips action-effect capture', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  let effectProbeCalls = 0;
+  const handlers = createLocatorHandlers({
+    assertTabId: id => id,
+    assertTabAllowed: async () => {},
+    assertString: () => {},
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async () => {},
+    resolveFrameTarget: async (tabId, params) => ({
+      target: { tabId, frameIds: [params.frameId] },
+      frameId: params.frameId,
+      frame: { frameId: params.frameId, url: 'about:test' },
+      frameOffset: null
+    }),
+    ensureContentScripts: async () => {},
+    chromeApi: {
+      tabs: {
+        async get() { effectProbeCalls += 1; return { url: 'x', title: 'y', status: 'complete' }; },
+        async sendMessage() {
+          return {
+            ok: true,
+            target: {
+              ref: 'ref_1',
+              snapshotId: 'snap_1',
+              element: { ref: 'ref_1', tagName: 'button', clickPoint: { x: 5, y: 6 } },
+              actionability: { actionable: true, visible: true, enabled: true, receivesEvents: true, reasons: [] }
+            }
+          };
+        }
+      },
+      scripting: { async executeScript() { effectProbeCalls += 1; return [{ result: null }]; } }
+    }
+  });
+
+  const result = await handlers.locatorClickRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', effects: false });
+  assert.equal(result.effects, null);
+  assert.equal(effectProbeCalls, 0); // no tab/focus snapshots taken when effects are disabled
+});
