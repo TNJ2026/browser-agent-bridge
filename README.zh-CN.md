@@ -285,9 +285,10 @@ scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
 
 1. 先调用 `session.start` 创建隔离的 Agent 标签组，或对已有 Agent session 调用 `session.get`。
 2. 优先使用只读方法，例如 `page.readText`、`page.accessibilityTree` 和 `dom.query`。
-3. 仅在必要时使用 `page.executeJavaScript`、`dom.*` 或 `computer.*`。
-4. 尊重运行时审批。侧边栏未打开时，扩展会打开审批弹窗。
-5. 将可复用的站点 selector、等待条件、提取逻辑、CSP 需求和坑点记录到 `runtime/site-patterns/{domain}.md`。
+3. 用 `page.accessibilityTree` 返回的 `ref`，通过 `locator.clickRef` / `fillRef` / `pressRef` / `hoverRef` / `selectOptionRef` 直接操作，避免重新推导 selector。
+4. 仅在必要时使用 `page.executeJavaScript`、`dom.*` 或 `computer.*`。
+5. 尊重运行时审批。侧边栏未打开时，扩展会打开审批弹窗。
+6. 将可复用的站点 selector、等待条件、提取逻辑、CSP 需求和坑点记录到 `runtime/site-patterns/{domain}.md`。
 
 只有侧边栏里的 bridge 控制处于 Start 状态时，本地 HTTP/WebSocket bridge 才可用。如果用户点击 Stop Bridge，`scripts/browser_bridge_client.py health` 等辅助脚本会失败，直到用户再次点击 Start Bridge。
 
@@ -308,11 +309,12 @@ scripts/browser_bridge_client.py rpc page.readText '{"tabId":123}'
 | Session | `session.stop` | 关闭会话工作区。 |
 | Page | `page.navigate` | 导航到 URL。 |
 | Page | `page.readText` | 提取页面可见文本。 |
-| Page | `page.accessibilityTree` | 获取结构化无障碍树。 |
+| Page | `page.accessibilityTree` | 获取结构化无障碍树；生成 `ref` 标识，并支持 `format: "compact"` 输出精简快照。 |
 | Page | `page.screenshot` | 截取页面截图。 |
 | Page | `page.domSnapshot` | 获取 CDP DOM 快照。 |
 | Interactive | `locator.click` | 通过 selector、文本、role/name、label 或 placeholder 点击。 |
 | Interactive | `locator.fill` | 通过 selector、label 或其他 locator 字段填写表单。 |
+| Interactive | `locator.clickRef` / `fillRef` / `pressRef` / `hoverRef` / `selectOptionRef` | 直接对 `page.accessibilityTree` 生成的 `ref` 操作，无需重建 locator。 |
 | Interactive | `dom.click` | 通过 CSS selector 点击。 |
 | Interactive | `dom.type` | 向 selector 对应元素输入文本。 |
 | Interactive | `computer.click` | 按视口坐标点击。 |
