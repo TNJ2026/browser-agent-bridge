@@ -407,3 +407,90 @@ test('locator.fillRef rejects a non-actionable ref', async () => {
     /not actionable for locator\.fillRef/
   );
 });
+
+test('ensureDomA11yAtom caches injection by tab/frame and invalidates on navigation', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  let executeScriptCalls = 0;
+  
+  // Listeners stored to simulate events
+  let commitListener = null;
+  let updatedListener = null;
+  let removedListener = null;
+
+  const chromeApi = {
+    runtime: { getURL: () => 'content/dom-a11y.js' },
+    webNavigation: {
+      onCommitted: {
+        addListener(fn) { commitListener = fn; }
+      }
+    },
+    tabs: {
+      onUpdated: {
+        addListener(fn) { updatedListener = fn; }
+      },
+      onRemoved: {
+        addListener(fn) { removedListener = fn; }
+      }
+    },
+    scripting: {
+      async executeScript() {
+        executeScriptCalls += 1;
+        return [{ result: { count: 3 } }];
+      }
+    }
+  };
+
+  const handlers = createLocatorHandlers({
+    assertTabId: id => id,
+    assertTabAllowed: async () => {},
+    assertString: () => {},
+    recordAction: async () => {},
+    resolveFrameTarget: async (tabId, params) => ({
+      target: { tabId, frameIds: [params.frameId || 0] },
+      frameId: params.frameId || 0,
+      frame: { frameId: params.frameId || 0, url: 'about:test' },
+      frameOffset: null
+    }),
+    chromeApi
+  });
+
+  // First call -> should inject + execute query (2 calls)
+  await handlers.locatorCount({ tabId: 42, selector: 'button' });
+  assert.equal(executeScriptCalls, 2);
+
+  // Second call -> cached, only execute query (1 call, total 3)
+  await handlers.locatorCount({ tabId: 42, selector: 'button' });
+  assert.equal(executeScriptCalls, 3);
+
+  // Call on a different tab -> inject + execute query (2 calls, total 5)
+  await handlers.locatorCount({ tabId: 99, selector: 'button' });
+  assert.equal(executeScriptCalls, 5);
+
+  // Call on different frame on same tab -> inject + execute query (2 calls, total 7)
+  await handlers.locatorCount({ tabId: 42, frameId: 1, selector: 'button' });
+  assert.equal(executeScriptCalls, 7);
+  
+  // Call on different frame again -> cached, only execute query (1 call, total 8)
+  await handlers.locatorCount({ tabId: 42, frameId: 1, selector: 'button' });
+  assert.equal(executeScriptCalls, 8);
+
+  // Simulate main frame navigation on tab 42
+  assert.ok(commitListener);
+  commitListener({ tabId: 42, frameId: 0 });
+
+  // Call again on tab 42 -> cache cleared, inject + execute query (2 calls, total 10)
+  await handlers.locatorCount({ tabId: 42, selector: 'button' });
+  assert.equal(executeScriptCalls, 10);
+
+  // Tab 99 is still cached (was not cleared) -> only execute query (1 call, total 11)
+  await handlers.locatorCount({ tabId: 99, selector: 'button' });
+  assert.equal(executeScriptCalls, 11);
+
+  // Simulate tab update loading status
+  assert.ok(updatedListener);
+  updatedListener(99, { status: 'loading' });
+
+  // Call on tab 99 -> cache cleared, inject + execute query (2 calls, total 13)
+  await handlers.locatorCount({ tabId: 99, selector: 'button' });
+  assert.equal(executeScriptCalls, 13);
+});

@@ -14,7 +14,51 @@ export function createLocatorHandlers({
   chromeApi = chrome,
   domA11ySource = null
 }) {
+  const injectedTargets = new Set();
+
+  if (chromeApi.webNavigation?.onCommitted) {
+    chromeApi.webNavigation.onCommitted.addListener((details) => {
+      if (details.frameId === 0) {
+        for (const key of injectedTargets) {
+          if (key.startsWith(`${details.tabId}:`)) {
+            injectedTargets.delete(key);
+          }
+        }
+      } else {
+        injectedTargets.delete(`${details.tabId}:${details.frameId}`);
+      }
+    });
+  }
+
+  if (chromeApi.tabs?.onUpdated) {
+    chromeApi.tabs.onUpdated.addListener((tabId, changeInfo) => {
+      if (changeInfo.url || changeInfo.status === 'loading') {
+        for (const key of injectedTargets) {
+          if (key.startsWith(`${tabId}:`)) {
+            injectedTargets.delete(key);
+          }
+        }
+      }
+    });
+  }
+
+  if (chromeApi.tabs?.onRemoved) {
+    chromeApi.tabs.onRemoved.addListener((tabId) => {
+      for (const key of injectedTargets) {
+        if (key.startsWith(`${tabId}:`)) {
+          injectedTargets.delete(key);
+        }
+      }
+    });
+  }
+
   async function ensureDomA11yAtom(tabId, frameTarget) {
+    const frameId = frameTarget?.frameId || 0;
+    const cacheKey = `${tabId}:${frameId}`;
+    if (injectedTargets.has(cacheKey)) {
+      return;
+    }
+
     const target = frameTarget?.target || { tabId };
     if (typeof domA11ySource === 'string') {
       await chromeApi.scripting.executeScript({
@@ -25,6 +69,7 @@ export function createLocatorHandlers({
         args: [domA11ySource],
         world: 'MAIN'
       });
+      injectedTargets.add(cacheKey);
       return;
     }
     if (!chromeApi.runtime?.getURL && !globalThis.chrome?.runtime?.getURL) return;
@@ -33,6 +78,7 @@ export function createLocatorHandlers({
       files: ['content/dom-a11y.js'],
       world: 'MAIN'
     });
+    injectedTargets.add(cacheKey);
   }
 
   async function locatorCount(params) {
