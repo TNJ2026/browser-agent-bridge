@@ -691,6 +691,13 @@ match counts, reasons, frame, and last element). A located element that has no
 usable click point uses `data.code: "DOM_ELEMENT_NOT_ACTIONABLE"`. This mirrors
 the `locator.*` diagnostics so both interaction surfaces report failures the
 same way.
+Successful responses include a compact `effects` object with best-effort
+post-action signals: URL/title/status changes and the currently focused
+element. This lets agents skip an immediate full snapshot when the action did
+not materially change page state. Capturing effects costs a couple of extra
+calls per action (a tab snapshot plus a focused-element probe, before and
+after); pass `"effects": false` to skip it and return `effects: null` when you
+do not need the delta.
 
 ```json
 { "tabId": 123, "selector": "button[type=submit]", "index": 0, "timeoutMs": 30000, "frameSelector": "iframe[name=app]" }
@@ -912,6 +919,8 @@ lists `count` and every conflicting candidate (`candidates`, capped by the
 in-page collection limit, with `candidatesTruncated` when `count` exceeds it).
 This applies to all auto-waiting locator actions (`locator.click`,
 `locator.fill`, `locator.check`, `locator.selectOption`, drag, etc.).
+Successful `locator.click` responses include a compact `effects` object with
+best-effort URL/title/status changes and the currently focused element.
 
 ```json
 { "tabId": 123, "role": "button", "name": "Submit", "timeoutMs": 30000 }
@@ -928,7 +937,8 @@ the same CDP mouse input path as `locator.click`.
 Refs are valid for the latest accessibility snapshot in that frame. Passing
 `snapshotId` is recommended; a stale id is rejected instead of clicking a newer
 node that reused the same `ref_N`. Use `force:true` to bypass actionability
-checks.
+checks. Successful responses include the same compact `effects` object as
+`locator.click`.
 
 ```json
 { "tabId": 123, "ref": "ref_4", "snapshotId": "snap_lx3...", "frameId": 0 }
@@ -942,7 +952,9 @@ and have a stable bounding box. Text fields and contenteditable elements are
 focused and filled through CDP text input; native selects use value assignment
 plus input/change events.
 For flat params, `text` is the value to fill. To locate by text and fill a
-different value, use the nested form.
+different value, use the nested form. Successful responses include compact
+`effects` so agents can see focus and navigation changes without immediately
+re-snapshotting.
 
 ```json
 { "tabId": 123, "label": "Search", "text": "browser bridge" }
