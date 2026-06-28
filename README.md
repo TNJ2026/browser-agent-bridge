@@ -8,6 +8,7 @@ An unpacked Chrome extension plus Native Messaging host that exposes browser-con
 
 - [Architecture](#architecture)
 - [Features](#features)
+- [Compared to CDP and Playwright](#compared-to-cdp-and-playwright)
 - [Installation](#installation)
 - [Authentication](#authentication)
 - [Quick Start](#quick-start)
@@ -40,6 +41,29 @@ graph TD
 - Event streaming for console and network activity.
 - Workflow recording with input-redaction defaults.
 - Optional visual overlays for tracing agent actions.
+
+## Compared to CDP and Playwright
+
+Playwright and the raw Chrome DevTools Protocol (CDP) are built to drive a
+**dedicated, automation-launched browser**. Browser Agent Bridge instead lets an
+agent operate the **user's everyday Chrome** through an installed extension. The
+practical differences for an agent:
+
+| | Browser Agent Bridge | Raw CDP | Playwright |
+| :-- | :-- | :-- | :-- |
+| Browser & profile | The user's running Chrome with their real profile — logged-in sessions, cookies, and extensions are already there | A Chrome launched with `--remote-debugging-port`, usually a throwaway profile | A bundled/automation Chromium with a fresh context |
+| How it attaches | MV3 extension + Native Messaging host; scoped `chrome.debugger` (CDP) under the hood | An open debugging port any local process can drive | Launches or connects over CDP and owns the browser |
+| Access scope | Hard-isolated to Agent-managed tab groups; calls to other tabs are rejected | The whole browser — every tab and target | The whole browser context it controls |
+| Consent & auth | Per-method runtime approval, a local bearer token, and origin checks | None — the debug port is unauthenticated | None — the test process has full control |
+| Agent perception | Built-in LLM-oriented primitives: ref-tagged accessibility tree, `format: "compact"` snapshots, `page.ariaSnapshot`, and post-action `whatChanged` deltas | You read the raw protocol and build perception yourself | Locators and the DOM; you build the LLM view yourself |
+| Acting | Playwright-style locators **plus** act-by-`ref` (`locator.*Ref`) on perceived nodes | Manual `Input.*` / `Runtime.*` calls | Locators with auto-waiting |
+| Lifecycle | Lives with the user's browser; start/stop from the side panel | Tied to the debug session | Ephemeral context per run |
+
+In short: Playwright and CDP are excellent for **testing and scripted automation
+in a sandboxed browser**. Browser Agent Bridge is for an **agent acting inside
+the user's real browser**, under an explicit tab-group boundary and per-action
+approval, with perception and action primitives shaped for an LLM loop rather
+than a test script.
 
 ## Installation
 
