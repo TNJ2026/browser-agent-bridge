@@ -147,3 +147,48 @@ test('action resolvers automatically parse f{frameId}:{ref} prefix format', asyn
   // It should strip the f7: prefix when looking up in the frame content script
   assert.equal(sentMessage.ref, 'ref_99');
 });
+
+test('locatorSelectOptionRef automatically parses f{frameId}:{ref} prefix format', async () => {
+  const { createLocatorHandlers } = await importLocatorModule();
+  
+  let sentMessage = null;
+  let sentFrameId = null;
+
+  const handlers = createLocatorHandlers({
+    assertTabId: v => v,
+    assertTabAllowed: async () => {},
+    assertString: () => {},
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async () => {},
+    resolveFrameTarget: async (tabId, params) => ({
+      target: { tabId, frameIds: [params.frameId] },
+      frameId: params.frameId,
+      frame: { frameId: params.frameId },
+      frameOffset: null
+    }),
+    ensureContentScripts: async () => {},
+    chromeApi: {
+      tabs: {
+        async sendMessage(tabId, message, options) {
+          sentMessage = message;
+          sentFrameId = options.frameId;
+          return {
+            ok: true,
+            target: {
+              element: { tagName: 'select' },
+              actionability: { actionable: true }
+            },
+            selected: [{ value: 'us', label: 'United States', index: 1 }]
+          };
+        }
+      }
+    }
+  });
+
+  const res = await handlers.locatorSelectOptionRef({ tabId: 1, ref: 'f12:ref_88', value: 'us' });
+
+  assert.equal(res.ok, true);
+  assert.equal(sentFrameId, 12);
+  assert.equal(sentMessage.ref, 'ref_88');
+});

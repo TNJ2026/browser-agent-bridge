@@ -920,16 +920,18 @@ export function createLocatorHandlers({
     await assertTabAllowed(tabId, 'locator.selectOptionRef');
     assertString(params.ref, 'ref');
     const values = normalizeSelectOptionValues(params);
-    const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
+    const parsed = parseRef(params.ref, Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0);
+    const frameId = parsed.frameId;
+    const ref = parsed.ref;
     const frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
     await ensureContentScripts(tabId, frameId);
     const response = await chromeApi.tabs.sendMessage(tabId, {
       type: 'SELECT_ACCESSIBILITY_REF_OPTIONS',
-      ref: params.ref,
+      ref,
       snapshotId: typeof params.snapshotId === 'string' && params.snapshotId ? params.snapshotId : undefined,
       values
     }, { frameId });
-    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${params.ref}`);
+    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${ref}`);
     const target = response.target;
     if (params.force !== true && target?.actionability?.actionable !== true) {
       throw createLocatorRefNotActionableError(params, frameTarget, target, 'locator.selectOptionRef');
