@@ -94,3 +94,56 @@ test('compact snapshot is much smaller than the verbose tree', async () => {
   assert.ok(compact.snapshot.length < JSON.stringify(verbose.nodes).length / 2,
     'compact should be < half the verbose JSON size');
 });
+
+async function importLocatorModule() {
+  const source = await readFile(new URL('../extension/sw/locator.js', import.meta.url), 'utf8');
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+  return import(dataUrl);
+}
+
+test('action resolvers automatically parse f{frameId}:{ref} prefix format', async () => {
+  const { createLocatorHandlers } = await importLocatorModule();
+  
+  let sentMessage = null;
+  let sentFrameId = null;
+
+  const handlers = createLocatorHandlers({
+    assertTabId: v => v,
+    assertTabAllowed: async () => {},
+    assertString: () => {},
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async () => {},
+    resolveFrameTarget: async (tabId, params) => ({
+      target: { tabId, frameIds: [params.frameId] },
+      frameId: params.frameId,
+      frame: { frameId: params.frameId },
+      frameOffset: null
+    }),
+    ensureContentScripts: async () => {},
+    chromeApi: {
+      tabs: {
+        async sendMessage(tabId, message, options) {
+          sentMessage = message;
+          sentFrameId = options.frameId;
+          return {
+            ok: true,
+            target: {
+              element: { clickPoint: { x: 5, y: 6 } },
+              actionability: { actionable: true }
+            }
+          };
+        }
+      }
+    }
+  });
+
+  // Call clickRef with f7:ref_99
+  const res = await handlers.locatorClickRef({ tabId: 1, ref: 'f7:ref_99' });
+
+  assert.equal(res.ok, true);
+  // It should parse frameId: 7 and send message to frame 7
+  assert.equal(sentFrameId, 7);
+  // It should strip the f7: prefix when looking up in the frame content script
+  assert.equal(sentMessage.ref, 'ref_99');
+});

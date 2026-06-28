@@ -16,6 +16,18 @@ export function createLocatorHandlers({
 }) {
   const injectedTargets = new Set();
 
+  function parseRef(ref, frameId = 0) {
+    const match = ref.match(/^f(\d+):(.+)$/);
+    if (match) {
+      return {
+        frameId: parseInt(match[1], 10),
+        ref: match[2]
+      };
+    }
+    return { frameId, ref };
+  }
+
+
   if (chromeApi.webNavigation?.onCommitted) {
     chromeApi.webNavigation.onCommitted.addListener((details) => {
       if (details.frameId === 0) {
@@ -353,20 +365,22 @@ export function createLocatorHandlers({
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.clickRef');
     assertString(params.ref, 'ref');
-    const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
+    const parsed = parseRef(params.ref, Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0);
+    const frameId = parsed.frameId;
+    const ref = parsed.ref;
     let frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
     await ensureContentScripts(tabId, frameId);
     const response = await chromeApi.tabs.sendMessage(tabId, {
       type: 'GET_ACCESSIBILITY_REF_TARGET',
-      ref: params.ref,
+      ref,
       snapshotId: typeof params.snapshotId === 'string' && params.snapshotId ? params.snapshotId : undefined
     }, { frameId });
-    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${params.ref}`);
+    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${ref}`);
     const target = response.target;
     if (params.force !== true && target?.actionability?.actionable !== true) {
       throw createLocatorRefNotActionableError(params, frameTarget, target);
     }
-    if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for ref ${params.ref}`);
+    if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for ref ${ref}`);
     if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = { element: target.element };
@@ -807,20 +821,22 @@ export function createLocatorHandlers({
   // plus a frame target whose offsets are settled. Mirrors locator.clickRef.
   async function resolveRefForAction(tabId, params, method) {
     assertString(params.ref, 'ref');
-    const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
+    const parsed = parseRef(params.ref, Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0);
+    const frameId = parsed.frameId;
+    const ref = parsed.ref;
     let frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
     await ensureContentScripts(tabId, frameId);
     const response = await chromeApi.tabs.sendMessage(tabId, {
       type: 'GET_ACCESSIBILITY_REF_TARGET',
-      ref: params.ref,
+      ref,
       snapshotId: typeof params.snapshotId === 'string' && params.snapshotId ? params.snapshotId : undefined
     }, { frameId });
-    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${params.ref}`);
+    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${ref}`);
     const target = response.target;
     if (params.force !== true && target?.actionability?.actionable !== true) {
       throw createLocatorRefNotActionableError(params, frameTarget, target, method);
     }
-    if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for ref ${params.ref}`);
+    if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for ref ${ref}`);
     if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
     return { frameId, frameTarget, target };
   }
@@ -842,16 +858,18 @@ export function createLocatorHandlers({
   // element and returns the same target summary as resolveRefForAction.
   async function focusRef(tabId, params, method, select) {
     assertString(params.ref, 'ref');
-    const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
+    const parsed = parseRef(params.ref, Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0);
+    const frameId = parsed.frameId;
+    const ref = parsed.ref;
     let frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
     await ensureContentScripts(tabId, frameId);
     const response = await chromeApi.tabs.sendMessage(tabId, {
       type: 'FOCUS_ACCESSIBILITY_REF',
-      ref: params.ref,
+      ref,
       snapshotId: typeof params.snapshotId === 'string' && params.snapshotId ? params.snapshotId : undefined,
       select
     }, { frameId });
-    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${params.ref}`);
+    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${ref}`);
     const target = response.target;
     if (params.force !== true && target?.actionability?.actionable !== true) {
       throw createLocatorRefNotActionableError(params, frameTarget, target, method);
@@ -895,6 +913,38 @@ export function createLocatorHandlers({
     await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
     await recordAction(tabId, 'locator.hoverRef', { ref: params.ref, snapshotId: target.snapshotId || params.snapshotId || null, frameId }, { element: target.element });
     return refActionResult(params, frameTarget, target, frameId);
+  }
+
+  async function locatorSelectOptionRef(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.selectOptionRef');
+    assertString(params.ref, 'ref');
+    const values = normalizeSelectOptionValues(params);
+    const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
+    const frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
+    await ensureContentScripts(tabId, frameId);
+    const response = await chromeApi.tabs.sendMessage(tabId, {
+      type: 'SELECT_ACCESSIBILITY_REF_OPTIONS',
+      ref: params.ref,
+      snapshotId: typeof params.snapshotId === 'string' && params.snapshotId ? params.snapshotId : undefined,
+      values
+    }, { frameId });
+    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${params.ref}`);
+    const target = response.target;
+    if (params.force !== true && target?.actionability?.actionable !== true) {
+      throw createLocatorRefNotActionableError(params, frameTarget, target, 'locator.selectOptionRef');
+    }
+    await recordAction(tabId, 'locator.selectOptionRef', { ref: params.ref, snapshotId: target.snapshotId || params.snapshotId || null, options: values, frameId }, { element: target.element, selected: response.selected });
+    return {
+      ok: true,
+      ref: params.ref,
+      snapshotId: target.snapshotId || null,
+      element: target.element,
+      selected: response.selected,
+      frame: frameTarget.frame,
+      actionability: target.actionability || null,
+      frameId
+    };
   }
 
   function compactLocatorElement(element) {
