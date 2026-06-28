@@ -417,9 +417,15 @@ def websocket_read_exact(sock, size):
         data += chunk
     return data
 
-def websocket_recv(sock):
+def websocket_read_frame(sock):
+    """Read a single WebSocket frame, returning (fin, opcode, payload_bytes).
+
+    The declared length is checked before the payload is read so an oversized
+    frame can never allocate memory.
+    """
     header = websocket_read_exact(sock, 2)
     first, second = header[0], header[1]
+    fin = bool(first & 0x80)
     opcode = first & 0x0F
     masked = bool(second & 0x80)
     length = second & 0x7F
@@ -438,14 +444,55 @@ def websocket_recv(sock):
     payload = websocket_read_exact(sock, length) if length else b""
     if masked:
         payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
-    if opcode == 0x8:
-        return None
-    if opcode == 0x9:
-        websocket_send(sock, payload, opcode=0xA)
-        return ""
-    if opcode != 0x1:
-        return ""
-    return payload.decode("utf-8")
+    return fin, opcode, payload
+
+
+def websocket_recv(sock):
+    """Read one full WebSocket message, reassembling fragmented frames.
+
+    Returns the decoded text of a complete text message, None when the peer
+    closes, or "" for a complete message the caller should ignore (binary).
+    Per RFC 6455, control frames (ping/pong) are never fragmented and may be
+    interleaved between the fragments of a data message, so they are handled
+    inline here rather than surfaced to the caller.
+    """
+    message = bytearray()
+    message_opcode = None  # opcode of the data frame that started the message
+    while True:
+        fin, opcode, payload = websocket_read_frame(sock)
+
+        if opcode == 0x8:  # close
+            return None
+        if opcode == 0x9:  # ping -> pong, then keep waiting for the data message
+            websocket_send(sock, payload, opcode=0xA)
+            continue
+        if opcode == 0xA:  # pong
+            continue
+
+        if opcode == 0x0:  # continuation of the in-progress message
+            if message_opcode is None:
+                raise ConnectionError("Unexpected WebSocket continuation frame")
+        elif opcode in (0x1, 0x2):  # start of a text/binary message
+            if message_opcode is not None:
+                raise ConnectionError("Expected a WebSocket continuation frame")
+            message_opcode = opcode
+        else:
+            raise ConnectionError(f"Unsupported WebSocket opcode: {opcode}")
+
+        if len(message) + len(payload) > MAX_MESSAGE_BYTES:
+            # Bound the reassembled total, not just each frame, so a flood of
+            # small fragments cannot sum past the cap.
+            try:
+                websocket_send(sock, struct.pack("!H", 1009) + b"message too big", opcode=0x8)
+            except Exception:
+                pass
+            raise ConnectionError("WebSocket message exceeds max size")
+        message.extend(payload)
+
+        if fin:
+            if message_opcode == 0x1:
+                return bytes(message).decode("utf-8")
+            return ""  # complete binary message: ignored, as before
 
 def websocket_send(sock, payload, opcode=0x1):
     if isinstance(payload, str):
