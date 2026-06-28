@@ -278,6 +278,9 @@ const rpcRouter = {
   // locator actions
   'locator.click': (params) => locatorHandlers.locatorClick(params),
   'locator.clickRef': (params) => locatorHandlers.locatorClickRef(params),
+  'locator.fillRef': (params) => locatorHandlers.locatorFillRef(params),
+  'locator.pressRef': (params) => locatorHandlers.locatorPressRef(params),
+  'locator.hoverRef': (params) => locatorHandlers.locatorHoverRef(params),
   'locator.dragTo': (params) => locatorHandlers.locatorDragTo(params),
   'locator.dispatchDragDrop': (params) => locatorHandlers.locatorDispatchDragDrop(params),
   'locator.screenshot': (params) => locatorHandlers.locatorScreenshot(params),

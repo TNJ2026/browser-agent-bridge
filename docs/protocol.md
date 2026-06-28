@@ -941,6 +941,29 @@ checks. Successful responses also carry the `whatChanged` object (see
 { "tabId": 123, "ref": "ref_4", "snapshotId": "snap_lx3...", "frameId": 0 }
 ```
 
+### `locator.fillRef` / `locator.pressRef` / `locator.hoverRef`
+
+The act-by-ref siblings of `locator.clickRef`: they resolve a `ref` from
+`page.accessibilityTree` the same way (with `snapshotId` / `frameId` / `force`)
+and act on it without rebuilding a locator.
+
+- **`locator.fillRef`** — focuses the ref and replaces its text. Requires `text`
+  (or `value`). It focuses the element in-page and selects its existing content
+  (works for input/textarea/contentEditable), then inserts the new text via real
+  CDP input; pass `"replace": false` to insert at the caret instead.
+- **`locator.pressRef`** — focuses the ref (without clicking, so a button is not
+  activated), then sends `key` (e.g. `"Enter"`, `"Control+a"`) through the
+  keyboard dispatcher.
+- **`locator.hoverRef`** — moves the mouse over the ref (no click).
+
+To toggle a checkbox/radio by ref, use `locator.clickRef`. Selecting an option in
+a `<select>` by ref is not yet supported — use `locator.selectOption` with a
+locator.
+
+```json
+{ "tabId": 123, "ref": "ref_4", "snapshotId": "snap_lx3...", "frameId": 0, "text": "alice@example.com" }
+```
+
 ### `locator.fill`
 
 Fills an input, textarea, select-like value field, or contenteditable element.

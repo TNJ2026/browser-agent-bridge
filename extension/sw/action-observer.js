@@ -5,6 +5,8 @@ const OBSERVED_METHODS = new Set([
   'dom.type',
   'locator.click',
   'locator.clickRef',
+  'locator.fillRef',
+  'locator.pressRef',
   'locator.check',
   'locator.uncheck',
   'locator.selectOption',

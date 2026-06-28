@@ -67,8 +67,10 @@ export function getMethodCategory(method, params = {}) {
   if (
     method === 'dom.type' ||
     method === 'locator.fill' ||
+    method === 'locator.fillRef' ||
     method === 'locator.focus' ||
     method === 'locator.press' ||
+    method === 'locator.pressRef' ||
     method === 'locator.pressSequentially' ||
     method === 'computer.type' ||
     method === 'computer.key' ||

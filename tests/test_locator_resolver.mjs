@@ -315,3 +315,89 @@ test('locator.clickRef rejects non-actionable refs with structured diagnostics',
     }
   );
 });
+
+function makeRefHandlers(createLocatorHandlers, { cdpCalls = [], keyPresses = [], messages = [], actionable = true }) {
+  return createLocatorHandlers({
+    assertTabId: id => id,
+    assertTabAllowed: async () => {},
+    assertString: value => { if (typeof value !== 'string' || !value) throw new Error('expected string'); },
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async (tabId, method, params) => { cdpCalls.push({ method, params }); },
+    resolveFrameTarget: async (tabId, params) => ({
+      target: { tabId, frameIds: [params.frameId] },
+      frameId: params.frameId,
+      frame: { frameId: params.frameId, url: 'about:test' },
+      frameOffset: null
+    }),
+    ensureContentScripts: async () => {},
+    keyboardDispatcher: { async press(tabId, key) { keyPresses.push(key); } },
+    chromeApi: {
+      tabs: {
+        async sendMessage(tabId, message) {
+          messages.push(message);
+          return {
+            ok: true,
+            target: {
+              ref: 'ref_1', snapshotId: 'snap_1', frameId: 0,
+              element: { ref: 'ref_1', tagName: 'input', accessibleName: 'Email', clickPoint: { x: 5, y: 6 } },
+              actionability: { actionable, visible: actionable, enabled: actionable, receivesEvents: actionable, reasons: actionable ? [] : ['disabled'] }
+            }
+          };
+        }
+      }
+    }
+  });
+}
+
+test('locator.fillRef focuses+selects in-page then inserts the text (no synthetic click)', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const cdpCalls = [];
+  const messages = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, messages });
+  const result = await handlers.locatorFillRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', text: 'hello' });
+  assert.equal(result.ok, true);
+  const focusMsg = messages.find(m => m.type === 'FOCUS_ACCESSIBILITY_REF');
+  assert.equal(focusMsg.select, true); // select existing content so input replaces it
+  assert.deepEqual(cdpCalls.find(c => c.method === 'Input.insertText').params, { text: 'hello' });
+  assert.equal(cdpCalls.some(c => c.params.type === 'mousePressed'), false);
+});
+
+test('locator.fillRef replace:false focuses without selecting', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const messages = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { messages });
+  await handlers.locatorFillRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', text: 'x', replace: false });
+  assert.equal(messages.find(m => m.type === 'FOCUS_ACCESSIBILITY_REF').select, false);
+});
+
+test('locator.pressRef focuses (no click) then presses the key', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const cdpCalls = [];
+  const keyPresses = [];
+  const messages = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses, messages });
+  const result = await handlers.locatorPressRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', key: 'Enter' });
+  assert.equal(result.ok, true);
+  assert.equal(messages.find(m => m.type === 'FOCUS_ACCESSIBILITY_REF').select, false);
+  assert.deepEqual(keyPresses, ['Enter']);
+  assert.equal(cdpCalls.some(c => c.params.type === 'mousePressed'), false); // no activating click
+});
+
+test('locator.hoverRef moves the mouse to the ref without pressing', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const cdpCalls = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls });
+  const result = await handlers.locatorHoverRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(cdpCalls, [{ method: 'Input.dispatchMouseEvent', params: { type: 'mouseMoved', x: 5, y: 6 } }]);
+});
+
+test('locator.fillRef rejects a non-actionable ref', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const handlers = makeRefHandlers(createLocatorHandlers, { actionable: false });
+  await assert.rejects(
+    handlers.locatorFillRef({ tabId: 1, frameId: 0, ref: 'ref_1', text: 'x' }),
+    /not actionable for locator\.fillRef/
+  );
+});

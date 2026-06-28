@@ -267,3 +267,21 @@ test('ref actionability uses the shared atom (fieldset[disabled] ancestor => not
   assert.equal(response.target.actionability.actionable, false);
   assert.ok(response.target.actionability.reasons.includes('disabled'));
 });
+
+test('FOCUS_ACCESSIBILITY_REF focuses the element and selects its content', async () => {
+  const input = new FakeInput('input', { attrs: { type: 'text' }, value: 'old text' });
+  let focused = false;
+  let selectedRange = null;
+  input.focus = () => { focused = true; };
+  input.setSelectionRange = (start, end) => { selectedRange = [start, end]; };
+
+  const document = makeDocument([input]);
+  const session = await runAccessibilitySession(document);
+  const node = session.tree.nodes.find(n => n.ref);
+  assert.ok(node?.ref);
+
+  const res = session.send({ type: 'FOCUS_ACCESSIBILITY_REF', ref: node.ref, snapshotId: node.snapshotId, select: true });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(focused, true);
+  assert.deepEqual(selectedRange, [0, 'old text'.length]); // whole value selected
+});
