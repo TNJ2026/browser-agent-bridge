@@ -190,6 +190,61 @@ test('action observer skips entirely when observe is false', async () => {
   assert.equal(treeCalls, 0);
 });
 
+test('action observer settles via onUpdated and resolves on complete', async () => {
+  const listeners = new Set();
+  let url = 'https://a.com';
+  const chromeApi = {
+    tabs: {
+      async get() { return { id: 1, url, status: 'complete' }; },
+      async query() { return [{ id: 1 }]; },
+      onUpdated: {
+        addListener: fn => listeners.add(fn),
+        removeListener: fn => listeners.delete(fn)
+      }
+    }
+  };
+  const pageHandlers = { async pageAccessibilityTree() { return { tree: { nodes: [] } }; } };
+  const handler = async () => {
+    url = 'https://b.com';
+    // Simulate Chrome firing loading then complete shortly after the action.
+    setTimeout(() => { for (const fn of [...listeners]) fn(1, { status: 'loading' }); }, 5);
+    setTimeout(() => { for (const fn of [...listeners]) fn(1, { status: 'complete' }); }, 15);
+    return { ok: true };
+  };
+
+  const result = await wrapWithActionObserver('page.navigate', { tabId: 1 }, handler, pageHandlers, chromeApi);
+
+  assert.equal(result.whatChanged.urlChanged, true);
+  assert.equal(result.whatChanged.toUrl, 'https://b.com');
+  assert.equal(listeners.size, 0); // listener cleaned up after settle
+});
+
+test('action observer settle ignores onUpdated events for other tabs', async () => {
+  const listeners = new Set();
+  const chromeApi = {
+    tabs: {
+      async get() { return { id: 1, url: 'https://a.com', status: 'complete' }; },
+      async query() { return [{ id: 1 }]; },
+      onUpdated: {
+        addListener: fn => listeners.add(fn),
+        removeListener: fn => listeners.delete(fn)
+      }
+    }
+  };
+  const pageHandlers = { async pageAccessibilityTree() { return { tree: { nodes: [] } }; } };
+  const handler = async () => {
+    // An unrelated tab finishing loading must not end our wait early; the grace
+    // timer should still resolve the observer.
+    setTimeout(() => { for (const fn of [...listeners]) fn(999, { status: 'complete' }); }, 2);
+    return { ok: true };
+  };
+
+  const result = await wrapWithActionObserver('locator.click', { tabId: 1 }, handler, pageHandlers, chromeApi);
+
+  assert.equal(result.ok, true);
+  assert.equal(listeners.size, 0);
+});
+
 test('action observer default mode is lightweight (no a11y tree diff; focus via probe)', async () => {
   let treeCalls = 0;
   let focused = { tag: 'input', role: 'textbox', name: 'A' };
