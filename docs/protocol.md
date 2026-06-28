@@ -623,13 +623,28 @@ is a clean perception layer for an LLM. Use `maxDepth` to cap nesting and
 
 ### `page.accessibilityTree`
 
-Returns a compact DOM-derived accessibility tree for agent perception. Nodes
-include `ref`, `snapshotId`, and `frameId`; interactive nodes can be acted on
-directly with `locator.clickRef` without rebuilding a text/role locator.
+Returns a DOM-derived accessibility tree for agent perception. Nodes include
+`ref`, `snapshotId`, and `frameId`; interactive nodes can be acted on directly
+with `locator.clickRef` / `fillRef` / `pressRef` / `hoverRef` without rebuilding a
+text/role locator.
+
+By default it returns the verbose `nodes` array (each with `bounds`). Pass
+`"format": "compact"` to instead get a `snapshot` string: one terse line per node
+with the `ref` inlined and bounds dropped — typically less than half the tokens,
+and the recommended perceive-to-act format since the agent acts by `ref`, not
+coordinates. The response then carries `snapshot`, `snapshotId`, `nodeCount`, and
+`truncated` (no `nodes`).
 
 ```json
 { "tabId": 123, "maxNodes": 1000 }
 ```
+
+```json
+{ "tabId": 123, "format": "compact" }
+```
+
+Compact lines look like `[ref_4] textbox "Email" ="a@b.com" type=email`, with
+plain text rendered as indented lines.
 
 ### `expect.page.toMatchAriaSnapshot`
 

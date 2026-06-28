@@ -946,6 +946,16 @@ export function createPageHandlers({
     }
   
     delete tree.iframes;
+    if (params.format === 'compact') {
+      return {
+        snapshot: renderCompactRefTree(tree.nodes || []),
+        url: tree.url,
+        title: tree.title,
+        snapshotId: tree.snapshotId,
+        nodeCount: (tree.nodes || []).length,
+        truncated: tree.truncated
+      };
+    }
     return tree;
   }
 
@@ -1458,6 +1468,30 @@ function extractAriaProps(node) {
     out[prop.name] = value === 'true' ? true : value;
   }
   return out;
+}
+
+// Render the (flat) ref-carrying accessibility nodes as a compact, token-efficient
+// text snapshot: one line per node, interactive lines tagged with their `ref` so an
+// agent can act on them directly (clickRef/fillRef/...). Bounds are dropped — the
+// agent acts by ref, not coordinates.
+function renderCompactRefTree(nodes) {
+  const lines = [];
+  for (const node of nodes) {
+    if (typeof node.text === 'string') {
+      const text = node.text.trim();
+      if (text) lines.push(`  ${text}`);
+      continue;
+    }
+    const parts = [`[${node.ref}]`, node.role || node.tag || 'element'];
+    if (node.name) parts.push(JSON.stringify(node.name));
+    if (typeof node.value === 'string' && node.value) parts.push(`=${JSON.stringify(node.value)}`);
+    else if (typeof node.value === 'boolean') parts.push(node.value ? '[checked]' : '[unchecked]');
+    if (node.type) parts.push(`type=${node.type}`);
+    if (node.href) parts.push(`-> ${node.href}`);
+    if (node.focused) parts.push('[focused]');
+    lines.push(parts.join(' '));
+  }
+  return lines.join('\n');
 }
 
 function renderAriaSnapshot(tree, indent = 0) {
