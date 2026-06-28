@@ -288,11 +288,13 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
   - Do not save private user data, page contents copied from a session, credentials, personal account details, or one-off observations that are unlikely to help future runs.
   - Use concise sections such as `Selectors`, `Wait Conditions`, `Extraction`, `Navigation`, `CSP`, and `Pitfalls`; include the date when behavior may be time-sensitive.
 - Do not execute high-risk actions such as purchases, sending messages, deleting data, changing account settings, or submitting sensitive forms unless the user explicitly asked for that exact action.
-- Prefer read-only methods first: `tabs.list`, `page.readText`, `page.accessibilityTree` (which prunes intermediate layout containers and consolidates element child texts), `page.screenshot`.
+- Prefer read-only methods first: `tabs.list`, `page.readText`, `page.accessibilityTree` (prefer `"format": "compact"` to get a token-efficient text snapshot with `f{frameId}:{ref}` tags), `page.screenshot`.
 - Prefer `session.start` for multi-step tasks that should stay isolated in a Chrome tab group. Use `session.createTab` for new tabs inside the session and `session.closeTab` to close one managed tab while keeping session metadata clean. `session.addTab` only accepts tabs that are already in an Agent-managed group.
 - Check `policy.get` before operating on sensitive domains or using high-risk methods; use `policy.set` only when the user asks to change local allow/block rules.
 - Use `page.executeJavaScript` only when read-only methods are insufficient or when the user explicitly wants page scripting.
-- Prefer `dom.query`, `dom.click`, `dom.type`, `dom.select`, `dom.hover`, and `dom.scroll` for ordinary page controls before falling back to viewport coordinates.
+- **Act by Ref**: When calling `page.accessibilityTree` with `"format": "compact"`, the returned nodes are labeled with a frame-aware identifier: `f{frameId}:{ref}` (e.g. `f0:ref_1` or `f7:ref_2`). You can act on these elements directly by passing the prefix-tagged `ref` to the ref-based actions: `locator.clickRef`, `locator.fillRef` (focus + replace text), `locator.pressRef` (focus + press key), `locator.hoverRef`, and `locator.selectOptionRef` (select items in `<select>` elements). The bridge automatically parses the frame prefix and resolves the correct frame target without requiring coordinate translations.
+- Prefer ref-based actions over DOM selector methods (`dom.click`, `dom.type`) or coordinate-based methods (`computer.click`), as refs are faster and immune to layout shifts.
+- If ref-based actions are not applicable, prefer `dom.query`, `dom.click`, `dom.type`, `dom.select`, `dom.hover`, and `dom.scroll` for ordinary page controls before falling back to viewport coordinates.
 - Use `frameSelector` with `dom.*` and page wait methods for same-origin iframes. Cross-origin iframes are not accessible through DOM methods.
 - Use `page.waitForLoad`, `page.waitForSelector`, or `page.waitForText` after navigation or UI actions instead of sleeping blindly.
 - Use `computer.*` methods for visible UI automation. Coordinates are CSS viewport coordinates. `computer.click`, `computer.drag`, and `computer.hover` do not display the page dot/label unless `showIndicator:true` is passed. Use `computer.hover` for cursor movements, and `computer.key` with combinations (e.g. "Control+a", "Meta+c") for keyboard shortcuts.
@@ -305,19 +307,23 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
 1. Use `session.start` for a new isolated Agent tab group, or `session.get` for an existing Agent session.
 2. Determine the page domain and check `runtime/site-patterns/` for a matching prior-experience file. Read and follow it before inspecting further.
 3. Call `extension.getCspBypass`; if enabled, prefer the default CSP-bypass path while analyzing or extracting page content.
-4. `page.readText` for visible text
-5. `page.accessibilityTree` for interactable elements
+4. `page.readText` for visible text.
+5. Call `page.accessibilityTree` with `"format": "compact"` to obtain a concise, token-saving text snapshot of interactive elements with inlined `f{frameId}:{ref}` tags.
 6. Use `page.executeJavaScript` for structured extraction when read-only text/tree methods are insufficient.
-7. `page.screenshot` when visual confirmation matters
+7. `page.screenshot` when visual confirmation matters.
 8. After finishing site-specific work, update `runtime/site-patterns/{domain}.md` if you learned reusable selectors, waits, extraction logic, navigation patterns, CSP needs, or pitfalls.
 
-### Interact (Click, Type, Hover)
-
+### Interact (Click, Type, Hover, Select)
 
 1. Determine the site domain and check `runtime/site-patterns/` for a matching prior-experience file. Read and use it before interacting.
-2. Read the accessibility tree or screenshot first.
-3. Try `dom.query` to find stable selectors for the target control.
-4. Call `dom.click`, `dom.type`, `dom.select`, `dom.hover`, or `dom.scroll` when selector targeting is reliable.
+2. Read the compact accessibility tree (`page.accessibilityTree` with `format: "compact"`) or screenshot first to identify target ref tags.
+3. Perform the action directly by passing the prefix-tagged `ref` (e.g. `f0:ref_1`) to the appropriate ref-based action:
+   - `locator.clickRef` to click.
+   - `locator.fillRef` to focus and replace input values.
+   - `locator.pressRef` to focus and press keyboard keys.
+   - `locator.hoverRef` to move the mouse cursor over the element.
+   - `locator.selectOptionRef` to choose options within a `<select>` element.
+4. If ref-based actions are not viable, try `dom.query` to find stable selectors and call `dom.click`, `dom.type`, `dom.select`, `dom.hover`, or `dom.scroll`.
 5. Call `page.waitForSelector` or `page.waitForText` when the action should change page state.
 6. Fall back to `computer.click`, `computer.type`, `computer.key` (supporting combination shortcuts like "Control+a"), `computer.scroll`, or `computer.hover` when selector targeting is not enough.
 7. Read the page again to verify the result.
