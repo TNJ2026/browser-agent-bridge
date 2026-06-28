@@ -189,6 +189,68 @@ function computeStateDiff(before, after, allTabsBefore, allTabsAfter) {
   return diff;
 }
 
+// The action may or may not navigate. The old code paid a flat 100ms wait on
+// every observed action just in case, taxing the common no-navigation case.
+// Instead, watch chrome.tabs.onUpdated: a navigation announces itself with a
+// `loading` status, and we resolve the moment it reports `complete`. If nothing
+// starts loading within a short grace window, assume the action did not
+// navigate and proceed. A hard cap bounds a tab stuck `loading`.
+const NAV_GRACE_MS = 60;       // window to notice a navigation starting
+const NAV_MAX_LOAD_MS = 2000;  // ceiling for a navigation to finish loading
+
+function waitForTabSettle(tabId, chromeApi, graceMs = NAV_GRACE_MS, maxLoadMs = NAV_MAX_LOAD_MS) {
+  const onUpdated = chromeApi.tabs && chromeApi.tabs.onUpdated;
+  if (!onUpdated || typeof onUpdated.addListener !== 'function') {
+    return pollTabSettle(tabId, chromeApi);
+  }
+  return new Promise(resolve => {
+    let graceTimer = null;
+    let hardTimer = null;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      onUpdated.removeListener(listener);
+      clearTimeout(graceTimer);
+      clearTimeout(hardTimer);
+      resolve();
+    };
+    const listener = (changedTabId, changeInfo) => {
+      if (changedTabId !== tabId) return;
+      if (changeInfo.status === 'loading') {
+        // A navigation started: drop the no-nav grace and wait for completion
+        // (bounded by the hard cap below).
+        clearTimeout(graceTimer);
+        graceTimer = null;
+      } else if (changeInfo.status === 'complete') {
+        finish();
+      }
+    };
+    onUpdated.addListener(listener);
+    graceTimer = setTimeout(finish, graceMs);
+    hardTimer = setTimeout(finish, maxLoadMs);
+    // If the tab is already loading by the time we attach, keep the full load
+    // budget instead of letting the short grace cut the wait off early.
+    Promise.resolve(chromeApi.tabs.get(tabId)).then(tab => {
+      if (!done && tab && tab.status === 'loading' && graceTimer) {
+        clearTimeout(graceTimer);
+        graceTimer = null;
+      }
+    }).catch(() => {});
+  });
+}
+
+async function pollTabSettle(tabId, chromeApi, stepMs = 100, maxSteps = 20) {
+  await new Promise(resolve => setTimeout(resolve, stepMs));
+  let tab = await chromeApi.tabs.get(tabId).catch(() => null);
+  let retries = maxSteps;
+  while (tab && tab.status === 'loading' && retries > 0) {
+    await new Promise(resolve => setTimeout(resolve, stepMs));
+    tab = await chromeApi.tabs.get(tabId).catch(() => null);
+    retries--;
+  }
+}
+
 export async function wrapWithActionObserver(method, params, handler, pageHandlers, chromeApi = chrome) {
   // `observe: false` opts out entirely. The expensive full-tree a11y diff is
   // opt-in via `a11yDiff: true` (or `observe: 'full'`); by default the observer
@@ -211,18 +273,8 @@ export async function wrapWithActionObserver(method, params, handler, pageHandle
   // 2. Execute original handler
   const result = await handler(params);
 
-  // 3. Wait for URL / state update to propagate
-  await new Promise(resolve => setTimeout(resolve, 100));
-  let tab = await chromeApi.tabs.get(tabId).catch(() => null);
-  if (tab && tab.status === 'loading') {
-    let retries = 20; // up to 2 seconds
-    while (retries > 0) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      tab = await chromeApi.tabs.get(tabId).catch(() => null);
-      if (!tab || tab.status !== 'loading') break;
-      retries--;
-    }
-  }
+  // 3. Wait for any navigation the action kicked off to settle.
+  await waitForTabSettle(tabId, chromeApi);
 
   // 4. Capture after-state
   const allTabsAfter = (await chromeApi.tabs.query({}).catch(() => [])).map(t => t.id);
