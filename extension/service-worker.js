@@ -66,6 +66,7 @@ const sessionStore = chrome.storage?.session || {
 };
 
 const attachedTabs = new Set();
+let sessionStateReady = Promise.resolve();
 
 async function initSessionState() {
   try {
@@ -109,6 +110,10 @@ async function saveCdpEventForwarding() {
     cdpEventForwardingTabIds: Array.from(cdpEventForwarding.tabIds),
     cdpEventForwardingAll: cdpEventForwarding.all
   });
+}
+
+async function waitForSessionState() {
+  await sessionStateReady.catch(() => {});
 }
 
 const networkEventsByTab = new Map();
@@ -545,7 +550,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 initializeBridgeEnabled().then(connectNative).catch(err => console.error(err));
 cspHandlers.initCspBypass().catch(err => console.error(err));
-initSessionState().catch(err => console.error(err));
+sessionStateReady = initSessionState().catch(err => console.error(err));
 
 
 async function initializeBridgeEnabled() {
@@ -851,6 +856,7 @@ async function indicatorSet(params) {
 }
 
 async function attachDebugger(tabId) {
+  await waitForSessionState();
   // Ensure the tab window is focused and the tab is active
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -894,6 +900,7 @@ function shouldForwardCdpEvent(event) {
 }
 
 async function detachDebugger(tabId) {
+  await waitForSessionState();
   if (!attachedTabs.has(tabId)) return;
   // onDetach also clears attachedTabs + interceptor state; delete eagerly too.
   await chrome.debugger.detach({ tabId }).catch(() => {});

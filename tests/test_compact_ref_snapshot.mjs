@@ -45,10 +45,10 @@ function makeHandlers(nodes) {
 }
 
 const NODES = [
-  { ref: 'ref_1', tag: 'h2', text: 'Billing' },
-  { ref: 'ref_2', tag: 'input', role: 'textbox', name: 'Email', type: 'email', value: 'a@b.com', focused: true },
-  { ref: 'ref_3', tag: 'input', role: 'checkbox', name: 'Subscribe', value: true },
-  { ref: 'ref_4', tag: 'a', role: 'link', name: 'Home', href: 'https://x/' }
+  { ref: 'ref_1', frameId: 0, tag: 'h2', text: 'Billing' },
+  { ref: 'ref_2', frameId: 0, tag: 'input', role: 'textbox', name: 'Email', type: 'email', value: 'a@b.com', focused: true },
+  { ref: 'ref_3', frameId: 0, tag: 'input', role: 'checkbox', name: 'Subscribe', value: true },
+  { ref: 'ref_4', frameId: 0, tag: 'a', role: 'link', name: 'Home', href: 'https://x/' }
 ];
 
 test('format:compact renders a terse ref-tagged snapshot, no verbose nodes', async () => {
@@ -56,13 +56,27 @@ test('format:compact renders a terse ref-tagged snapshot, no verbose nodes', asy
   const res = await handlers.pageAccessibilityTree({ tabId: 1, format: 'compact' });
   assert.equal(res.snapshot, [
     '  Billing',
-    '[ref_2] textbox "Email" ="a@b.com" type=email [focused]',
-    '[ref_3] checkbox "Subscribe" [checked]',
-    '[ref_4] link "Home" -> https://x/'
+    '[f0:ref_2] textbox "Email" ="a@b.com" type=email [focused]',
+    '[f0:ref_3] checkbox "Subscribe" [checked]',
+    '[f0:ref_4] link "Home" -> https://x/'
   ].join('\n'));
   assert.equal(res.nodeCount, 4);
   assert.equal(res.snapshotId, 'snap_1');
   assert.equal('nodes' in res, false); // compact omits the verbose node array
+});
+
+test('compact snapshot disambiguates duplicate refs from different frames', async () => {
+  const handlers = await makeHandlers([
+    { ref: 'ref_1', frameId: 0, tag: 'button', role: 'button', name: 'Top Save' },
+    { ref: 'ref_1', frameId: 7, tag: 'button', role: 'button', name: 'Frame Save' }
+  ]);
+
+  const res = await handlers.pageAccessibilityTree({ tabId: 1, format: 'compact' });
+
+  assert.equal(res.snapshot, [
+    '[f0:ref_1] button "Top Save"',
+    '[f7:ref_1] button "Frame Save"'
+  ].join('\n'));
 });
 
 test('default (no format) still returns the verbose node tree', async () => {

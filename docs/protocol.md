@@ -630,10 +630,11 @@ text/role locator.
 
 By default it returns the verbose `nodes` array (each with `bounds`). Pass
 `"format": "compact"` to instead get a `snapshot` string: one terse line per node
-with the `ref` inlined and bounds dropped — typically less than half the tokens,
-and the recommended perceive-to-act format since the agent acts by `ref`, not
-coordinates. The response then carries `snapshot`, `snapshotId`, `nodeCount`, and
-`truncated` (no `nodes`).
+with the frame-scoped ref inlined as `[f<frameId>:<ref>]` and bounds dropped —
+typically less than half the tokens, and the recommended perceive-to-act format
+since the agent acts by `ref`, not coordinates. For example, `[f7:ref_3]` means
+call a ref action with `frameId:7` and `ref:"ref_3"`. The response then carries
+`snapshot`, `snapshotId`, `nodeCount`, and `truncated` (no `nodes`).
 
 ```json
 { "tabId": 123, "maxNodes": 1000 }

@@ -277,9 +277,8 @@ export function createPageHandlers({
     }
   }
 
-  // Load from session storage on startup
-  loadRecentPopups().then(loaded => {
-    recentPopups = [...loaded, ...recentPopups];
+  const recentPopupsReady = loadRecentPopups().then(loaded => {
+    recentPopups = mergeRecentPopups(loaded, recentPopups);
   }).catch(() => {});
 
   function recordRecentPopup(tab) {
@@ -287,6 +286,17 @@ export function createPageHandlers({
     recentPopups.push({ openerTabId: tab.openerTabId, tabId: tab.id, ts: Date.now() });
     while (recentPopups.length > POPUP_BUFFER_MAX) recentPopups.shift();
     saveRecentPopups();
+  }
+
+  function mergeRecentPopups(restored, current) {
+    const byTabId = new Map();
+    for (const entry of [...restored, ...current]) {
+      if (!entry || typeof entry.tabId !== 'number') continue;
+      byTabId.set(entry.tabId, entry);
+    }
+    return Array.from(byTabId.values())
+      .sort((a, b) => a.ts - b.ts)
+      .slice(-POPUP_BUFFER_MAX);
   }
 
   function drainRecentPopups(openerTabId, lookbackMs) {
@@ -373,6 +383,7 @@ export function createPageHandlers({
       // the same matching path (consume-once), so a popup that opened just
       // before this call is still caught.
       (async () => {
+        await recentPopupsReady;
         for (const popupTabId of drainRecentPopups(tabId, lookbackMs)) {
           if (done) return;
           const fresh = await chromeApi.tabs.get(popupTabId).catch(() => null);
@@ -1525,7 +1536,7 @@ function extractAriaProps(node) {
 }
 
 // Render the (flat) ref-carrying accessibility nodes as a compact, token-efficient
-// text snapshot: one line per node, interactive lines tagged with their `ref` so an
+// text snapshot: one line per node, interactive lines tagged with frame+ref so an
 // agent can act on them directly (clickRef/fillRef/...). Bounds are dropped — the
 // agent acts by ref, not coordinates.
 function renderCompactRefTree(nodes) {
@@ -1536,7 +1547,8 @@ function renderCompactRefTree(nodes) {
       if (text) lines.push(`  ${text}`);
       continue;
     }
-    const parts = [`[${node.ref}]`, node.role || node.tag || 'element'];
+    const frameId = Number.isInteger(node.frameId) ? node.frameId : 0;
+    const parts = [`[f${frameId}:${node.ref}]`, node.role || node.tag || 'element'];
     if (node.name) parts.push(JSON.stringify(node.name));
     if (typeof node.value === 'string' && node.value) parts.push(`=${JSON.stringify(node.value)}`);
     else if (typeof node.value === 'boolean') parts.push(node.value ? '[checked]' : '[unchecked]');

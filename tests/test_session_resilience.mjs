@@ -73,13 +73,10 @@ test('recentPopups session persistence', async () => {
     chromeApi
   });
 
-  // Yield execution to allow loadRecentPopups startup promise to resolve
-  await new Promise(resolve => setTimeout(resolve, 10));
-
   // Let's mock tabs.get for the lookback popup resolution
   chromeApi.tabs.get = async (id) => ({ id, openerTabId: 42, url: 'https://test.com' });
 
-  // Call pageWaitForPopup
+  // pageWaitForPopup should wait for the session popup restore itself.
   const result = await handlersNew.pageWaitForPopup({ tabId: 42, popupLookbackMs: 5000, timeoutMs: 1000 });
   
   assert.equal(result.ok, true);
