@@ -38,6 +38,9 @@ cp "$ROOT_DIR/scripts/doctor.py" "$RELEASE_DIR/scripts/"
 cp "$ROOT_DIR/README.md" "$RELEASE_DIR/"
 cp "$ROOT_DIR/README.zh-CN.md" "$RELEASE_DIR/"
 cp "$ROOT_DIR/docs/protocol.md" "$RELEASE_DIR/docs/"
+# The skill's scripts/ runtime clients are generated (gitignored); inject them
+# before bundling the skill so the release carries a usable portable skill.
+bash "$ROOT_DIR/scripts/sync-skill-scripts.sh"
 cp -R "$ROOT_DIR/skills/browser-agent-bridge" "$RELEASE_DIR/skills/"
 find "$RELEASE_DIR" -name '.DS_Store' -type f -delete
 find "$RELEASE_DIR/extension" -name '_metadata' -type d -prune -exec rm -rf {} +

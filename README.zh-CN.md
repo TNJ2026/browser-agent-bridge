@@ -117,19 +117,19 @@ graph TD
    ln -s "$(pwd)/skills/browser-agent-bridge" ~/.codex/skills/browser-agent-bridge
    ```
 
-   skill 目录内包含一份从仓库顶层 `scripts/` 复制过去的 `scripts/` 快照。这份快照用于离线参考和新鲜度检查；当本仓库可用时，Agent 应优先从仓库根目录执行顶层 `scripts/` 下的脚本。
+   skill 的 `scripts/` 目录**只**包含可移植的运行时 RPC 客户端（`rpc.sh`、`ws-rpc.js`、`browser_bridge_client.py`），这样软链出去的 skill 也能自己调用 bridge。该目录由 `scripts/sync-skill-scripts.sh` 生成且被 gitignore —— 软链前先跑一次填充。安装/诊断脚本（`doctor.py`、安装器）从不打进 skill，统一从仓库顶层 `scripts/` 执行。
 
    如果目标路径已存在，只有在现有版本是最新时才保留；否则替换为本仓库的 `skills/browser-agent-bridge/` 目录。这一步会写入仓库外路径，受沙箱限制的 Agent 应在执行前申请提升权限。
 
    安装 skill 后，重启 Agent 会话，让它发现新的 `browser-agent-bridge` 指令。
 
-3. 仓库脚本更新后，让 Agent 同步 skill 内的脚本快照：
+3. 软链前生成 skill 的运行时客户端（gitignored），客户端变更后重跑：
 
    ```bash
    scripts/sync-skill-scripts.sh
    ```
 
-   `python3 scripts/doctor.py --skip-live` 如果发现快照缺失或过期，会用 `skill.scripts.snapshot` 给出 warning。如果 skill 已经安装到 `~/.codex/skills`，同步后需要重新复制或重新软链 `skills/browser-agent-bridge/`。
+   它只把 `rpc.sh`、`ws-rpc.js`、`browser_bridge_client.py` 注入 `skills/browser-agent-bridge/scripts/`。若 skill 是软链到 `~/.codex/skills`，无需重复制；若是复制安装，则重跑同步。
 
 4. 让 Agent 在仓库根目录先执行诊断：
 

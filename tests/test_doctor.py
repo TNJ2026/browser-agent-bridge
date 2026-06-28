@@ -39,7 +39,6 @@ class TestDoctor(unittest.TestCase):
                 "scripts/sync-skill-scripts.sh",
                 "scripts/ws-rpc.js",
                 "scripts/browser_bridge_client.py",
-                "skills/browser-agent-bridge/scripts/SYNC_MANIFEST.sha256",
             ]
             for path in required:
                 full_path = tmp_root / path
@@ -52,7 +51,6 @@ class TestDoctor(unittest.TestCase):
             statuses = {check["name"]: check["status"] for check in checks}
             self.assertEqual(statuses["repo.files"], "pass")
             self.assertEqual(statuses["repo.install_layout"], "pass")
-            self.assertEqual(statuses["skill.scripts.snapshot"], "warn")
 
     def test_check_repo_files_missing(self):
         checks = []
@@ -64,7 +62,6 @@ class TestDoctor(unittest.TestCase):
             statuses = {check["name"]: check["status"] for check in checks}
             self.assertEqual(statuses["repo.files"], "fail")
             self.assertEqual(statuses["repo.install_layout"], "fail")
-            self.assertEqual(statuses["skill.scripts.snapshot"], "warn")
 
     def test_native_manifest_candidates_linux(self):
         with patch("doctor.Path.home", return_value=Path("/home/alice")):

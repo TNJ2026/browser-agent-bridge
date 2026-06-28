@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -168,7 +167,6 @@ def check_repo_files(checks):
         "scripts/sync-skill-scripts.sh",
         "scripts/ws-rpc.js",
         "scripts/browser_bridge_client.py",
-        "skills/browser-agent-bridge/scripts/SYNC_MANIFEST.sha256",
     ]
     missing = [path for path in required if not (ROOT / path).exists()]
     if missing:
@@ -176,7 +174,6 @@ def check_repo_files(checks):
     else:
         add(checks, "repo.files", "pass", "required project files exist")
     check_install_layout(checks)
-    check_skill_script_snapshots(checks)
 
 
 def check_install_layout(checks):
@@ -189,13 +186,11 @@ def check_install_layout(checks):
         ROOT / "native" / "host-wrapper.sh",
         ROOT / "native" / "host-wrapper.win.bat",
     ]
+    # Installer scripts must never live under skills/ — they require the repo and
+    # are not part of the portable skill bundle.
     misplaced_skill_scripts = []
     if (ROOT / "skills").exists():
-        allowed_snapshot_dir = ROOT / "skills" / "browser-agent-bridge" / "scripts"
-        for path in (ROOT / "skills").glob("**/install-native-host*"):
-            if path.parent == allowed_snapshot_dir:
-                continue
-            misplaced_skill_scripts.append(path)
+        misplaced_skill_scripts = list((ROOT / "skills").glob("**/install-native-host*"))
     missing_scripts = [path.relative_to(ROOT).as_posix() for path in agent_scripts if not path.exists()]
     missing_launchers = [path.relative_to(ROOT).as_posix() for path in native_launchers if not path.exists()]
     if misplaced_skill_scripts:
@@ -206,46 +201,6 @@ def check_install_layout(checks):
         add(checks, "repo.install_layout", "fail", f"missing expected install layout files: {missing}")
     else:
         add(checks, "repo.install_layout", "pass", "agent-run installers are in scripts/; generated launchers are in native/")
-
-
-def check_skill_script_snapshots(checks):
-    scripts = [
-        "browser_bridge_client.py",
-        "doctor.py",
-        "install-native-host-macos.sh",
-        "install-native-host-unix.sh",
-        "install-native-host-win.ps1",
-        "rpc.sh",
-        "sync-skill-scripts.sh",
-        "ws-rpc.js",
-    ]
-    stale = []
-    missing = []
-    for name in scripts:
-        source = ROOT / "scripts" / name
-        snapshot = ROOT / "skills" / "browser-agent-bridge" / "scripts" / name
-        if not snapshot.exists():
-            missing.append(snapshot.relative_to(ROOT).as_posix())
-            continue
-        if file_sha256(source) != file_sha256(snapshot):
-            stale.append(name)
-    manifest = ROOT / "skills" / "browser-agent-bridge" / "scripts" / "SYNC_MANIFEST.sha256"
-    if not manifest.exists():
-        missing.append(manifest.relative_to(ROOT).as_posix())
-    if missing:
-        add(checks, "skill.scripts.snapshot", "warn", f"missing skill script snapshot files: {', '.join(missing)}; run scripts/sync-skill-scripts.sh")
-    elif stale:
-        add(checks, "skill.scripts.snapshot", "warn", f"skill script snapshots are stale: {', '.join(stale)}; run scripts/sync-skill-scripts.sh")
-    else:
-        add(checks, "skill.scripts.snapshot", "pass", "skill script snapshots match scripts/")
-
-
-def file_sha256(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def check_extension_manifest(checks):
