@@ -1,26 +1,51 @@
 (() => {
   if (globalThis.__localBrowserAgentAccessibilityTreeLoaded) return;
   globalThis.__localBrowserAgentAccessibilityTreeLoaded = true;
+  const refState = {
+    snapshotId: '',
+    frameId: 0,
+    refs: new Map()
+  };
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'PING_AGENT_BRIDGE_CONTENT') {
       sendResponse({ ok: true });
       return true;
     }
+    if (message?.type === 'GET_ACCESSIBILITY_REF_TARGET') {
+      try {
+        sendResponse({ ok: true, target: resolveRefTarget(message) });
+      } catch (error) {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return true;
+    }
     if (message?.type !== 'GET_ACCESSIBILITY_TREE') return false;
     try {
-      sendResponse({ ok: true, tree: buildTree(message.maxNodes || 1000, message.offsetX || 0, message.offsetY || 0) });
+      sendResponse({
+        ok: true,
+        tree: buildTree(
+          message.maxNodes || 1000,
+          message.offsetX || 0,
+          message.offsetY || 0,
+          message.snapshotId || '',
+          Number.isInteger(message.frameId) ? message.frameId : 0
+        )
+      });
     } catch (error) {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
     }
     return true;
   });
 
-  function buildTree(maxNodes, initialOffsetX = 0, initialOffsetY = 0) {
+  function buildTree(maxNodes, initialOffsetX = 0, initialOffsetY = 0, snapshotId = '', frameId = 0) {
     const nodes = [];
     const iframes = [];
     const docView = window;
     let currentIndex = 1;
+    refState.snapshotId = snapshotId || `snapshot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    refState.frameId = frameId;
+    refState.refs = new Map();
 
     const TEXT_BLOCK_TAGS = new Set([
       'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'td', 'th', 'dt', 'dd', 'span', 'strong', 'em', 'b', 'i', 'code', 'pre', 'mark'
@@ -51,8 +76,12 @@
           const parentEl = node.parentElement;
           if (parentEl) {
             const rect = parentEl.getBoundingClientRect();
+            const ref = `ref_${currentIndex++}`;
+            rememberRef(ref, parentEl, frameId === 0 ? offsetX : 0, frameId === 0 ? offsetY : 0);
             nodes.push({
-              ref: `ref_${currentIndex++}`,
+              ref,
+              snapshotId: refState.snapshotId,
+              frameId,
               tag: 'text',
               text: txt,
               bounds: {
@@ -119,8 +148,12 @@
 
       if (isInteractive) {
         const name = globalThis.__browserAgentBridgeDomA11y.accessibleName(el);
+        const ref = `ref_${currentIndex++}`;
+        rememberRef(ref, el, frameId === 0 ? offsetX : 0, frameId === 0 ? offsetY : 0);
         nodes.push({
-          ref: `ref_${currentIndex++}`,
+          ref,
+          snapshotId: refState.snapshotId,
+          frameId,
           tag: el.tagName.toLowerCase(),
           role: role || undefined,
           name,
@@ -155,8 +188,12 @@
         if (isTextTag || !hasElementChildren) {
           const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
           if (txt) {
+            const ref = `ref_${currentIndex++}`;
+            rememberRef(ref, el, frameId === 0 ? offsetX : 0, frameId === 0 ? offsetY : 0);
             nodes.push({
-              ref: `ref_${currentIndex++}`,
+              ref,
+              snapshotId: refState.snapshotId,
+              frameId,
               tag: el.tagName.toLowerCase(),
               text: txt.slice(0, 500),
               bounds: {
@@ -194,10 +231,76 @@
     return {
       url: location.href,
       title: document.title,
+      snapshotId: refState.snapshotId,
+      frameId,
       nodes,
       iframes,
       truncated: nodes.length >= maxNodes
     };
+  }
+
+  function rememberRef(ref, element, offsetX = 0, offsetY = 0) {
+    refState.refs.set(ref, { element, offsetX, offsetY });
+  }
+
+  function resolveRefTarget(message) {
+    const ref = typeof message.ref === 'string' ? message.ref : '';
+    if (!ref) throw new Error('ref is required');
+    if (message.snapshotId && message.snapshotId !== refState.snapshotId) {
+      throw new Error(`Stale accessibility ref snapshot: ${message.snapshotId}`);
+    }
+    const entry = refState.refs.get(ref);
+    if (!entry?.element || entry.element.isConnected === false) throw new Error(`Accessibility ref not found or stale: ${ref}`);
+    return summarizeRefTarget(ref, entry);
+  }
+
+  function summarizeRefTarget(ref, entry) {
+    const { element, offsetX = 0, offsetY = 0 } = entry;
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    const localClickPoint = clickablePoint(element, rect);
+    const clickPoint = localClickPoint ? { x: localClickPoint.x + offsetX, y: localClickPoint.y + offsetY } : null;
+    const visible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    const enabled = !element.disabled && element.getAttribute('aria-disabled') !== 'true';
+    const hitDocument = element.ownerDocument || document;
+    const hit = localClickPoint && typeof hitDocument.elementFromPoint === 'function' ? hitDocument.elementFromPoint(localClickPoint.x, localClickPoint.y) : null;
+    const receivesEvents = !clickPoint || !hit || element === hit || element.contains(hit);
+    const reasons = [];
+    if (!visible) reasons.push('not visible');
+    if (!enabled) reasons.push('disabled');
+    if (!clickPoint) reasons.push('no clickable point');
+    if (!receivesEvents) reasons.push('covered by another element');
+    return {
+      ref,
+      snapshotId: refState.snapshotId,
+      frameId: refState.frameId,
+      element: {
+        ref,
+        tagName: element.tagName.toLowerCase(),
+        id: element.id || '',
+        role: element.getAttribute('role') || globalThis.__browserAgentBridgeDomA11y.implicitRole(element) || '',
+        accessibleName: globalThis.__browserAgentBridgeDomA11y.accessibleName(element),
+        text: (element.innerText || element.textContent || '').trim().slice(0, 500),
+        visible,
+        disabled: !enabled,
+        rect: { x: rect.x + offsetX, y: rect.y + offsetY, width: rect.width, height: rect.height },
+        clickPoint
+      },
+      actionability: {
+        actionable: visible && enabled && Boolean(clickPoint) && receivesEvents,
+        visible,
+        enabled,
+        receivesEvents,
+        reasons
+      }
+    };
+  }
+
+  function clickablePoint(element, rect = element.getBoundingClientRect()) {
+    const width = Math.max(0, rect.width);
+    const height = Math.max(0, rect.height);
+    if (width <= 0 || height <= 0) return null;
+    return { x: rect.x + width / 2, y: rect.y + height / 2 };
   }
 
   function valueOf(el) {

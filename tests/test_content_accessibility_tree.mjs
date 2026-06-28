@@ -31,6 +31,7 @@ class FakeElement {
   getBoundingClientRect() { return { x: 0, y: 0, left: 0, top: 0, width: 10, height: 10 }; }
   getAttribute(name) { return name in this._attrs ? this._attrs[name] : null; }
   hasAttribute(name) { return name in this._attrs; }
+  contains(node) { return this === node || allDescendants(this).includes(node); }
   querySelector(selector) { return findDescendant(this, el => matchesSelectorList(el, selector)); }
   querySelectorAll(selector) { return allDescendants(this).filter(el => matchesSelectorList(el, selector)); }
   matches(selector) { return matchesSelectorList(this, selector); }
@@ -107,7 +108,7 @@ function makeDocument(bodyChildren) {
   return doc;
 }
 
-async function runAccessibilityTree(document) {
+async function runAccessibilitySession(document, message = {}) {
   const a11ySource = await readFile(new URL('../extension/content/dom-a11y.js', import.meta.url), 'utf8');
   const treeSource = await readFile(new URL('../extension/content/accessibility-tree.js', import.meta.url), 'utf8');
   let listener = null;
@@ -130,9 +131,20 @@ async function runAccessibilityTree(document) {
   vm.runInNewContext(a11ySource, context);
   vm.runInNewContext(treeSource, context);
   let response = null;
-  listener({ type: 'GET_ACCESSIBILITY_TREE', maxNodes: 100 }, {}, value => { response = value; });
+  listener({ type: 'GET_ACCESSIBILITY_TREE', maxNodes: 100, snapshotId: 'snap_test', frameId: 0, ...message }, {}, value => { response = value; });
   assert.equal(response.ok, true, response.error);
-  return response.tree;
+  return {
+    tree: response.tree,
+    send(message) {
+      let sent = null;
+      listener(message, {}, value => { sent = value; });
+      return sent;
+    }
+  };
+}
+
+async function runAccessibilityTree(document) {
+  return (await runAccessibilitySession(document)).tree;
 }
 
 async function locatorCount(document, params) {
@@ -205,4 +217,33 @@ test('content accessibility tree uses locator-aligned accessible names and impli
   ]) {
     assert.equal(await locatorCount(document, { role, name }), 1, `${role} ${name}`);
   }
+});
+
+test('content accessibility refs can be resolved after a snapshot', async () => {
+  const button = new FakeElement('button', { text: 'Save' });
+  const document = makeDocument([button]);
+
+  const session = await runAccessibilitySession(document);
+  const node = session.tree.nodes.find(item => item.name === 'Save');
+  assert.ok(node?.ref, JSON.stringify(session.tree.nodes));
+  assert.equal(node.snapshotId, 'snap_test');
+  assert.equal(node.frameId, 0);
+
+  const response = session.send({ type: 'GET_ACCESSIBILITY_REF_TARGET', ref: node.ref, snapshotId: node.snapshotId });
+  assert.equal(response.ok, true, response.error);
+  assert.equal(response.target.ref, node.ref);
+  assert.equal(response.target.snapshotId, 'snap_test');
+  assert.equal(response.target.element.accessibleName, 'Save');
+  assert.equal(response.target.actionability.actionable, true);
+});
+
+test('content accessibility refs reject stale snapshot ids', async () => {
+  const button = new FakeElement('button', { text: 'Save' });
+  const document = makeDocument([button]);
+
+  const session = await runAccessibilitySession(document);
+  const node = session.tree.nodes.find(item => item.name === 'Save');
+  const response = session.send({ type: 'GET_ACCESSIBILITY_REF_TARGET', ref: node.ref, snapshotId: 'old_snapshot' });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /Stale accessibility ref snapshot/);
 });

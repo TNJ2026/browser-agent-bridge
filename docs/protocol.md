@@ -580,6 +580,16 @@ is a clean perception layer for an LLM. Use `maxDepth` to cap nesting and
 { "tabId": 123, "maxDepth": 12 }
 ```
 
+### `page.accessibilityTree`
+
+Returns a compact DOM-derived accessibility tree for agent perception. Nodes
+include `ref`, `snapshotId`, and `frameId`; interactive nodes can be acted on
+directly with `locator.clickRef` without rebuilding a text/role locator.
+
+```json
+{ "tabId": 123, "maxNodes": 1000 }
+```
+
 ### `expect.page.toMatchAriaSnapshot`
 
 Retries until the page's aria snapshot matches `expected` (alias `snapshot`).
@@ -866,6 +876,23 @@ This applies to all auto-waiting locator actions (`locator.click`,
 
 ```json
 { "tabId": 123, "role": "button", "name": "Submit", "timeoutMs": 30000 }
+```
+
+### `locator.clickRef`
+
+Clicks an element returned by `page.accessibilityTree` using its `ref`. This is
+the deterministic perceive-to-act path for agents: read a snapshot, pick a node,
+then pass its `ref`, `snapshotId`, and `frameId` directly without rebuilding a
+locator from text. The ref is resolved in the page content script and clicked via
+the same CDP mouse input path as `locator.click`.
+
+Refs are valid for the latest accessibility snapshot in that frame. Passing
+`snapshotId` is recommended; a stale id is rejected instead of clicking a newer
+node that reused the same `ref_N`. Use `force:true` to bypass actionability
+checks.
+
+```json
+{ "tabId": 123, "ref": "ref_4", "snapshotId": "snap_lx3...", "frameId": 0 }
 ```
 
 ### `locator.fill`

@@ -7,6 +7,7 @@ export function createLocatorHandlers({
   cdp,
   captureElementScreenshot,
   resolveFrameTarget,
+  ensureContentScripts = async () => {},
   keyboardDispatcher,
   sleep,
   defaultTimeoutMs,
@@ -300,6 +301,42 @@ export function createLocatorHandlers({
     const result = { element: target.element };
     await recordAction(tabId, 'locator.click', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
     return { ok: true, element: result.element, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
+  }
+
+  async function locatorClickRef(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.clickRef');
+    assertString(params.ref, 'ref');
+    const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
+    let frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
+    await ensureContentScripts(tabId, frameId);
+    const response = await chromeApi.tabs.sendMessage(tabId, {
+      type: 'GET_ACCESSIBILITY_REF_TARGET',
+      ref: params.ref,
+      snapshotId: typeof params.snapshotId === 'string' && params.snapshotId ? params.snapshotId : undefined
+    }, { frameId });
+    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${params.ref}`);
+    const target = response.target;
+    if (params.force !== true && target?.actionability?.actionable !== true) {
+      throw createLocatorRefNotActionableError(params, frameTarget, target);
+    }
+    if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for ref ${params.ref}`);
+    if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
+    await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
+    const result = { element: target.element };
+    await recordAction(tabId, 'locator.clickRef', {
+      ref: params.ref,
+      snapshotId: target.snapshotId || params.snapshotId || null,
+      frameId
+    }, result);
+    return {
+      ok: true,
+      ref: params.ref,
+      snapshotId: target.snapshotId || null,
+      element: result.element,
+      frame: frameTarget.frame,
+      actionability: target.actionability || null
+    };
   }
 
   async function locatorDragTo(params) {
@@ -696,6 +733,27 @@ export function createLocatorHandlers({
     }
     if (diagnostic.actionability?.hitTarget) parts.push(`hit target: ${diagnostic.actionability.hitTarget}`);
     return parts.join('; ');
+  }
+
+  function createLocatorRefNotActionableError(params, frameTarget, target) {
+    const reasons = Array.isArray(target?.actionability?.reasons) && target.actionability.reasons.length > 0
+      ? target.actionability.reasons
+      : ['not actionable'];
+    const diagnostic = {
+      type: 'LocatorRefNotActionable',
+      ref: params.ref,
+      snapshotId: params.snapshotId || target?.snapshotId || null,
+      action: 'locator.clickRef',
+      reasons,
+      actionability: target?.actionability || null,
+      element: target?.element || null,
+      frame: frameTarget?.frame || null
+    };
+    const error = new Error(`Ref ${params.ref} is not actionable for locator.clickRef: ${reasons.join(', ')}`);
+    error.name = 'LocatorRefNotActionable';
+    error.code = 'LOCATOR_REF_NOT_ACTIONABLE';
+    error.diagnostic = diagnostic;
+    return error;
   }
 
   function compactLocatorElement(element) {
@@ -1955,6 +2013,7 @@ export function createLocatorHandlers({
     expectLocatorToHaveCount,
     expectLocatorToHaveText,
     expectLocatorToHaveAttribute,
+    locatorClickRef,
     locatorClick,
     locatorDragTo,
     locatorScreenshot,

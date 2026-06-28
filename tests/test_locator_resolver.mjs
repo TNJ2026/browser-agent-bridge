@@ -215,3 +215,103 @@ test('visibleCount reported alongside count', async () => {
   assert.equal(res.count, 4);       // 4 button tags
   assert.equal(res.visibleCount, 3); // hiddenBtn invisible
 });
+
+test('locator.clickRef dispatches CDP click at a snapshot ref target', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const cdpCalls = [];
+  const messages = [];
+  const handlers = createLocatorHandlers({
+    assertTabId: id => id,
+    assertTabAllowed: async () => {},
+    assertString: value => {
+      if (typeof value !== 'string' || !value) throw new Error('expected string');
+    },
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async (tabId, method, params) => { cdpCalls.push({ tabId, method, params }); },
+    resolveFrameTarget: async (tabId, params) => ({
+      target: { tabId, frameIds: [params.frameId] },
+      frameId: params.frameId,
+      frame: { frameId: params.frameId, url: 'about:test' },
+      frameOffset: { x: 10, y: 20 }
+    }),
+    ensureContentScripts: async () => {},
+    chromeApi: {
+      tabs: {
+        async sendMessage(tabId, message, options) {
+          messages.push({ tabId, message, options });
+          return {
+            ok: true,
+            target: {
+              ref: 'ref_1',
+              snapshotId: 'snap_1',
+              frameId: 7,
+              element: {
+                ref: 'ref_1',
+                tagName: 'button',
+                accessibleName: 'Save',
+                clickPoint: { x: 5, y: 6 },
+                rect: { x: 0, y: 0, width: 10, height: 12 }
+              },
+              actionability: { actionable: true, visible: true, enabled: true, receivesEvents: true, reasons: [] }
+            }
+          };
+        }
+      }
+    }
+  });
+
+  const result = await handlers.locatorClickRef({ tabId: 1, frameId: 7, ref: 'ref_1', snapshotId: 'snap_1' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.element.accessibleName, 'Save');
+  assert.deepEqual(messages[0], {
+    tabId: 1,
+    message: { type: 'GET_ACCESSIBILITY_REF_TARGET', ref: 'ref_1', snapshotId: 'snap_1' },
+    options: { frameId: 7 }
+  });
+  assert.deepEqual(cdpCalls.map(call => call.params), [
+    { type: 'mouseMoved', x: 15, y: 26, button: 'none' },
+    { type: 'mousePressed', x: 15, y: 26, button: 'left', clickCount: 1 },
+    { type: 'mouseReleased', x: 15, y: 26, button: 'left', clickCount: 1 }
+  ]);
+});
+
+test('locator.clickRef rejects non-actionable refs with structured diagnostics', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const handlers = createLocatorHandlers({
+    assertTabId: id => id,
+    assertTabAllowed: async () => {},
+    assertString: () => {},
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async () => {},
+    resolveFrameTarget: async () => ({ frameId: 0, frame: { frameId: 0, url: 'about:test' }, frameOffset: null }),
+    ensureContentScripts: async () => {},
+    chromeApi: {
+      tabs: {
+        async sendMessage() {
+          return {
+            ok: true,
+            target: {
+              ref: 'ref_2',
+              snapshotId: 'snap_1',
+              element: { ref: 'ref_2', tagName: 'button', clickPoint: { x: 1, y: 2 } },
+              actionability: { actionable: false, visible: true, enabled: false, receivesEvents: true, reasons: ['disabled'] }
+            }
+          };
+        }
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => handlers.locatorClickRef({ tabId: 1, ref: 'ref_2', snapshotId: 'snap_1' }),
+    error => {
+      assert.equal(error.code, 'LOCATOR_REF_NOT_ACTIONABLE');
+      assert.equal(error.diagnostic.ref, 'ref_2');
+      assert.deepEqual(error.diagnostic.reasons, ['disabled']);
+      return true;
+    }
+  );
+});

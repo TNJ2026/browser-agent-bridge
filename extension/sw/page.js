@@ -892,9 +892,12 @@ export function createPageHandlers({
     await assertTabAllowed(tabId, 'page.accessibilityTree');
   
     await ensureContentScripts(tabId, 0);
+    const snapshotId = `snap_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const mainResponse = await chromeApi.tabs.sendMessage(tabId, {
       type: 'GET_ACCESSIBILITY_TREE',
-      maxNodes: params.maxNodes || 1000
+      maxNodes: params.maxNodes || 1000,
+      snapshotId,
+      frameId: 0
     }, { frameId: 0 });
   
     if (!mainResponse?.ok) throw new Error(mainResponse?.error || 'Failed to read accessibility tree');
@@ -924,6 +927,8 @@ export function createPageHandlers({
           const subResponse = await chromeApi.tabs.sendMessage(tabId, {
             type: 'GET_ACCESSIBILITY_TREE',
             maxNodes: params.maxNodes || 1000,
+            snapshotId,
+            frameId: frame.frameId,
             offsetX: match.x,
             offsetY: match.y
           }, { frameId: frame.frameId });

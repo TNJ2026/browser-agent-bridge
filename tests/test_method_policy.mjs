@@ -35,6 +35,7 @@ const CATEGORY = [
   ['computer.type', 'page_input'],
   ['dom.click', 'page_action'],
   ['locator.click', 'page_action'],
+  ['locator.clickRef', 'page_action'],
   ['locator.setInputFiles', 'page_action'],
   ['page.setExtraHTTPHeaders', 'page_action'],
   ['page.acceptDialog', 'page_action'],

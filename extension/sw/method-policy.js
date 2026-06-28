@@ -85,6 +85,7 @@ export function getMethodCategory(method, params = {}) {
     method === 'dom.dragTo' ||
     method === 'dom.dispatchDragDrop' ||
     method === 'locator.click' ||
+    method === 'locator.clickRef' ||
     method === 'locator.dragTo' ||
     method === 'locator.dispatchDragDrop' ||
     method === 'locator.check' ||
