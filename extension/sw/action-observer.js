@@ -25,23 +25,53 @@ const OBSERVED_METHODS = new Set([
   'page.goForward'
 ]);
 
-async function captureTabState(tabId, pageHandlers, chromeApi) {
+async function captureTabState(tabId, pageHandlers, chromeApi, includeTree = false) {
   try {
     const tab = await chromeApi.tabs.get(tabId);
-    const treeResult = await pageHandlers.pageAccessibilityTree({ tabId }).catch(() => null);
-    
-    let focusedNode = null;
-    if (treeResult?.tree?.nodes) {
-      focusedNode = treeResult.tree.nodes.find(n => n.focused);
+
+    // Full accessibility-tree capture is expensive (a whole-DOM traversal), so it
+    // is only done when an a11y diff was explicitly requested. By default we take
+    // a cheap focused-element probe and skip the tree.
+    if (includeTree) {
+      const treeResult = await pageHandlers.pageAccessibilityTree({ tabId }).catch(() => null);
+      const tree = treeResult?.tree || null;
+      return {
+        url: tab.url,
+        title: tab.title,
+        tree,
+        focusedNode: tree?.nodes?.find(n => n.focused) || null
+      };
     }
-    
+
     return {
       url: tab.url,
       title: tab.title,
-      tree: treeResult?.tree || null,
-      focusedNode
+      tree: null,
+      focusedNode: await captureFocusedElement(tabId, chromeApi)
     };
   } catch (e) {
+    return null;
+  }
+}
+
+async function captureFocusedElement(tabId, chromeApi) {
+  try {
+    if (typeof chromeApi.scripting?.executeScript !== 'function') return null;
+    const [{ result } = {}] = await chromeApi.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const el = document.activeElement;
+        if (!el || el === document.body || el === document.documentElement) return null;
+        return {
+          tag: el.tagName ? el.tagName.toLowerCase() : '',
+          role: (el.getAttribute && el.getAttribute('role')) || '',
+          name: (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('name'))) || '',
+          value: 'value' in el ? String(el.value).slice(0, 200) : ''
+        };
+      }
+    });
+    return result || null;
+  } catch {
     return null;
   }
 }
@@ -157,7 +187,10 @@ function computeStateDiff(before, after, allTabsBefore, allTabsAfter) {
 }
 
 export async function wrapWithActionObserver(method, params, handler, pageHandlers, chromeApi = chrome) {
-  if (!OBSERVED_METHODS.has(method)) {
+  // `observe: false` opts out entirely. The expensive full-tree a11y diff is
+  // opt-in via `a11yDiff: true` (or `observe: 'full'`); by default the observer
+  // only reports URL/title, popups, and a cheap focused-element delta.
+  if (!OBSERVED_METHODS.has(method) || params.observe === false) {
     return handler(params);
   }
 
@@ -166,9 +199,11 @@ export async function wrapWithActionObserver(method, params, handler, pageHandle
     return handler(params);
   }
 
+  const includeTree = params.a11yDiff === true || params.observe === 'full';
+
   // 1. Capture before-state
   const allTabsBefore = (await chromeApi.tabs.query({}).catch(() => [])).map(t => t.id);
-  const beforeState = await captureTabState(tabId, pageHandlers, chromeApi);
+  const beforeState = await captureTabState(tabId, pageHandlers, chromeApi, includeTree);
 
   // 2. Execute original handler
   const result = await handler(params);
@@ -188,7 +223,7 @@ export async function wrapWithActionObserver(method, params, handler, pageHandle
 
   // 4. Capture after-state
   const allTabsAfter = (await chromeApi.tabs.query({}).catch(() => [])).map(t => t.id);
-  const afterState = await captureTabState(tabId, pageHandlers, chromeApi);
+  const afterState = await captureTabState(tabId, pageHandlers, chromeApi, includeTree);
 
   // 5. Compute differences
   const diff = computeStateDiff(beforeState, afterState, allTabsBefore, allTabsAfter);

@@ -292,7 +292,6 @@ export function createLocatorHandlers({
     await assertTabAllowed(tabId, 'locator.click');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     let frameTarget = await resolveFrameTarget(tabId, params);
-    const effectsBefore = await captureActionEffectsBaseline(tabId, frameTarget, params);
     const target = params.force === true
       ? await runLocatorScript(tabId, { ...params, index, actionKind: 'click' }, 'actionability', frameTarget)
       : await waitForLocatorActionable(tabId, { ...params, index }, 'click', frameTarget);
@@ -301,8 +300,7 @@ export function createLocatorHandlers({
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = { element: target.element };
     await recordAction(tabId, 'locator.click', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
-    const effects = await captureActionEffects(tabId, frameTarget, effectsBefore, params);
-    return { ok: true, element: result.element, frame: frameTarget.frame, effects, ...(params.force === true ? {} : { actionability: target.actionability }) };
+    return { ok: true, element: result.element, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
   }
 
   async function locatorClickRef(params) {
@@ -311,7 +309,6 @@ export function createLocatorHandlers({
     assertString(params.ref, 'ref');
     const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
     let frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
-    const effectsBefore = await captureActionEffectsBaseline(tabId, frameTarget, params);
     await ensureContentScripts(tabId, frameId);
     const response = await chromeApi.tabs.sendMessage(tabId, {
       type: 'GET_ACCESSIBILITY_REF_TARGET',
@@ -338,7 +335,6 @@ export function createLocatorHandlers({
       snapshotId: target.snapshotId || null,
       element: result.element,
       frame: frameTarget.frame,
-      effects: await captureActionEffects(tabId, frameTarget, effectsBefore, params),
       actionability: target.actionability || null
     };
   }
@@ -440,15 +436,13 @@ export function createLocatorHandlers({
     assertString(text, 'text');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     const frameTarget = await resolveFrameTarget(tabId, params);
-    const effectsBefore = await captureActionEffectsBaseline(tabId, frameTarget, params);
     const readiness = params.force === true ? null : await waitForLocatorActionable(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'fill', frameTarget);
     const prepared = await runLocatorScript(tabId, { ...params, index, replace: params.replace !== false, _ignoreTopLevelTextLocator: true }, 'prepareTextInput', frameTarget);
     const result = prepared.inputMode === 'select'
       ? await runLocatorScript(tabId, { ...params, fillText: text, index, _ignoreTopLevelTextLocator: true }, 'fill', frameTarget)
       : await dispatchRealTextInput(tabId, text, params).then(() => runLocatorScript(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'summarize', frameTarget));
     await recordAction(tabId, 'locator.fill', { locator: locatorSpecForRecording({ ...params, _ignoreTopLevelTextLocator: true }), index, text, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
-    const effects = await captureActionEffects(tabId, frameTarget, effectsBefore, params);
-    return { ok: true, element: result.element, frame: frameTarget.frame, effects, ...(readiness ? { actionability: readiness.actionability } : {}) };
+    return { ok: true, element: result.element, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
   async function locatorPress(params) {
@@ -802,66 +796,6 @@ export function createLocatorHandlers({
       world: 'MAIN'
     });
     return typeof result === 'number' && result > 0 ? result : 1;
-  }
-
-  async function captureActionEffectsBaseline(tabId, frameTarget, params = {}) {
-    if (params.effects === false) return null;
-    return {
-      tab: await safeTabSnapshot(tabId),
-      focused: frameTarget ? await safeFocusedElementSnapshot(tabId, frameTarget) : null
-    };
-  }
-
-  async function captureActionEffects(tabId, frameTarget, before, params = {}) {
-    if (params.effects === false) return null;
-    const after = await captureActionEffectsBaseline(tabId, frameTarget, params);
-    const urlChanged = Boolean(before?.tab && after.tab && before.tab.url !== after.tab.url);
-    const titleChanged = Boolean(before?.tab && after.tab && before.tab.title !== after.tab.title);
-    const statusChanged = Boolean(before?.tab && after.tab && before.tab.status !== after.tab.status);
-    const beforeFocus = before?.focused?.signature || null;
-    const afterFocus = after.focused?.signature || null;
-    const focusChanged = beforeFocus !== afterFocus;
-    return {
-      available: Boolean(after.tab || after.focused),
-      changed: urlChanged || titleChanged || statusChanged || focusChanged,
-      urlChanged,
-      titleChanged,
-      statusChanged,
-      focusChanged,
-      url: after.tab?.url || null,
-      title: after.tab?.title || null,
-      status: after.tab?.status || null,
-      focused: stripEffectSignature(after.focused)
-    };
-  }
-
-  async function safeTabSnapshot(tabId) {
-    if (typeof chromeApi.tabs?.get !== 'function') return null;
-    try {
-      const tab = await chromeApi.tabs.get(tabId);
-      if (!tab) return null;
-      return {
-        url: typeof tab.url === 'string' ? tab.url : '',
-        title: typeof tab.title === 'string' ? tab.title : '',
-        status: typeof tab.status === 'string' ? tab.status : ''
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  async function safeFocusedElementSnapshot(tabId, frameTarget) {
-    if (typeof chromeApi.scripting?.executeScript !== 'function') return null;
-    try {
-      const [{ result } = {}] = await chromeApi.scripting.executeScript({
-        target: frameTarget?.target || { tabId },
-        func: summarizeFocusedElementForEffects,
-        world: 'MAIN'
-      });
-      return normalizeFocusedEffect(result);
-    } catch {
-      return null;
-    }
   }
 
   async function dispatchRealClick(tabId, point, params) {
@@ -2092,55 +2026,4 @@ export function createLocatorHandlers({
     locatorSelectOption,
     locatorSetInputFiles
   };
-}
-
-function summarizeFocusedElementForEffects() {
-  const element = document.activeElement;
-  if (!element || element === document.body || element === document.documentElement) return null;
-  const rect = typeof element.getBoundingClientRect === 'function' ? element.getBoundingClientRect() : null;
-  const role = element.getAttribute?.('role') || globalThis.__browserAgentBridgeDomA11y?.implicitRole?.(element) || '';
-  const name = globalThis.__browserAgentBridgeDomA11y?.accessibleName?.(element) || element.getAttribute?.('aria-label') || '';
-  return {
-    tagName: element.tagName?.toLowerCase?.() || '',
-    id: element.id || '',
-    name: element.getAttribute?.('name') || '',
-    role,
-    accessibleName: name,
-    type: element.getAttribute?.('type') || '',
-    value: 'value' in element ? String(element.value).slice(0, 200) : '',
-    text: (element.innerText || element.textContent || '').trim().slice(0, 200),
-    rect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null
-  };
-}
-
-function normalizeFocusedEffect(value) {
-  if (!value || typeof value !== 'object' || typeof value.tagName !== 'string' || !value.tagName) return null;
-  const normalized = {
-    tagName: value.tagName,
-    id: typeof value.id === 'string' ? value.id : '',
-    name: typeof value.name === 'string' ? value.name : '',
-    role: typeof value.role === 'string' ? value.role : '',
-    accessibleName: typeof value.accessibleName === 'string' ? value.accessibleName : '',
-    type: typeof value.type === 'string' ? value.type : '',
-    value: typeof value.value === 'string' ? value.value : '',
-    text: typeof value.text === 'string' ? value.text : '',
-    rect: value.rect && typeof value.rect === 'object' ? value.rect : null
-  };
-  return {
-    ...normalized,
-    signature: [
-      normalized.tagName,
-      normalized.id,
-      normalized.name,
-      normalized.role,
-      normalized.accessibleName,
-      normalized.type
-    ].join('|')
-  };
-}
-
-function stripEffectSignature(value) {
-  if (!value) return null;
-  const { signature, ...rest } = value;
-  return rest;
 }

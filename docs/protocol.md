@@ -100,7 +100,9 @@ Errors use standard JSON-RPC shape:
 
 ## Action Observer (State Diffing)
 
-Mutating and navigation operations (such as `locator.click`, `locator.fill`, `dom.click`, `page.navigate`, `page.reload`, etc.) automatically capture the state of the tab before and after the action. A compact description of what changed is appended to the JSON-RPC response in a `whatChanged` property. This allows agents to skip taking a full snapshot after every action, significantly reducing round-trip latency.
+Mutating and navigation operations (such as `locator.click`, `locator.fill`, `dom.click`, `page.navigate`, `page.reload`, etc.) capture the state of the tab before and after the action. A compact description of what changed is appended to the JSON-RPC response in a `whatChanged` property. This lets agents skip taking a full snapshot after every action, reducing round-trip latency.
+
+By default the observer is **lightweight**: it reports URL changes, new popups, and a cheap focused-element delta only. Pass `"a11yDiff": true` (or `"observe": "full"`) to also include the accessibility-tree structural diff, which costs a full before/after tree capture. Pass `"observe": false` to skip the observer entirely (no `whatChanged` in the response).
 
 The `whatChanged` object has the following optional properties:
 
@@ -110,7 +112,7 @@ The `whatChanged` object has the following optional properties:
 - **`newPopups`**: An array of newly created tab objects `{ tabId, url, title }` detected during the action.
 - **`focusChanged`**: `true` if the active element changed.
   - **`focusedElement`**: `{ ref, tag, role, name }` describing the newly focused element, or `null`.
-- **`a11yDiff`**: A structural difference of the interactive/text elements in the accessibility tree:
+- **`a11yDiff`** (only when `a11yDiff: true`): A structural difference of the interactive/text elements in the accessibility tree:
   - **`added`**: Array of newly appeared nodes `{ tag, role, name, text, value }`.
   - **`removed`**: Array of disappeared nodes `{ tag, role, name, text }`.
   - **`changed`**: Array of nodes whose value changed `{ tag, role, name, fromValue, toValue }`.
@@ -691,13 +693,8 @@ match counts, reasons, frame, and last element). A located element that has no
 usable click point uses `data.code: "DOM_ELEMENT_NOT_ACTIONABLE"`. This mirrors
 the `locator.*` diagnostics so both interaction surfaces report failures the
 same way.
-Successful responses include a compact `effects` object with best-effort
-post-action signals: URL/title/status changes and the currently focused
-element. This lets agents skip an immediate full snapshot when the action did
-not materially change page state. Capturing effects costs a couple of extra
-calls per action (a tab snapshot plus a focused-element probe, before and
-after); pass `"effects": false` to skip it and return `effects: null` when you
-do not need the delta.
+Successful responses also carry the `whatChanged` object described under
+[Action Observer](#action-observer-state-diffing).
 
 ```json
 { "tabId": 123, "selector": "button[type=submit]", "index": 0, "timeoutMs": 30000, "frameSelector": "iframe[name=app]" }
@@ -919,8 +916,8 @@ lists `count` and every conflicting candidate (`candidates`, capped by the
 in-page collection limit, with `candidatesTruncated` when `count` exceeds it).
 This applies to all auto-waiting locator actions (`locator.click`,
 `locator.fill`, `locator.check`, `locator.selectOption`, drag, etc.).
-Successful `locator.click` responses include a compact `effects` object with
-best-effort URL/title/status changes and the currently focused element.
+Successful responses also carry the `whatChanged` object (see
+[Action Observer](#action-observer-state-diffing)).
 
 ```json
 { "tabId": 123, "role": "button", "name": "Submit", "timeoutMs": 30000 }
@@ -937,8 +934,8 @@ the same CDP mouse input path as `locator.click`.
 Refs are valid for the latest accessibility snapshot in that frame. Passing
 `snapshotId` is recommended; a stale id is rejected instead of clicking a newer
 node that reused the same `ref_N`. Use `force:true` to bypass actionability
-checks. Successful responses include the same compact `effects` object as
-`locator.click`.
+checks. Successful responses also carry the `whatChanged` object (see
+[Action Observer](#action-observer-state-diffing)).
 
 ```json
 { "tabId": 123, "ref": "ref_4", "snapshotId": "snap_lx3...", "frameId": 0 }
@@ -952,9 +949,8 @@ and have a stable bounding box. Text fields and contenteditable elements are
 focused and filled through CDP text input; native selects use value assignment
 plus input/change events.
 For flat params, `text` is the value to fill. To locate by text and fill a
-different value, use the nested form. Successful responses include compact
-`effects` so agents can see focus and navigation changes without immediately
-re-snapshotting.
+different value, use the nested form. Successful responses also carry the
+`whatChanged` object (see [Action Observer](#action-observer-state-diffing)).
 
 ```json
 { "tabId": 123, "label": "Search", "text": "browser bridge" }

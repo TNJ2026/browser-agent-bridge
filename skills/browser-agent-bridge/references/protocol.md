@@ -69,7 +69,9 @@ Authorization: Bearer <token>
 
 ## Action Observer (State Diffing)
 
-Mutating and navigation operations (such as `locator.click`, `locator.fill`, `dom.click`, `page.navigate`, `page.reload`, etc.) automatically capture the state of the tab before and after the action. A compact description of what changed is appended to the JSON-RPC response in a `whatChanged` property. This allows agents to skip taking a full snapshot after every action, significantly reducing round-trip latency.
+Mutating and navigation operations (such as `locator.click`, `locator.fill`, `dom.click`, `page.navigate`, `page.reload`, etc.) capture the state of the tab before and after the action. A compact description of what changed is appended to the JSON-RPC response in a `whatChanged` property. This lets agents skip taking a full snapshot after every action, reducing round-trip latency.
+
+By default the observer is **lightweight**: URL changes, new popups, and a cheap focused-element delta only. Pass `"a11yDiff": true` (or `"observe": "full"`) to also include the accessibility-tree structural diff (costs a full before/after tree capture). Pass `"observe": false` to skip the observer entirely.
 
 The `whatChanged` object has the following optional properties:
 

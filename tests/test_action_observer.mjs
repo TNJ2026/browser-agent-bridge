@@ -58,7 +58,7 @@ test('action observer detects focus changes', async () => {
 
   const result = await wrapWithActionObserver(
     'locator.fill',
-    { tabId: 1 },
+    { tabId: 1, a11yDiff: true },
     handler,
     pageHandlers,
     chromeApi
@@ -140,7 +140,7 @@ test('action observer computes accessibility tree diffs (added/removed/changed)'
 
   const result = await wrapWithActionObserver(
     'locator.click',
-    { tabId: 1 },
+    { tabId: 1, a11yDiff: true },
     handler,
     pageHandlers,
     chromeApi
@@ -168,4 +168,42 @@ test('action observer computes accessibility tree diffs (added/removed/changed)'
     text: undefined,
     value: undefined
   });
+});
+
+test('action observer skips entirely when observe is false', async () => {
+  let treeCalls = 0;
+  const chromeApi = {
+    tabs: { async get() { return { url: 'x', status: 'complete' }; }, async query() { return [{ id: 1 }]; } }
+  };
+  const pageHandlers = { async pageAccessibilityTree() { treeCalls += 1; return { tree: { nodes: [] } }; } };
+
+  const result = await wrapWithActionObserver(
+    'locator.click',
+    { tabId: 1, observe: false },
+    async () => ({ ok: true }),
+    pageHandlers,
+    chromeApi
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal('whatChanged' in result, false);
+  assert.equal(treeCalls, 0);
+});
+
+test('action observer default mode is lightweight (no a11y tree diff; focus via probe)', async () => {
+  let treeCalls = 0;
+  let focused = { tag: 'input', role: 'textbox', name: 'A' };
+  const chromeApi = {
+    tabs: { async get() { return { url: 'x', status: 'complete' }; }, async query() { return [{ id: 1 }]; } },
+    scripting: { async executeScript() { return [{ result: focused }]; } }
+  };
+  const pageHandlers = { async pageAccessibilityTree() { treeCalls += 1; return { tree: { nodes: [] } }; } };
+  const handler = async () => { focused = { tag: 'button', role: 'button', name: 'B' }; return { ok: true }; };
+
+  const result = await wrapWithActionObserver('locator.click', { tabId: 1 }, handler, pageHandlers, chromeApi);
+
+  assert.equal(result.ok, true);
+  assert.equal(treeCalls, 0); // no full a11y tree by default
+  assert.equal(result.whatChanged.a11yDiff, undefined); // a11y diff is opt-in
+  assert.equal(result.whatChanged.focusChanged, true); // focus delta from the cheap probe
 });
