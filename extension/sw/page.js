@@ -235,12 +235,58 @@ export function createPageHandlers({
   const POPUP_LOOKBACK_MS = 3000;
   const POPUP_LOOKBACK_MAX_MS = 10000;
   const POPUP_BUFFER_MAX = 50;
-  const recentPopups = [];
+
+  const sessionStore = chromeApi.storage?.session || {
+    _store: new Map(),
+    async get(keys) {
+      const res = {};
+      if (typeof keys === 'string') {
+        res[keys] = this._store.get(keys);
+      } else if (Array.isArray(keys)) {
+        for (const k of keys) res[k] = this._store.get(k);
+      } else if (keys && typeof keys === 'object') {
+        for (const k of Object.keys(keys)) {
+          res[k] = this._store.has(k) ? this._store.get(k) : keys[k];
+        }
+      }
+      return res;
+    },
+    async set(obj) {
+      for (const [k, v] of Object.entries(obj)) {
+        this._store.set(k, v);
+      }
+    }
+  };
+
+  let recentPopups = [];
+
+  async function loadRecentPopups() {
+    try {
+      const data = await sessionStore.get('recentPopups');
+      return data.recentPopups || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async function saveRecentPopups() {
+    try {
+      await sessionStore.set({ recentPopups });
+    } catch {
+      // Ignore
+    }
+  }
+
+  // Load from session storage on startup
+  loadRecentPopups().then(loaded => {
+    recentPopups = [...loaded, ...recentPopups];
+  }).catch(() => {});
 
   function recordRecentPopup(tab) {
     if (!tab || typeof tab.openerTabId !== 'number' || tab.openerTabId < 0) return;
     recentPopups.push({ openerTabId: tab.openerTabId, tabId: tab.id, ts: Date.now() });
     while (recentPopups.length > POPUP_BUFFER_MAX) recentPopups.shift();
+    saveRecentPopups();
   }
 
   function drainRecentPopups(openerTabId, lookbackMs) {
@@ -253,12 +299,20 @@ export function createPageHandlers({
         recentPopups.splice(i, 1);   // consume once
       }
     }
+    saveRecentPopups();
     return tabIds;
   }
 
   function forgetRecentPopup(tabId) {
+    let modified = false;
     for (let i = recentPopups.length - 1; i >= 0; i -= 1) {
-      if (recentPopups[i].tabId === tabId) recentPopups.splice(i, 1);
+      if (recentPopups[i].tabId === tabId) {
+        recentPopups.splice(i, 1);
+        modified = true;
+      }
+    }
+    if (modified) {
+      saveRecentPopups();
     }
   }
 
@@ -946,6 +1000,16 @@ export function createPageHandlers({
     }
   
     delete tree.iframes;
+    if (params.format === 'compact') {
+      return {
+        snapshot: renderCompactRefTree(tree.nodes || []),
+        url: tree.url,
+        title: tree.title,
+        snapshotId: tree.snapshotId,
+        nodeCount: (tree.nodes || []).length,
+        truncated: tree.truncated
+      };
+    }
     return tree;
   }
 
@@ -1458,6 +1522,30 @@ function extractAriaProps(node) {
     out[prop.name] = value === 'true' ? true : value;
   }
   return out;
+}
+
+// Render the (flat) ref-carrying accessibility nodes as a compact, token-efficient
+// text snapshot: one line per node, interactive lines tagged with their `ref` so an
+// agent can act on them directly (clickRef/fillRef/...). Bounds are dropped — the
+// agent acts by ref, not coordinates.
+function renderCompactRefTree(nodes) {
+  const lines = [];
+  for (const node of nodes) {
+    if (typeof node.text === 'string') {
+      const text = node.text.trim();
+      if (text) lines.push(`  ${text}`);
+      continue;
+    }
+    const parts = [`[${node.ref}]`, node.role || node.tag || 'element'];
+    if (node.name) parts.push(JSON.stringify(node.name));
+    if (typeof node.value === 'string' && node.value) parts.push(`=${JSON.stringify(node.value)}`);
+    else if (typeof node.value === 'boolean') parts.push(node.value ? '[checked]' : '[unchecked]');
+    if (node.type) parts.push(`type=${node.type}`);
+    if (node.href) parts.push(`-> ${node.href}`);
+    if (node.focused) parts.push('[focused]');
+    lines.push(parts.join(' '));
+  }
+  return lines.join('\n');
 }
 
 function renderAriaSnapshot(tree, indent = 0) {
