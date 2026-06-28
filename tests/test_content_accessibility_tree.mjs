@@ -120,6 +120,7 @@ async function runAccessibilitySession(document, message = {}) {
       CSS: { escape: value => String(value).replace(/["\\]/g, '\\$&') },
       getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' })
     },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
     Node: { ELEMENT_NODE: 1, TEXT_NODE: 3 },
     HTMLAnchorElement: FakeAnchor,
     HTMLInputElement: FakeInput,
@@ -128,8 +129,9 @@ async function runAccessibilitySession(document, message = {}) {
     globalThis: null
   };
   context.globalThis = context;
-  vm.runInNewContext(a11ySource, context);
-  vm.runInNewContext(treeSource, context);
+  vm.createContext(context);
+  vm.runInContext(a11ySource, context);
+  vm.runInContext(treeSource, context);
   let response = null;
   listener({ type: 'GET_ACCESSIBILITY_TREE', maxNodes: 100, snapshotId: 'snap_test', frameId: 0, ...message }, {}, value => { response = value; });
   assert.equal(response.ok, true, response.error);
@@ -246,4 +248,22 @@ test('content accessibility refs reject stale snapshot ids', async () => {
   const response = session.send({ type: 'GET_ACCESSIBILITY_REF_TARGET', ref: node.ref, snapshotId: 'old_snapshot' });
   assert.equal(response.ok, false);
   assert.match(response.error, /Stale accessibility ref snapshot/);
+});
+
+test('ref actionability uses the shared atom (fieldset[disabled] ancestor => not enabled)', async () => {
+  // The button itself has no `disabled`, but a disabled fieldset ancestor makes
+  // it inactive — only the shared dom-a11y isEnabled (closest('fieldset[disabled]'))
+  // catches this; the previous inline check did not.
+  const button = new FakeElement('button', { text: 'Save' });
+  const fieldset = new FakeElement('fieldset', { attrs: { disabled: '' }, children: [button] });
+  const document = makeDocument([fieldset]);
+
+  const session = await runAccessibilitySession(document);
+  const node = session.tree.nodes.find(item => item.name === 'Save');
+  assert.ok(node?.ref);
+  const response = session.send({ type: 'GET_ACCESSIBILITY_REF_TARGET', ref: node.ref, snapshotId: node.snapshotId });
+  assert.equal(response.ok, true, response.error);
+  assert.equal(response.target.actionability.enabled, false);
+  assert.equal(response.target.actionability.actionable, false);
+  assert.ok(response.target.actionability.reasons.includes('disabled'));
 });

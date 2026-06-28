@@ -267,11 +267,12 @@
   function summarizeRefTarget(ref, entry) {
     const { element, offsetX = 0, offsetY = 0 } = entry;
     const rect = element.getBoundingClientRect();
-    const style = window.getComputedStyle(element);
     const localClickPoint = clickablePoint(element, rect);
     const clickPoint = localClickPoint ? { x: localClickPoint.x + offsetX, y: localClickPoint.y + offsetY } : null;
-    const visible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-    const enabled = !element.disabled && element.getAttribute('aria-disabled') !== 'true';
+    // Reuse the shared dom-a11y atom so ref actionability matches locator.click
+    // (covers element.hidden / [hidden] ancestor / aria-hidden / fieldset[disabled]).
+    const visible = globalThis.__browserAgentBridgeDomA11y.isVisible(element);
+    const enabled = globalThis.__browserAgentBridgeDomA11y.isEnabled(element);
     const hitDocument = element.ownerDocument || document;
     const hit = localClickPoint && typeof hitDocument.elementFromPoint === 'function' ? hitDocument.elementFromPoint(localClickPoint.x, localClickPoint.y) : null;
     const receivesEvents = !clickPoint || !hit || element === hit || element.contains(hit);
