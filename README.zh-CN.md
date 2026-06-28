@@ -8,6 +8,7 @@ English documentation: [README.md](README.md)
 
 - [系统架构](#系统架构)
 - [主要特性](#主要特性)
+- [与 CDP、Playwright 的区别](#与-cdpplaywright-的区别)
 - [安装](#安装)
 - [本地认证](#本地认证)
 - [快速开始](#快速开始)
@@ -38,6 +39,22 @@ graph TD
 - 支持页面 console 和 network 事件流。
 - 支持工作流录制，并默认对输入内容脱敏。
 - 支持可视化高亮，用于追踪 Agent 操作。
+
+## 与 CDP、Playwright 的区别
+
+Playwright 和原生 Chrome DevTools Protocol (CDP) 都是为驱动**专用的、自动化启动的浏览器**设计的。Browser Agent Bridge 则通过一个已安装的扩展，让 Agent 操作**用户日常使用的 Chrome**。对 Agent 而言的实际差异：
+
+| | Browser Agent Bridge | 原生 CDP | Playwright |
+| :-- | :-- | :-- | :-- |
+| 浏览器与 profile | 用户正在运行的 Chrome 和真实 profile —— 登录态、cookie、扩展都已就绪 | 用 `--remote-debugging-port` 启动的 Chrome，通常是临时 profile | 内置/自动化用的 Chromium，全新 context |
+| 接入方式 | MV3 扩展 + Native Messaging host；底层用受限的 `chrome.debugger` (CDP) | 一个任何本地进程都能驱动的开放调试端口 | 通过 CDP 启动或连接，独占浏览器 |
+| 访问范围 | 硬隔离在 Agent 托管标签组内；对其他标签的调用被拒 | 整个浏览器 —— 每个标签和 target | 它所控制的整个浏览器 context |
+| 授权与认证 | 按方法的运行时审批 + 本地 bearer token + origin 校验 | 无 —— 调试端口不做认证 | 无 —— 测试进程拥有完全控制 |
+| Agent 感知 | 内置面向 LLM 的原语：带 `ref` 的无障碍树、`format: "compact"` 快照、`page.ariaSnapshot`、动作后 `whatChanged` 增量 | 直接读原始协议，自己构建感知 | locator 和 DOM；LLM 视图自己构建 |
+| 操作 | Playwright 风格 locator **加上**对感知节点的按 `ref` 操作（`locator.*Ref`） | 手动 `Input.*` / `Runtime.*` 调用 | locator + 自动等待 |
+| 生命周期 | 随用户浏览器存在；侧边栏 start/stop | 绑定调试会话 | 每次运行的临时 context |
+
+简言之：Playwright 和 CDP 擅长**在沙箱浏览器里做测试和脚本化自动化**；Browser Agent Bridge 面向**在用户真实浏览器里行动的 Agent**——受显式标签组边界和按动作审批约束，感知/操作原语为 LLM 循环而非测试脚本而设计。
 
 ## 安装
 
