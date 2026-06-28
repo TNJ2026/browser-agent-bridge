@@ -39,7 +39,78 @@ let nativeStatus = {
   lastChecked: Date.now()
 };
 const pendingNativeRequests = new Map();
+const sessionStore = chrome.storage?.session || {
+  _store: new Map(),
+  async get(keys) {
+    const res = {};
+    if (typeof keys === 'string') {
+      res[keys] = this._store.get(keys);
+    } else if (Array.isArray(keys)) {
+      for (const k of keys) res[k] = this._store.get(k);
+    } else if (keys && typeof keys === 'object') {
+      for (const k of Object.keys(keys)) {
+        res[k] = this._store.has(k) ? this._store.get(k) : keys[k];
+      }
+    }
+    return res;
+  },
+  async set(obj) {
+    for (const [k, v] of Object.entries(obj)) {
+      this._store.set(k, v);
+    }
+  },
+  async remove(keys) {
+    const arr = Array.isArray(keys) ? keys : [keys];
+    for (const k of arr) this._store.delete(k);
+  }
+};
+
 const attachedTabs = new Set();
+
+async function initSessionState() {
+  try {
+    // Clear zombie pending prompts from previous runs (since request contexts are dead anyway)
+    await sessionStore.remove('pendingPrompts').catch(() => {});
+
+    const data = await sessionStore.get(['attachedTabs', 'cdpEventForwardingTabIds', 'cdpEventForwardingAll']);
+    const stored = data.attachedTabs || [];
+    
+    // Check actual debugger targets that are still attached
+    const targets = await chrome.debugger.getTargets().catch(() => []);
+    const activeAttached = new Set(
+      targets.filter(t => t.type === 'page' && t.attached && t.tabId).map(t => t.tabId)
+    );
+
+    attachedTabs.clear();
+    for (const tabId of stored) {
+      if (activeAttached.has(tabId)) {
+        attachedTabs.add(tabId);
+      }
+    }
+    await saveAttachedTabs();
+
+    if (data.cdpEventForwardingTabIds) {
+      cdpEventForwarding.tabIds = new Set(data.cdpEventForwardingTabIds);
+    }
+    if (typeof data.cdpEventForwardingAll === 'boolean') {
+      cdpEventForwarding.all = data.cdpEventForwardingAll;
+    }
+  } catch (e) {
+    console.error('Error initializing session state:', e);
+  }
+}
+
+async function saveAttachedTabs() {
+  await sessionStore.set({ attachedTabs: Array.from(attachedTabs) });
+}
+
+async function saveCdpEventForwarding() {
+  await sessionStore.set({
+    cdpEventForwardingTabIds: Array.from(cdpEventForwarding.tabIds),
+    cdpEventForwardingAll: cdpEventForwarding.all
+  });
+}
+
 const networkEventsByTab = new Map();
 const consoleEventsByTab = new Map();
 const dialogsByTab = new Map();
@@ -436,6 +507,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 chrome.debugger.onDetach.addListener(source => {
   if (typeof source.tabId === 'number') {
     attachedTabs.delete(source.tabId);
+    saveAttachedTabs().catch(() => {});
     networkInterceptorController.onDebuggerDetached(source.tabId);
   }
 });
@@ -473,6 +545,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 initializeBridgeEnabled().then(connectNative).catch(err => console.error(err));
 cspHandlers.initCspBypass().catch(err => console.error(err));
+initSessionState().catch(err => console.error(err));
+
 
 async function initializeBridgeEnabled() {
   const result = await chrome.storage.local.get('bridgeEnabled');
@@ -793,6 +867,7 @@ async function attachDebugger(tabId) {
   if (attachedTabs.has(tabId)) return;
   await withTimeout(chrome.debugger.attach({ tabId }, CDP_VERSION), DEFAULT_TIMEOUT_MS, 'debugger.attach');
   attachedTabs.add(tabId);
+  await saveAttachedTabs();
 }
 
 function handleNativeNotification(message) {
@@ -809,6 +884,7 @@ function updateCdpEventForwarding(status) {
       if (Number.isInteger(tabId)) cdpEventForwarding.tabIds.add(tabId);
     }
   }
+  saveCdpEventForwarding().catch(() => {});
 }
 
 function shouldForwardCdpEvent(event) {
@@ -822,6 +898,7 @@ async function detachDebugger(tabId) {
   // onDetach also clears attachedTabs + interceptor state; delete eagerly too.
   await chrome.debugger.detach({ tabId }).catch(() => {});
   attachedTabs.delete(tabId);
+  await saveAttachedTabs();
 }
 
 async function detachAllDebuggers() {
