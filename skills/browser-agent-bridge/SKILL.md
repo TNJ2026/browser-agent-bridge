@@ -1,5 +1,6 @@
 ---
 name: browser-agent-bridge
+version: 1.0.0
 description: Use the Chrome Native Messaging browser-control bridge extension (Browser Agent Bridge) from an agent. Trigger when a user asks Codex/agent to inspect or control Chrome through the locally built Browser Agent Bridge, call browser tools exposed at http://127.0.0.1:8765/rpc or ws://127.0.0.1:8765/ws, verify the bridge/native host connection, troubleshoot the extension connection, or automate Chrome tabs/pages without embedding an LLM client in the extension.
 ---
 
