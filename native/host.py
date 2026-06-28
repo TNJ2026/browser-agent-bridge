@@ -626,6 +626,7 @@ class RpcRequestHandler(BaseHTTPRequestHandler):
                 pending_size = len(pending_requests)
             self.send_json(200, {
                 "ok": True,
+                "hostReady": True,
                 "extensionReady": extension_ready,
                 "extensionVersion": extension_version,
                 "authRequired": auth_enabled(),

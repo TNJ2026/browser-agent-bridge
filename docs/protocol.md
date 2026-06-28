@@ -56,7 +56,12 @@ Header:
 Authorization: Bearer <token>
 ```
 
-`GET /health` does not require auth and includes `authRequired`, `authConfigured`, and `allowNoAuth`.
+`GET /health` does not require auth. It returns `hostReady` (always `true` — a
+response means the native host process is up and serving) and `extensionReady`
+(whether the Chrome extension has connected its native port), alongside
+`authRequired`, `authConfigured`, and `allowNoAuth`. A client can poll `/health`
+to tell "host up but extension not connected" (`extensionReady:false`) apart from
+"host down" (connection refused).
 
 ## Request
 
