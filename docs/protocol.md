@@ -98,6 +98,45 @@ Errors use standard JSON-RPC shape:
 }
 ```
 
+## Action Observer (State Diffing)
+
+Mutating and navigation operations (such as `locator.click`, `locator.fill`, `dom.click`, `page.navigate`, `page.reload`, etc.) automatically capture the state of the tab before and after the action. A compact description of what changed is appended to the JSON-RPC response in a `whatChanged` property. This allows agents to skip taking a full snapshot after every action, significantly reducing round-trip latency.
+
+The `whatChanged` object has the following optional properties:
+
+- **`urlChanged`**: `true` if the tab URL changed.
+  - **`fromUrl`**: The original URL.
+  - **`toUrl`**: The new URL.
+- **`newPopups`**: An array of newly created tab objects `{ tabId, url, title }` detected during the action.
+- **`focusChanged`**: `true` if the active element changed.
+  - **`focusedElement`**: `{ ref, tag, role, name }` describing the newly focused element, or `null`.
+- **`a11yDiff`**: A structural difference of the interactive/text elements in the accessibility tree:
+  - **`added`**: Array of newly appeared nodes `{ tag, role, name, text, value }`.
+  - **`removed`**: Array of disappeared nodes `{ tag, role, name, text }`.
+  - **`changed`**: Array of nodes whose value changed `{ tag, role, name, fromValue, toValue }`.
+
+Example:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-1",
+  "result": {
+    "ok": true,
+    "element": { "ref": "ref_1" },
+    "whatChanged": {
+      "focusChanged": true,
+      "focusedElement": { "ref": "ref_2", "tag": "input", "role": "textbox", "name": "Email" },
+      "a11yDiff": {
+        "changed": [
+          { "tag": "input", "role": "checkbox", "name": "Subscribe", "fromValue": "false", "toValue": "true" }
+        ]
+      }
+    }
+  }
+}
+```
+
 ## Method Sketch
 
 ### `extension.info`

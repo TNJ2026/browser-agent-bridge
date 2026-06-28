@@ -14,6 +14,8 @@ import { createKeyboardDispatcher, createKeyboardHandlers } from './sw/keyboard.
 import { createNetworkInterceptorController } from './sw/network-interceptors.js';
 import { isTabTargetedMethod } from './sw/tab-scope.js';
 import { getMethodCategory, optionalPermissionsForMethod } from './sw/method-policy.js';
+import { wrapWithActionObserver } from './sw/action-observer.js';
+
 
 const NATIVE_HOST = 'com.local.browser_agent_bridge';
 const CDP_VERSION = '1.3';
@@ -737,7 +739,7 @@ async function dispatchRpc(request) {
   if (!handler) {
     throw new Error(`Unknown method: ${request.method}`);
   }
-  return handler(params);
+  return wrapWithActionObserver(request.method, params, handler, pageHandlers);
 }
 
 async function extensionInfo() {

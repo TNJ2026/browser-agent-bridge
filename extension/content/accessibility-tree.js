@@ -7,6 +7,14 @@
     refs: new Map()
   };
 
+  function getActiveElementDeep() {
+    let active = document.activeElement;
+    while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+      active = active.shadowRoot.activeElement;
+    }
+    return active;
+  }
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'PING_AGENT_BRIDGE_CONTENT') {
       sendResponse({ ok: true });
@@ -157,6 +165,7 @@
           tag: el.tagName.toLowerCase(),
           role: role || undefined,
           name,
+          focused: getActiveElementDeep() === el || undefined,
           type: el.getAttribute('type') || undefined,
           value: valueOf(el),
           href: el instanceof HTMLAnchorElement ? el.href : undefined,
@@ -196,6 +205,7 @@
               frameId,
               tag: el.tagName.toLowerCase(),
               text: txt.slice(0, 500),
+              focused: getActiveElementDeep() === el || undefined,
               bounds: {
                 x: Math.round(rect.x + offsetX),
                 y: Math.round(rect.y + offsetY),

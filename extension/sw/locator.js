@@ -290,6 +290,7 @@ export function createLocatorHandlers({
   async function locatorClick(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.click');
+    const effectsBefore = await captureActionEffectsBaseline(tabId, null);
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     let frameTarget = await resolveFrameTarget(tabId, params);
     const target = params.force === true
@@ -300,13 +301,15 @@ export function createLocatorHandlers({
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = { element: target.element };
     await recordAction(tabId, 'locator.click', { locator: locatorSpecForRecording(params), index, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
-    return { ok: true, element: result.element, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
+    const effects = await captureActionEffects(tabId, frameTarget, effectsBefore);
+    return { ok: true, element: result.element, frame: frameTarget.frame, effects, ...(params.force === true ? {} : { actionability: target.actionability }) };
   }
 
   async function locatorClickRef(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.clickRef');
     assertString(params.ref, 'ref');
+    const effectsBefore = await captureActionEffectsBaseline(tabId, null);
     const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
     let frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
     await ensureContentScripts(tabId, frameId);
@@ -335,6 +338,7 @@ export function createLocatorHandlers({
       snapshotId: target.snapshotId || null,
       element: result.element,
       frame: frameTarget.frame,
+      effects: await captureActionEffects(tabId, frameTarget, effectsBefore),
       actionability: target.actionability || null
     };
   }
@@ -434,6 +438,7 @@ export function createLocatorHandlers({
     await assertTabAllowed(tabId, 'locator.fill');
     const text = typeof params.text === 'string' ? params.text : params.value;
     assertString(text, 'text');
+    const effectsBefore = await captureActionEffectsBaseline(tabId, null);
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     const frameTarget = await resolveFrameTarget(tabId, params);
     const readiness = params.force === true ? null : await waitForLocatorActionable(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'fill', frameTarget);
@@ -442,7 +447,8 @@ export function createLocatorHandlers({
       ? await runLocatorScript(tabId, { ...params, fillText: text, index, _ignoreTopLevelTextLocator: true }, 'fill', frameTarget)
       : await dispatchRealTextInput(tabId, text, params).then(() => runLocatorScript(tabId, { ...params, index, _ignoreTopLevelTextLocator: true }, 'summarize', frameTarget));
     await recordAction(tabId, 'locator.fill', { locator: locatorSpecForRecording({ ...params, _ignoreTopLevelTextLocator: true }), index, text, frameSelector: params.frameSelector || params.locator?.frameSelector || null, frameId: frameTarget.frameId }, result);
-    return { ok: true, element: result.element, frame: frameTarget.frame, ...(readiness ? { actionability: readiness.actionability } : {}) };
+    const effects = await captureActionEffects(tabId, frameTarget, effectsBefore);
+    return { ok: true, element: result.element, frame: frameTarget.frame, effects, ...(readiness ? { actionability: readiness.actionability } : {}) };
   }
 
   async function locatorPress(params) {
@@ -796,6 +802,62 @@ export function createLocatorHandlers({
       world: 'MAIN'
     });
     return typeof result === 'number' && result > 0 ? result : 1;
+  }
+
+  async function captureActionEffectsBaseline(tabId, frameTarget) {
+    return {
+      tab: await safeTabSnapshot(tabId),
+      focused: frameTarget ? await safeFocusedElementSnapshot(tabId, frameTarget) : null
+    };
+  }
+
+  async function captureActionEffects(tabId, frameTarget, before) {
+    const after = await captureActionEffectsBaseline(tabId, frameTarget);
+    const urlChanged = Boolean(before?.tab && after.tab && before.tab.url !== after.tab.url);
+    const titleChanged = Boolean(before?.tab && after.tab && before.tab.title !== after.tab.title);
+    const statusChanged = Boolean(before?.tab && after.tab && before.tab.status !== after.tab.status);
+    const focusChanged = Boolean(before?.focused && after.focused && before.focused.signature !== after.focused.signature);
+    return {
+      available: Boolean(after.tab || after.focused),
+      changed: urlChanged || titleChanged || statusChanged || focusChanged,
+      urlChanged,
+      titleChanged,
+      statusChanged,
+      focusChanged,
+      url: after.tab?.url || null,
+      title: after.tab?.title || null,
+      status: after.tab?.status || null,
+      focused: stripEffectSignature(after.focused)
+    };
+  }
+
+  async function safeTabSnapshot(tabId) {
+    if (typeof chromeApi.tabs?.get !== 'function') return null;
+    try {
+      const tab = await chromeApi.tabs.get(tabId);
+      if (!tab) return null;
+      return {
+        url: typeof tab.url === 'string' ? tab.url : '',
+        title: typeof tab.title === 'string' ? tab.title : '',
+        status: typeof tab.status === 'string' ? tab.status : ''
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async function safeFocusedElementSnapshot(tabId, frameTarget) {
+    if (typeof chromeApi.scripting?.executeScript !== 'function') return null;
+    try {
+      const [{ result } = {}] = await chromeApi.scripting.executeScript({
+        target: frameTarget?.target || { tabId },
+        func: summarizeFocusedElementForEffects,
+        world: 'MAIN'
+      });
+      return normalizeFocusedEffect(result);
+    } catch {
+      return null;
+    }
   }
 
   async function dispatchRealClick(tabId, point, params) {
