@@ -94,7 +94,6 @@ export function createDomHandlers({
     assertString(params.selector, 'selector');
     const index = Number.isInteger(params.index) && params.index >= 0 ? params.index : 0;
     let frameTarget = await resolveFrameTarget(tabId, params);
-    const effectsBefore = await captureActionEffectsBaseline(tabId, frameTarget);
     const target = params.force === true ? await getDomClickTarget(tabId, params, frameTarget) : await waitForDomActionable(tabId, params, 'click', frameTarget);
     if (!target?.element?.clickPoint) {
       throw createDomNotActionableError(`Element has no clickable point: ${params.selector} at index ${index}`, { selector: params.selector, index, action: 'dom.click' });
@@ -103,8 +102,7 @@ export function createDomHandlers({
     await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), params);
     const result = target.element;
     await recordAction(tabId, 'dom.click', { selector: params.selector, index, frameSelector: params.frameSelector || null, frameId: frameTarget.frameId }, result);
-    const effects = await captureActionEffects(tabId, frameTarget, effectsBefore);
-    return { ok: true, element: result, frame: frameTarget.frame, effects, ...(params.force === true ? {} : { actionability: target.actionability }) };
+    return { ok: true, element: result, frame: frameTarget.frame, ...(params.force === true ? {} : { actionability: target.actionability }) };
   }
 
   async function domDragTo(params) {
@@ -1409,64 +1407,6 @@ export function createDomHandlers({
     await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button, clickCount });
   }
 
-  async function captureActionEffectsBaseline(tabId, frameTarget) {
-    return {
-      tab: await safeTabSnapshot(tabId),
-      focused: frameTarget ? await safeFocusedElementSnapshot(tabId, frameTarget) : null
-    };
-  }
-
-  async function captureActionEffects(tabId, frameTarget, before) {
-    const after = await captureActionEffectsBaseline(tabId, frameTarget);
-    const urlChanged = Boolean(before?.tab && after.tab && before.tab.url !== after.tab.url);
-    const titleChanged = Boolean(before?.tab && after.tab && before.tab.title !== after.tab.title);
-    const statusChanged = Boolean(before?.tab && after.tab && before.tab.status !== after.tab.status);
-    const beforeFocus = before?.focused?.signature || null;
-    const afterFocus = after.focused?.signature || null;
-    const focusChanged = beforeFocus !== afterFocus;
-    return {
-      available: Boolean(after.tab || after.focused),
-      changed: urlChanged || titleChanged || statusChanged || focusChanged,
-      urlChanged,
-      titleChanged,
-      statusChanged,
-      focusChanged,
-      url: after.tab?.url || null,
-      title: after.tab?.title || null,
-      status: after.tab?.status || null,
-      focused: stripEffectSignature(after.focused)
-    };
-  }
-
-  async function safeTabSnapshot(tabId) {
-    if (typeof chromeApi.tabs?.get !== 'function') return null;
-    try {
-      const tab = await chromeApi.tabs.get(tabId);
-      if (!tab) return null;
-      return {
-        url: typeof tab.url === 'string' ? tab.url : '',
-        title: typeof tab.title === 'string' ? tab.title : '',
-        status: typeof tab.status === 'string' ? tab.status : ''
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  async function safeFocusedElementSnapshot(tabId, frameTarget) {
-    if (typeof chromeApi.scripting?.executeScript !== 'function') return null;
-    try {
-      const [{ result } = {}] = await chromeApi.scripting.executeScript({
-        target: frameTarget?.target || { tabId },
-        func: summarizeFocusedElementForEffects,
-        world: 'MAIN'
-      });
-      return normalizeFocusedEffect(result);
-    } catch {
-      return null;
-    }
-  }
-
   async function dispatchRealDrag(tabId, from, to, params) {
     await attachDebugger(tabId);
     const button = params.button || 'left';
@@ -1548,53 +1488,4 @@ function createDomNotActionableError(message, diagnostic) {
   error.code = 'DOM_ELEMENT_NOT_ACTIONABLE';
   error.diagnostic = { type: 'DomElementNotActionable', ...diagnostic };
   return error;
-}
-
-function summarizeFocusedElementForEffects() {
-  const element = document.activeElement;
-  if (!element || element === document.body || element === document.documentElement) return null;
-  const rect = typeof element.getBoundingClientRect === 'function' ? element.getBoundingClientRect() : null;
-  return {
-    tagName: element.tagName?.toLowerCase?.() || '',
-    id: element.id || '',
-    name: element.getAttribute?.('name') || '',
-    role: element.getAttribute?.('role') || '',
-    accessibleName: element.getAttribute?.('aria-label') || '',
-    type: element.getAttribute?.('type') || '',
-    value: 'value' in element ? String(element.value).slice(0, 200) : '',
-    text: (element.innerText || element.textContent || '').trim().slice(0, 200),
-    rect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null
-  };
-}
-
-function normalizeFocusedEffect(value) {
-  if (!value || typeof value !== 'object' || typeof value.tagName !== 'string' || !value.tagName) return null;
-  const normalized = {
-    tagName: value.tagName,
-    id: typeof value.id === 'string' ? value.id : '',
-    name: typeof value.name === 'string' ? value.name : '',
-    role: typeof value.role === 'string' ? value.role : '',
-    accessibleName: typeof value.accessibleName === 'string' ? value.accessibleName : '',
-    type: typeof value.type === 'string' ? value.type : '',
-    value: typeof value.value === 'string' ? value.value : '',
-    text: typeof value.text === 'string' ? value.text : '',
-    rect: value.rect && typeof value.rect === 'object' ? value.rect : null
-  };
-  return {
-    ...normalized,
-    signature: [
-      normalized.tagName,
-      normalized.id,
-      normalized.name,
-      normalized.role,
-      normalized.accessibleName,
-      normalized.type
-    ].join('|')
-  };
-}
-
-function stripEffectSignature(value) {
-  if (!value) return null;
-  const { signature, ...rest } = value;
-  return rest;
 }
