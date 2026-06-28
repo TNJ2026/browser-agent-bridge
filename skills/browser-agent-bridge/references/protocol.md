@@ -258,6 +258,14 @@ Polls the whole page, or a selector subtree, for text. Use `frameSelector` for a
 {"tabId":123,"text":"Signed in","selector":"main","timeoutMs":30000,"frameSelector":"iframe[name=app]"}
 ```
 
+### `page.waitForPopup`
+
+Waits for a popup opened by the target tab (matched by `openerTabId`). Optional `url`, `urlContains`, or `urlRegex` filter the popup target. Call it before the action that opens the popup; a short lookback (default `popupLookbackMs` 3000, max 10000; `0` to disable) also catches a popup opened just before the call. The popup is moved into the opener's Agent-managed group so it can be driven; pass `"adopt":false` to leave it ungrouped. On timeout the error includes `data.code:"PAGE_WAIT_FOR_POPUP_TIMEOUT"`.
+
+```json
+{"tabId":123,"urlContains":"login-success","timeoutMs":30000}
+```
+
 ### `page.readText`
 
 Returns `url`, `title`, `text`, and current selection.
@@ -289,6 +297,14 @@ For JPEG:
 ```
 
 To save a screenshot to disk, pass the returned `dataUrl` to `native.saveDataUrl`.
+
+### `page.pdf`
+
+Prints the page to a PDF via CDP `Page.printToPDF` and returns a `data:application/pdf` URL. Pass the returned `dataUrl` to `native.saveDataUrl` (with a `.pdf` filename) to save it.
+
+```json
+{"tabId":123,"landscape":false,"printBackground":true}
+```
 
 ### `page.executeJavaScript`
 
@@ -372,10 +388,16 @@ Scrolls a specific element or the entire page/window.
 Finds elements using a Playwright-like locator shape. Locator fields can be
 passed directly or under `locator`. Supported fields are `selector`, `text`,
 `role`, `name`, `label`, `placeholder`, `exact`, `caseSensitive`, `visible`,
-and `frameSelector`.
+`frameSelector`, and `within`. `within` takes a nested locator (same fields, may
+itself nest `within`) and scopes the match to descendants of the parent
+locator's matches — Playwright's `page.locator(parent).locator(child)`.
 
 ```json
 {"tabId":123,"role":"button","name":"Submit","visible":true}
+```
+
+```json
+{"tabId":123,"role":"button","name":"Save","within":{"selector":".card","hasText":"Billing"}}
 ```
 
 ### `locator.textContent`
@@ -574,7 +596,7 @@ Hide:
 
 ### `policy.get`
 
-Returns URL policy. Default blocked patterns include `chrome://*`, `chrome-extension://*`, and `chromewebstore.google.com/*`.
+Returns URL policy. Default blocked patterns include `chrome://*`, `chrome-extension://*`, and `*://chromewebstore.google.com/*`.
 
 ```json
 {}
