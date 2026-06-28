@@ -19,7 +19,7 @@ const TAB_TARGETED = [
   'computer.click', 'computer.type', 'computer.drag',
   'keyboard.type', 'keyboard.press', 'keyboard.down', 'keyboard.up', 'keyboard.compose',
   'network.read', 'network.getResponseBody', 'network.setInterceptors',
-  'network.routeFromHAR', 'network.interceptors.status', 'network.interceptors.events',
+  'network.routeFromHAR', 'network.interceptors.events',
   'console.read',
   'indicator.set'
 ];
@@ -31,7 +31,7 @@ const NOT_TAB_TARGETED = [
   'tabs.list', 'tabs.close', 'tabs.activate', 'tabs.group',
   'session.start', 'session.get', 'session.list', 'session.addTab',
   'session.closeTab', 'session.stop', 'session.createTab',
-  'downloads.list', 'downloads.waitFor', 'downloads.download',
+  'downloads.list', 'downloads.waitFor',
   'trace.start', 'trace.stop', 'trace.export', 'trace.exportHtml', 'trace.clear',
   'recording.start', 'recording.status', 'recording.export', 'recording.clear',
   'policy.get', 'policy.set', 'policy.checkUrl',
@@ -64,6 +64,13 @@ test('SECURITY: cookies.get stays tab-targeted (isolation must restrict it)', as
 test('SECURITY: tabs.list is NOT tab-targeted (it keys on query.groupId, not tabId)', async () => {
   const { isTabTargetedMethod } = await importModule();
   assert.equal(isTabTargetedMethod('tabs.list'), false);
+});
+
+test('network.interceptors.status is tab-targeted only when scoped to a tab', async () => {
+  const { isTabTargetedMethod } = await importModule();
+  assert.equal(isTabTargetedMethod('network.interceptors.status'), false);
+  assert.equal(isTabTargetedMethod('network.interceptors.status', {}), false);
+  assert.equal(isTabTargetedMethod('network.interceptors.status', { tabId: 7 }), true);
 });
 
 test('prefix anchoring requires the dot (no loose prefix matches)', async () => {

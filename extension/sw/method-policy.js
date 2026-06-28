@@ -14,9 +14,10 @@ export function optionalPermissionsForMethod(method, params = {}) {
   if (method === 'tabs.group') return ['tabs', 'tabGroups'];
   if (method.startsWith('tabs.')) return ['tabs'];
   if (method.startsWith('session.')) return ['tabs', 'tabGroups'];
-  if (method === 'downloads.list' || method === 'downloads.waitFor' || method === 'downloads.download') return ['downloads'];
+  if (method === 'downloads.list' || method === 'downloads.waitFor') return ['downloads'];
   if (method === 'recording.export' && params.download === true) return ['downloads'];
   if ((method === 'trace.export' || method === 'trace.exportHtml') && params.download === true) return ['downloads'];
+  if (method === 'network.interceptors.status') return params.tabId != null ? ['tabs'] : [];
   if (
     method.startsWith('page.') ||
     method.startsWith('dom.') ||
@@ -31,7 +32,6 @@ export function optionalPermissionsForMethod(method, params = {}) {
     method === 'network.interceptors.clear' ||
     method === 'network.interceptors.events' ||
     method === 'network.interceptors.clearEvents' ||
-    method === 'network.interceptors.status' ||
     method === 'recording.start'
   ) {
     return ['tabs'];
@@ -50,7 +50,7 @@ export function getMethodCategory(method, params = {}) {
   if (method === 'tabs.close' || method === 'session.closeTab' || method === 'session.stop') {
     return 'tab_control';
   }
-  if (method === 'downloads.list' || method === 'downloads.waitFor' || method === 'downloads.download') {
+  if (method === 'downloads.list' || method === 'downloads.waitFor') {
     return 'read_downloads';
   }
   if (

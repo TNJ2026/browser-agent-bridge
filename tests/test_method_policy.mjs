@@ -19,7 +19,6 @@ const CATEGORY = [
   ['session.stop', 'tab_control'],
   ['downloads.list', 'read_downloads'],
   ['downloads.waitFor', 'read_downloads'],
-  ['downloads.download', 'read_downloads'],
   ['page.executeJavaScript', 'page_script'],
   ['page.waitForFunction', 'page_script'],
   ['page.addInitScript', 'page_script'],
@@ -105,9 +104,15 @@ test('optionalPermissionsForMethod: tab-acting families need tabs', async () => 
   const { optionalPermissionsForMethod } = await importModule();
   for (const method of ['page.navigate', 'dom.click', 'locator.fill', 'computer.click',
     'console.read', 'network.read', 'network.getResponseBody', 'network.setInterceptors',
-    'network.interceptors.status', 'recording.start']) {
+    'recording.start']) {
     assert.deepEqual(optionalPermissionsForMethod(method), ['tabs'], method);
   }
+});
+
+test('optionalPermissionsForMethod: global interceptor status does not need tabs', async () => {
+  const { optionalPermissionsForMethod } = await importModule();
+  assert.deepEqual(optionalPermissionsForMethod('network.interceptors.status', {}), []);
+  assert.deepEqual(optionalPermissionsForMethod('network.interceptors.status', { tabId: 7 }), ['tabs']);
 });
 
 test('optionalPermissionsForMethod: download permission is gated by params.download', async () => {
