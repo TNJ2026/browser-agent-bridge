@@ -28,6 +28,14 @@
       }
       return true;
     }
+    if (message?.type === 'FOCUS_ACCESSIBILITY_REF') {
+      try {
+        sendResponse({ ok: true, target: focusRefTarget(message) });
+      } catch (error) {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return true;
+    }
     if (message?.type !== 'GET_ACCESSIBILITY_TREE') return false;
     try {
       sendResponse({
@@ -253,7 +261,7 @@
     refState.refs.set(ref, { element, offsetX, offsetY });
   }
 
-  function resolveRefTarget(message) {
+  function lookupRefEntry(message) {
     const ref = typeof message.ref === 'string' ? message.ref : '';
     if (!ref) throw new Error('ref is required');
     if (message.snapshotId && message.snapshotId !== refState.snapshotId) {
@@ -261,7 +269,46 @@
     }
     const entry = refState.refs.get(ref);
     if (!entry?.element || entry.element.isConnected === false) throw new Error(`Accessibility ref not found or stale: ${ref}`);
+    return { ref, entry };
+  }
+
+  function resolveRefTarget(message) {
+    const { ref, entry } = lookupRefEntry(message);
     return summarizeRefTarget(ref, entry);
+  }
+
+  // Focus the ref's element directly (no synthetic click, so it does not
+  // activate buttons/links), optionally selecting its content so a following
+  // real text input replaces it. Works for input/textarea/contentEditable.
+  function focusRefTarget(message) {
+    const { ref, entry } = lookupRefEntry(message);
+    const element = entry.element;
+    if (typeof element.focus === 'function') {
+      try { element.focus({ preventScroll: true }); } catch { element.focus(); }
+    }
+    if (message.select) selectAllContent(element);
+    return summarizeRefTarget(ref, entry);
+  }
+
+  function selectAllContent(element) {
+    const tag = element.tagName ? element.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea') {
+      if (typeof element.setSelectionRange === 'function') {
+        try { element.setSelectionRange(0, String(element.value || '').length); return; } catch { /* fall through */ }
+      }
+      if (typeof element.select === 'function') element.select();
+      return;
+    }
+    if (element.isContentEditable) {
+      const doc = element.ownerDocument || document;
+      const selection = doc.getSelection && doc.getSelection();
+      if (selection && typeof doc.createRange === 'function') {
+        const range = doc.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
   }
 
   function summarizeRefTarget(ref, entry) {

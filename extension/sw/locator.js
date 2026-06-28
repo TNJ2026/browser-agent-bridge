@@ -837,17 +837,38 @@ export function createLocatorHandlers({
     };
   }
 
+  // Focus a ref in-page (no synthetic click, so buttons/links are not activated),
+  // optionally selecting its content. The content script focuses the actual
+  // element and returns the same target summary as resolveRefForAction.
+  async function focusRef(tabId, params, method, select) {
+    assertString(params.ref, 'ref');
+    const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
+    let frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
+    await ensureContentScripts(tabId, frameId);
+    const response = await chromeApi.tabs.sendMessage(tabId, {
+      type: 'FOCUS_ACCESSIBILITY_REF',
+      ref: params.ref,
+      snapshotId: typeof params.snapshotId === 'string' && params.snapshotId ? params.snapshotId : undefined,
+      select
+    }, { frameId });
+    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${params.ref}`);
+    const target = response.target;
+    if (params.force !== true && target?.actionability?.actionable !== true) {
+      throw createLocatorRefNotActionableError(params, frameTarget, target, method);
+    }
+    if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
+    return { frameId, frameTarget, target };
+  }
+
   async function locatorFillRef(params) {
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.fillRef');
     const text = typeof params.text === 'string' ? params.text : params.value;
     assertString(text, 'text');
-    const { frameId, frameTarget, target } = await resolveRefForAction(tabId, params, 'locator.fillRef');
-    const point = applyFrameOffset(target.element.clickPoint, frameTarget);
-    // Triple-click selects the field's existing content so insertText replaces it
-    // (unless replace:false, then just focus + insert at the caret).
-    const clickCount = params.replace === false ? 1 : 3;
-    await dispatchRealClick(tabId, point, { ...params, clickCount });
+    // Focus + select the field in-page so real input replaces its content. This
+    // works for input/textarea/contentEditable (a triple-click would only select
+    // one line of a textarea).
+    const { frameId, frameTarget, target } = await focusRef(tabId, params, 'locator.fillRef', params.replace !== false);
     await dispatchRealTextInput(tabId, text);
     await recordAction(tabId, 'locator.fillRef', { ref: params.ref, snapshotId: target.snapshotId || params.snapshotId || null, text, frameId }, { element: target.element });
     return refActionResult(params, frameTarget, target, frameId);
@@ -857,8 +878,8 @@ export function createLocatorHandlers({
     const tabId = assertTabId(params.tabId);
     await assertTabAllowed(tabId, 'locator.pressRef');
     assertString(params.key, 'key');
-    const { frameId, frameTarget, target } = await resolveRefForAction(tabId, params, 'locator.pressRef');
-    await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), { ...params, clickCount: 1 });
+    // Focus without clicking so pressing a key on a button does not also activate it.
+    const { frameId, frameTarget, target } = await focusRef(tabId, params, 'locator.pressRef', false);
     await attachDebugger(tabId);
     await keyboardDispatcher.press(tabId, params.key, params);
     await recordAction(tabId, 'locator.pressRef', { ref: params.ref, snapshotId: target.snapshotId || params.snapshotId || null, key: params.key, frameId }, { element: target.element });

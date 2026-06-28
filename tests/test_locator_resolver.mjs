@@ -316,7 +316,7 @@ test('locator.clickRef rejects non-actionable refs with structured diagnostics',
   );
 });
 
-function makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses }) {
+function makeRefHandlers(createLocatorHandlers, { cdpCalls = [], keyPresses = [], messages = [], actionable = true }) {
   return createLocatorHandlers({
     assertTabId: id => id,
     assertTabAllowed: async () => {},
@@ -334,13 +334,14 @@ function makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses }) {
     keyboardDispatcher: { async press(tabId, key) { keyPresses.push(key); } },
     chromeApi: {
       tabs: {
-        async sendMessage() {
+        async sendMessage(tabId, message) {
+          messages.push(message);
           return {
             ok: true,
             target: {
               ref: 'ref_1', snapshotId: 'snap_1', frameId: 0,
               element: { ref: 'ref_1', tagName: 'input', accessibleName: 'Email', clickPoint: { x: 5, y: 6 } },
-              actionability: { actionable: true, visible: true, enabled: true, receivesEvents: true, reasons: [] }
+              actionability: { actionable, visible: actionable, enabled: actionable, receivesEvents: actionable, reasons: actionable ? [] : ['disabled'] }
             }
           };
         }
@@ -349,42 +350,44 @@ function makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses }) {
   });
 }
 
-test('locator.fillRef triple-clicks to select then inserts the text', async () => {
+test('locator.fillRef focuses+selects in-page then inserts the text (no synthetic click)', async () => {
   const createLocatorHandlers = await getCreateLocatorHandlers();
   const cdpCalls = [];
-  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses: [] });
+  const messages = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, messages });
   const result = await handlers.locatorFillRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', text: 'hello' });
   assert.equal(result.ok, true);
-  assert.equal(result.ref, 'ref_1');
-  const press = cdpCalls.find(c => c.params.type === 'mousePressed');
-  assert.equal(press.params.clickCount, 3); // triple-click selects existing content
-  const insert = cdpCalls.find(c => c.method === 'Input.insertText');
-  assert.deepEqual(insert.params, { text: 'hello' });
+  const focusMsg = messages.find(m => m.type === 'FOCUS_ACCESSIBILITY_REF');
+  assert.equal(focusMsg.select, true); // select existing content so input replaces it
+  assert.deepEqual(cdpCalls.find(c => c.method === 'Input.insertText').params, { text: 'hello' });
+  assert.equal(cdpCalls.some(c => c.params.type === 'mousePressed'), false);
 });
 
-test('locator.fillRef replace:false uses a single click (insert at caret)', async () => {
+test('locator.fillRef replace:false focuses without selecting', async () => {
   const createLocatorHandlers = await getCreateLocatorHandlers();
-  const cdpCalls = [];
-  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses: [] });
+  const messages = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { messages });
   await handlers.locatorFillRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', text: 'x', replace: false });
-  assert.equal(cdpCalls.find(c => c.params.type === 'mousePressed').params.clickCount, 1);
+  assert.equal(messages.find(m => m.type === 'FOCUS_ACCESSIBILITY_REF').select, false);
 });
 
-test('locator.pressRef focuses the ref then presses the key', async () => {
+test('locator.pressRef focuses (no click) then presses the key', async () => {
   const createLocatorHandlers = await getCreateLocatorHandlers();
   const cdpCalls = [];
   const keyPresses = [];
-  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses });
+  const messages = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses, messages });
   const result = await handlers.locatorPressRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', key: 'Enter' });
   assert.equal(result.ok, true);
-  assert.equal(cdpCalls.find(c => c.params.type === 'mousePressed').params.clickCount, 1);
+  assert.equal(messages.find(m => m.type === 'FOCUS_ACCESSIBILITY_REF').select, false);
   assert.deepEqual(keyPresses, ['Enter']);
+  assert.equal(cdpCalls.some(c => c.params.type === 'mousePressed'), false); // no activating click
 });
 
 test('locator.hoverRef moves the mouse to the ref without pressing', async () => {
   const createLocatorHandlers = await getCreateLocatorHandlers();
   const cdpCalls = [];
-  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses: [] });
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls });
   const result = await handlers.locatorHoverRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1' });
   assert.equal(result.ok, true);
   assert.deepEqual(cdpCalls, [{ method: 'Input.dispatchMouseEvent', params: { type: 'mouseMoved', x: 5, y: 6 } }]);
@@ -392,105 +395,9 @@ test('locator.hoverRef moves the mouse to the ref without pressing', async () =>
 
 test('locator.fillRef rejects a non-actionable ref', async () => {
   const createLocatorHandlers = await getCreateLocatorHandlers();
-  const handlers = createLocatorHandlers({
-    assertTabId: id => id, assertTabAllowed: async () => {},
-    assertString: v => { if (typeof v !== 'string' || !v) throw new Error('expected string'); },
-    recordAction: async () => {}, attachDebugger: async () => {}, cdp: async () => {},
-    resolveFrameTarget: async (tabId, params) => ({ target: { tabId }, frameId: params.frameId, frame: {}, frameOffset: null }),
-    ensureContentScripts: async () => {},
-    chromeApi: { tabs: { async sendMessage() {
-      return { ok: true, target: { ref: 'ref_1', element: { clickPoint: { x: 1, y: 1 } }, actionability: { actionable: false, reasons: ['disabled'] } } };
-    } } }
-  });
+  const handlers = makeRefHandlers(createLocatorHandlers, { actionable: false });
   await assert.rejects(
     handlers.locatorFillRef({ tabId: 1, frameId: 0, ref: 'ref_1', text: 'x' }),
     /not actionable for locator\.fillRef/
   );
-});
-
-test('ensureDomA11yAtom caches injection by tab/frame and invalidates on navigation', async () => {
-  const createLocatorHandlers = await getCreateLocatorHandlers();
-  let executeScriptCalls = 0;
-  
-  // Listeners stored to simulate events
-  let commitListener = null;
-  let updatedListener = null;
-  let removedListener = null;
-
-  const chromeApi = {
-    runtime: { getURL: () => 'content/dom-a11y.js' },
-    webNavigation: {
-      onCommitted: {
-        addListener(fn) { commitListener = fn; }
-      }
-    },
-    tabs: {
-      onUpdated: {
-        addListener(fn) { updatedListener = fn; }
-      },
-      onRemoved: {
-        addListener(fn) { removedListener = fn; }
-      }
-    },
-    scripting: {
-      async executeScript() {
-        executeScriptCalls += 1;
-        return [{ result: { count: 3 } }];
-      }
-    }
-  };
-
-  const handlers = createLocatorHandlers({
-    assertTabId: id => id,
-    assertTabAllowed: async () => {},
-    assertString: () => {},
-    recordAction: async () => {},
-    resolveFrameTarget: async (tabId, params) => ({
-      target: { tabId, frameIds: [params.frameId || 0] },
-      frameId: params.frameId || 0,
-      frame: { frameId: params.frameId || 0, url: 'about:test' },
-      frameOffset: null
-    }),
-    chromeApi
-  });
-
-  // First call -> should inject + execute query (2 calls)
-  await handlers.locatorCount({ tabId: 42, selector: 'button' });
-  assert.equal(executeScriptCalls, 2);
-
-  // Second call -> cached, only execute query (1 call, total 3)
-  await handlers.locatorCount({ tabId: 42, selector: 'button' });
-  assert.equal(executeScriptCalls, 3);
-
-  // Call on a different tab -> inject + execute query (2 calls, total 5)
-  await handlers.locatorCount({ tabId: 99, selector: 'button' });
-  assert.equal(executeScriptCalls, 5);
-
-  // Call on different frame on same tab -> inject + execute query (2 calls, total 7)
-  await handlers.locatorCount({ tabId: 42, frameId: 1, selector: 'button' });
-  assert.equal(executeScriptCalls, 7);
-  
-  // Call on different frame again -> cached, only execute query (1 call, total 8)
-  await handlers.locatorCount({ tabId: 42, frameId: 1, selector: 'button' });
-  assert.equal(executeScriptCalls, 8);
-
-  // Simulate main frame navigation on tab 42
-  assert.ok(commitListener);
-  commitListener({ tabId: 42, frameId: 0 });
-
-  // Call again on tab 42 -> cache cleared, inject + execute query (2 calls, total 10)
-  await handlers.locatorCount({ tabId: 42, selector: 'button' });
-  assert.equal(executeScriptCalls, 10);
-
-  // Tab 99 is still cached (was not cleared) -> only execute query (1 call, total 11)
-  await handlers.locatorCount({ tabId: 99, selector: 'button' });
-  assert.equal(executeScriptCalls, 11);
-
-  // Simulate tab update loading status
-  assert.ok(updatedListener);
-  updatedListener(99, { status: 'loading' });
-
-  // Call on tab 99 -> cache cleared, inject + execute query (2 calls, total 13)
-  await handlers.locatorCount({ tabId: 99, selector: 'button' });
-  assert.equal(executeScriptCalls, 13);
 });

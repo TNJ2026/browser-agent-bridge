@@ -948,10 +948,12 @@ The act-by-ref siblings of `locator.clickRef`: they resolve a `ref` from
 and act on it without rebuilding a locator.
 
 - **`locator.fillRef`** — focuses the ref and replaces its text. Requires `text`
-  (or `value`). It triple-clicks to select existing content, then inserts the new
-  text via real CDP input; pass `"replace": false` to insert at the caret instead.
-- **`locator.pressRef`** — focuses the ref, then sends `key` (e.g. `"Enter"`,
-  `"Control+a"`) through the keyboard dispatcher.
+  (or `value`). It focuses the element in-page and selects its existing content
+  (works for input/textarea/contentEditable), then inserts the new text via real
+  CDP input; pass `"replace": false` to insert at the caret instead.
+- **`locator.pressRef`** — focuses the ref (without clicking, so a button is not
+  activated), then sends `key` (e.g. `"Enter"`, `"Control+a"`) through the
+  keyboard dispatcher.
 - **`locator.hoverRef`** — moves the mouse over the ref (no click).
 
 To toggle a checkbox/radio by ref, use `locator.clickRef`. Selecting an option in
