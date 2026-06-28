@@ -735,7 +735,7 @@ export function createLocatorHandlers({
     return parts.join('; ');
   }
 
-  function createLocatorRefNotActionableError(params, frameTarget, target) {
+  function createLocatorRefNotActionableError(params, frameTarget, target, method = 'locator.clickRef') {
     const reasons = Array.isArray(target?.actionability?.reasons) && target.actionability.reasons.length > 0
       ? target.actionability.reasons
       : ['not actionable'];
@@ -743,17 +743,91 @@ export function createLocatorHandlers({
       type: 'LocatorRefNotActionable',
       ref: params.ref,
       snapshotId: params.snapshotId || target?.snapshotId || null,
-      action: 'locator.clickRef',
+      action: method,
       reasons,
       actionability: target?.actionability || null,
       element: target?.element || null,
       frame: frameTarget?.frame || null
     };
-    const error = new Error(`Ref ${params.ref} is not actionable for locator.clickRef: ${reasons.join(', ')}`);
+    const error = new Error(`Ref ${params.ref} is not actionable for ${method}: ${reasons.join(', ')}`);
     error.name = 'LocatorRefNotActionable';
     error.code = 'LOCATOR_REF_NOT_ACTIONABLE';
     error.diagnostic = diagnostic;
     return error;
+  }
+
+  // Shared resolve for all act-by-ref handlers: look the ref up in the content
+  // script, validate actionability/clickability, and return the resolved target
+  // plus a frame target whose offsets are settled. Mirrors locator.clickRef.
+  async function resolveRefForAction(tabId, params, method) {
+    assertString(params.ref, 'ref');
+    const frameId = Number.isInteger(params.frameId) && params.frameId >= 0 ? params.frameId : 0;
+    let frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
+    await ensureContentScripts(tabId, frameId);
+    const response = await chromeApi.tabs.sendMessage(tabId, {
+      type: 'GET_ACCESSIBILITY_REF_TARGET',
+      ref: params.ref,
+      snapshotId: typeof params.snapshotId === 'string' && params.snapshotId ? params.snapshotId : undefined
+    }, { frameId });
+    if (!response?.ok) throw new Error(response?.error || `Accessibility ref not found: ${params.ref}`);
+    const target = response.target;
+    if (params.force !== true && target?.actionability?.actionable !== true) {
+      throw createLocatorRefNotActionableError(params, frameTarget, target, method);
+    }
+    if (!target?.element?.clickPoint) throw new Error(`Element has no clickable point for ref ${params.ref}`);
+    if (frameTarget.frameOffset) frameTarget = await resolveFrameTarget(tabId, { ...params, frameId });
+    return { frameId, frameTarget, target };
+  }
+
+  function refActionResult(params, frameTarget, target, frameId) {
+    return {
+      ok: true,
+      ref: params.ref,
+      snapshotId: target.snapshotId || params.snapshotId || null,
+      element: target.element,
+      frame: frameTarget.frame,
+      actionability: target.actionability || null,
+      frameId
+    };
+  }
+
+  async function locatorFillRef(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.fillRef');
+    const text = typeof params.text === 'string' ? params.text : params.value;
+    assertString(text, 'text');
+    const { frameId, frameTarget, target } = await resolveRefForAction(tabId, params, 'locator.fillRef');
+    const point = applyFrameOffset(target.element.clickPoint, frameTarget);
+    // Triple-click selects the field's existing content so insertText replaces it
+    // (unless replace:false, then just focus + insert at the caret).
+    const clickCount = params.replace === false ? 1 : 3;
+    await dispatchRealClick(tabId, point, { ...params, clickCount });
+    await dispatchRealTextInput(tabId, text);
+    await recordAction(tabId, 'locator.fillRef', { ref: params.ref, snapshotId: target.snapshotId || params.snapshotId || null, text, frameId }, { element: target.element });
+    return refActionResult(params, frameTarget, target, frameId);
+  }
+
+  async function locatorPressRef(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.pressRef');
+    assertString(params.key, 'key');
+    const { frameId, frameTarget, target } = await resolveRefForAction(tabId, params, 'locator.pressRef');
+    await dispatchRealClick(tabId, applyFrameOffset(target.element.clickPoint, frameTarget), { ...params, clickCount: 1 });
+    await attachDebugger(tabId);
+    await keyboardDispatcher.press(tabId, params.key, params);
+    await recordAction(tabId, 'locator.pressRef', { ref: params.ref, snapshotId: target.snapshotId || params.snapshotId || null, key: params.key, frameId }, { element: target.element });
+    return refActionResult(params, frameTarget, target, frameId);
+  }
+
+  async function locatorHoverRef(params) {
+    const tabId = assertTabId(params.tabId);
+    await assertTabAllowed(tabId, 'locator.hoverRef');
+    const { frameId, frameTarget, target } = await resolveRefForAction(tabId, params, 'locator.hoverRef');
+    const point = applyFrameOffset(target.element.clickPoint, frameTarget);
+    await attachDebugger(tabId);
+    await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
+    await recordAction(tabId, 'locator.hoverRef', { ref: params.ref, snapshotId: target.snapshotId || params.snapshotId || null, frameId }, { element: target.element });
+    return refActionResult(params, frameTarget, target, frameId);
   }
 
   function compactLocatorElement(element) {
@@ -2014,6 +2088,9 @@ export function createLocatorHandlers({
     expectLocatorToHaveText,
     expectLocatorToHaveAttribute,
     locatorClickRef,
+    locatorFillRef,
+    locatorPressRef,
+    locatorHoverRef,
     locatorClick,
     locatorDragTo,
     locatorScreenshot,

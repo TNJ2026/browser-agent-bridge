@@ -315,3 +315,95 @@ test('locator.clickRef rejects non-actionable refs with structured diagnostics',
     }
   );
 });
+
+function makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses }) {
+  return createLocatorHandlers({
+    assertTabId: id => id,
+    assertTabAllowed: async () => {},
+    assertString: value => { if (typeof value !== 'string' || !value) throw new Error('expected string'); },
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async (tabId, method, params) => { cdpCalls.push({ method, params }); },
+    resolveFrameTarget: async (tabId, params) => ({
+      target: { tabId, frameIds: [params.frameId] },
+      frameId: params.frameId,
+      frame: { frameId: params.frameId, url: 'about:test' },
+      frameOffset: null
+    }),
+    ensureContentScripts: async () => {},
+    keyboardDispatcher: { async press(tabId, key) { keyPresses.push(key); } },
+    chromeApi: {
+      tabs: {
+        async sendMessage() {
+          return {
+            ok: true,
+            target: {
+              ref: 'ref_1', snapshotId: 'snap_1', frameId: 0,
+              element: { ref: 'ref_1', tagName: 'input', accessibleName: 'Email', clickPoint: { x: 5, y: 6 } },
+              actionability: { actionable: true, visible: true, enabled: true, receivesEvents: true, reasons: [] }
+            }
+          };
+        }
+      }
+    }
+  });
+}
+
+test('locator.fillRef triple-clicks to select then inserts the text', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const cdpCalls = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses: [] });
+  const result = await handlers.locatorFillRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', text: 'hello' });
+  assert.equal(result.ok, true);
+  assert.equal(result.ref, 'ref_1');
+  const press = cdpCalls.find(c => c.params.type === 'mousePressed');
+  assert.equal(press.params.clickCount, 3); // triple-click selects existing content
+  const insert = cdpCalls.find(c => c.method === 'Input.insertText');
+  assert.deepEqual(insert.params, { text: 'hello' });
+});
+
+test('locator.fillRef replace:false uses a single click (insert at caret)', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const cdpCalls = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses: [] });
+  await handlers.locatorFillRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', text: 'x', replace: false });
+  assert.equal(cdpCalls.find(c => c.params.type === 'mousePressed').params.clickCount, 1);
+});
+
+test('locator.pressRef focuses the ref then presses the key', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const cdpCalls = [];
+  const keyPresses = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses });
+  const result = await handlers.locatorPressRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', key: 'Enter' });
+  assert.equal(result.ok, true);
+  assert.equal(cdpCalls.find(c => c.params.type === 'mousePressed').params.clickCount, 1);
+  assert.deepEqual(keyPresses, ['Enter']);
+});
+
+test('locator.hoverRef moves the mouse to the ref without pressing', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const cdpCalls = [];
+  const handlers = makeRefHandlers(createLocatorHandlers, { cdpCalls, keyPresses: [] });
+  const result = await handlers.locatorHoverRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(cdpCalls, [{ method: 'Input.dispatchMouseEvent', params: { type: 'mouseMoved', x: 5, y: 6 } }]);
+});
+
+test('locator.fillRef rejects a non-actionable ref', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const handlers = createLocatorHandlers({
+    assertTabId: id => id, assertTabAllowed: async () => {},
+    assertString: v => { if (typeof v !== 'string' || !v) throw new Error('expected string'); },
+    recordAction: async () => {}, attachDebugger: async () => {}, cdp: async () => {},
+    resolveFrameTarget: async (tabId, params) => ({ target: { tabId }, frameId: params.frameId, frame: {}, frameOffset: null }),
+    ensureContentScripts: async () => {},
+    chromeApi: { tabs: { async sendMessage() {
+      return { ok: true, target: { ref: 'ref_1', element: { clickPoint: { x: 1, y: 1 } }, actionability: { actionable: false, reasons: ['disabled'] } } };
+    } } }
+  });
+  await assert.rejects(
+    handlers.locatorFillRef({ tabId: 1, frameId: 0, ref: 'ref_1', text: 'x' }),
+    /not actionable for locator\.fillRef/
+  );
+});
