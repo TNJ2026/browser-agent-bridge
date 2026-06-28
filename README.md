@@ -35,6 +35,8 @@ graph TD
 - Tab and session isolation using Chrome tab groups.
 - High-fidelity page interaction through Chrome DevTools Protocol.
 - Page inspection with visible text, screenshots, DOM snapshots, and accessibility trees.
+- Ref-based interaction: act on `ref` ids minted by `page.accessibilityTree` (`locator.*Ref`) without rebuilding a locator.
+- Post-action change summaries (`whatChanged`) reporting URL, popups, focus, and optional accessibility-tree diffs.
 - Event streaming for console and network activity.
 - Workflow recording with input-redaction defaults.
 - Optional visual overlays for tracing agent actions.
@@ -285,9 +287,10 @@ For site-specific browsing work, the agent should:
 
 1. Run `session.start` first to create an isolated Agent tab group, or `session.get` for an existing Agent session.
 2. Prefer read-only calls such as `page.readText`, `page.accessibilityTree`, and `dom.query`.
-3. Use `page.executeJavaScript`, `dom.*`, or `computer.*` only when needed.
-4. Respect runtime approval prompts. If the side panel is closed, the extension opens an approval popup.
-5. Record reusable site selectors, waits, extraction logic, CSP needs, and pitfalls in `runtime/site-patterns/{domain}.md`.
+3. Act on the `ref` ids from `page.accessibilityTree` with `locator.clickRef` / `fillRef` / `pressRef` / `hoverRef` / `selectOptionRef` instead of re-deriving selectors.
+4. Use `page.executeJavaScript`, `dom.*`, or `computer.*` only when needed.
+5. Respect runtime approval prompts. If the side panel is closed, the extension opens an approval popup.
+6. Record reusable site selectors, waits, extraction logic, CSP needs, and pitfalls in `runtime/site-patterns/{domain}.md`.
 
 The local HTTP/WebSocket bridge is available only while the side panel bridge control is started. If the user clicks Stop Bridge, helper scripts such as `scripts/browser_bridge_client.py health` fail until the user clicks Start Bridge again.
 
@@ -319,7 +322,7 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Page | `page.acceptDialog` | Accept the current JavaScript dialog. |
 | Page | `page.dismissDialog` | Dismiss the current JavaScript dialog. |
 | Page | `page.readText` | Extract visible page text. |
-| Page | `page.accessibilityTree` | Get a structured accessibility tree. |
+| Page | `page.accessibilityTree` | Get a structured accessibility tree; mints `ref` ids and supports `format: "compact"` for a token-lean snapshot. |
 | Page | `page.ariaSnapshot` | Get a compact ARIA role/name snapshot for LLM perception. |
 | Page | `page.screenshot` | Capture a page screenshot. |
 | Page | `page.pdf` | Render the page to a PDF data URL. |
@@ -345,6 +348,7 @@ The local HTTP/WebSocket bridge is available only while the side panel bridge co
 | Interactive | `locator.check` | Check checkbox, radio, or switch-like controls. |
 | Interactive | `locator.uncheck` | Uncheck checkbox or switch-like controls. |
 | Interactive | `locator.selectOption` | Select native `<select>` options. |
+| Interactive | `locator.clickRef` / `fillRef` / `pressRef` / `hoverRef` / `selectOptionRef` | Act on a `ref` from `page.accessibilityTree` without rebuilding a locator. |
 | Interactive | `locator.setInputFiles` | Set local files on a located file input. |
 | Interactive | `locator.dragTo` | Drag from one locator to another. |
 | Interactive | `locator.dispatchDragDrop` | Dispatch HTML5 drag/drop events. |
