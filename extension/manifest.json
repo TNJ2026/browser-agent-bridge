@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Browser Agent Bridge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Expose Chrome browser-control tools to a local agent through Native Messaging.",
   "minimum_chrome_version": "116",
   "icons": {
