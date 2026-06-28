@@ -93,6 +93,7 @@ export function getMethodCategory(method, params = {}) {
     method === 'locator.check' ||
     method === 'locator.uncheck' ||
     method === 'locator.selectOption' ||
+    method === 'locator.selectOptionRef' ||
     method === 'locator.setInputFiles' ||
     method === 'dom.select' ||
     method === 'dom.setInputFiles' ||

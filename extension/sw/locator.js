@@ -2208,6 +2208,7 @@ export function createLocatorHandlers({
     locatorFillRef,
     locatorPressRef,
     locatorHoverRef,
+    locatorSelectOptionRef,
     locatorClick,
     locatorDragTo,
     locatorScreenshot,

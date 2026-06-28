@@ -957,7 +957,7 @@ checks. Successful responses also carry the `whatChanged` object (see
 { "tabId": 123, "ref": "ref_4", "snapshotId": "snap_lx3...", "frameId": 0 }
 ```
 
-### `locator.fillRef` / `locator.pressRef` / `locator.hoverRef`
+### `locator.fillRef` / `locator.pressRef` / `locator.hoverRef` / `locator.selectOptionRef`
 
 The act-by-ref siblings of `locator.clickRef`: they resolve a `ref` from
 `page.accessibilityTree` the same way (with `snapshotId` / `frameId` / `force`)
@@ -971,10 +971,11 @@ and act on it without rebuilding a locator.
   activated), then sends `key` (e.g. `"Enter"`, `"Control+a"`) through the
   keyboard dispatcher.
 - **`locator.hoverRef`** — moves the mouse over the ref (no click).
+- **`locator.selectOptionRef`** — selects option(s) on a `<select>` ref. Accepts
+  `value` / `label` / `index` (or arrays via `values`/`options`, same shape as
+  `locator.selectOption`); returns the `selected` options. Honors `multiple`.
 
-To toggle a checkbox/radio by ref, use `locator.clickRef`. Selecting an option in
-a `<select>` by ref is not yet supported — use `locator.selectOption` with a
-locator.
+To toggle a checkbox/radio by ref, use `locator.clickRef` (clicking toggles it).
 
 ```json
 { "tabId": 123, "ref": "ref_4", "snapshotId": "snap_lx3...", "frameId": 0, "text": "alice@example.com" }

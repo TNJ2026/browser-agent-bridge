@@ -401,3 +401,53 @@ test('locator.fillRef rejects a non-actionable ref', async () => {
     /not actionable for locator\.fillRef/
   );
 });
+
+test('locator.selectOptionRef sends normalized values and returns the selection', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const messages = [];
+  const handlers = createLocatorHandlers({
+    assertTabId: id => id,
+    assertTabAllowed: async () => {},
+    assertString: v => { if (typeof v !== 'string' || !v) throw new Error('expected string'); },
+    recordAction: async () => {},
+    attachDebugger: async () => {},
+    cdp: async () => {},
+    resolveFrameTarget: async (tabId, params) => ({ target: { tabId }, frameId: params.frameId, frame: { frameId: params.frameId }, frameOffset: null }),
+    ensureContentScripts: async () => {},
+    chromeApi: {
+      tabs: {
+        async sendMessage(tabId, message) {
+          messages.push(message);
+          return {
+            ok: true,
+            target: { ref: 'ref_1', snapshotId: 'snap_1', element: { ref: 'ref_1', tagName: 'select' }, actionability: { actionable: true } },
+            selected: [{ value: 'us', label: 'United States', index: 1 }]
+          };
+        }
+      }
+    }
+  });
+  const result = await handlers.locatorSelectOptionRef({ tabId: 1, frameId: 0, ref: 'ref_1', snapshotId: 'snap_1', value: 'us' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.selected, [{ value: 'us', label: 'United States', index: 1 }]);
+  const msg = messages.find(m => m.type === 'SELECT_ACCESSIBILITY_REF_OPTIONS');
+  assert.deepEqual(msg.values, [{ value: 'us' }]); // string param normalized to {value}
+});
+
+test('locator.selectOptionRef rejects a non-actionable ref', async () => {
+  const createLocatorHandlers = await getCreateLocatorHandlers();
+  const handlers = createLocatorHandlers({
+    assertTabId: id => id, assertTabAllowed: async () => {},
+    assertString: v => { if (typeof v !== 'string' || !v) throw new Error('expected string'); },
+    recordAction: async () => {}, attachDebugger: async () => {}, cdp: async () => {},
+    resolveFrameTarget: async (tabId, params) => ({ target: { tabId }, frameId: params.frameId, frame: {}, frameOffset: null }),
+    ensureContentScripts: async () => {},
+    chromeApi: { tabs: { async sendMessage() {
+      return { ok: true, target: { element: { tagName: 'select' }, actionability: { actionable: false, reasons: ['disabled'] } }, selected: [] };
+    } } }
+  });
+  await assert.rejects(
+    handlers.locatorSelectOptionRef({ tabId: 1, frameId: 0, ref: 'ref_1', value: 'us' }),
+    /not actionable for locator\.selectOptionRef/
+  );
+});

@@ -10,6 +10,7 @@ const OBSERVED_METHODS = new Set([
   'locator.check',
   'locator.uncheck',
   'locator.selectOption',
+  'locator.selectOptionRef',
   'locator.setInputFiles',
   'locator.fill',
   'locator.press',

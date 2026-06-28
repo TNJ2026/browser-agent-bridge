@@ -122,6 +122,7 @@ async function runAccessibilitySession(document, message = {}) {
     },
     getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
     Node: { ELEMENT_NODE: 1, TEXT_NODE: 3 },
+    Event: class { constructor(type) { this.type = type; } },
     HTMLAnchorElement: FakeAnchor,
     HTMLInputElement: FakeInput,
     HTMLTextAreaElement: FakeTextArea,
@@ -284,4 +285,59 @@ test('FOCUS_ACCESSIBILITY_REF focuses the element and selects its content', asyn
   assert.equal(res.ok, true, res.error);
   assert.equal(focused, true);
   assert.deepEqual(selectedRange, [0, 'old text'.length]); // whole value selected
+});
+
+test('SELECT_ACCESSIBILITY_REF_OPTIONS selects a <select> option and fires change', async () => {
+  const select = new FakeSelect('select', {});
+  select.multiple = false;
+  select.options = [
+    { value: 'us', label: 'United States', textContent: 'United States', index: 0, selected: true },
+    { value: 'ca', label: 'Canada', textContent: 'Canada', index: 1, selected: false }
+  ];
+  const dispatched = [];
+  select.dispatchEvent = (event) => { dispatched.push(event.type); };
+  select.focus = () => {};
+
+  const document = makeDocument([select]);
+  const session = await runAccessibilitySession(document);
+  const node = session.tree.nodes.find(n => n.ref);
+  assert.ok(node?.ref);
+
+  const res = session.send({ type: 'SELECT_ACCESSIBILITY_REF_OPTIONS', ref: node.ref, snapshotId: node.snapshotId, values: [{ value: 'ca' }] });
+  assert.equal(res.ok, true, res.error);
+  // res.selected is a vm-realm array; compare fields rather than deepEqual.
+  assert.equal(res.selected.length, 1);
+  assert.equal(res.selected[0].value, 'ca');
+  assert.equal(res.selected[0].label, 'Canada');
+  assert.equal(res.selected[0].index, 1);
+  assert.equal(select.options[0].selected, false);
+  assert.equal(select.options[1].selected, true);
+  assert.ok(dispatched.includes('input') && dispatched.includes('change'));
+});
+
+test('SELECT_ACCESSIBILITY_REF_OPTIONS matches options by label', async () => {
+  const select = new FakeSelect('select', {});
+  select.multiple = false;
+  select.options = [
+    { value: 'us', label: 'United States', textContent: 'United States', index: 0, selected: false },
+    { value: 'ca', label: 'Canada', textContent: 'Canada', index: 1, selected: false }
+  ];
+  select.dispatchEvent = () => {};
+  select.focus = () => {};
+  const document = makeDocument([select]);
+  const session = await runAccessibilitySession(document);
+  const node = session.tree.nodes.find(n => n.ref);
+  const res = session.send({ type: 'SELECT_ACCESSIBILITY_REF_OPTIONS', ref: node.ref, snapshotId: node.snapshotId, values: [{ label: 'Canada' }] });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(select.options[1].selected, true);
+});
+
+test('SELECT_ACCESSIBILITY_REF_OPTIONS rejects a non-select ref', async () => {
+  const button = new FakeElement('button', { text: 'Go' });
+  const document = makeDocument([button]);
+  const session = await runAccessibilitySession(document);
+  const node = session.tree.nodes.find(n => n.ref);
+  const res = session.send({ type: 'SELECT_ACCESSIBILITY_REF_OPTIONS', ref: node.ref, snapshotId: node.snapshotId, values: [{ value: 'x' }] });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /not a <select>/);
 });

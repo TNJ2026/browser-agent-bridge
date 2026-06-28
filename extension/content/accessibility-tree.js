@@ -36,6 +36,14 @@
       }
       return true;
     }
+    if (message?.type === 'SELECT_ACCESSIBILITY_REF_OPTIONS') {
+      try {
+        sendResponse({ ok: true, ...selectRefOptions(message) });
+      } catch (error) {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return true;
+    }
     if (message?.type !== 'GET_ACCESSIBILITY_TREE') return false;
     try {
       sendResponse({
@@ -309,6 +317,53 @@
         selection.addRange(range);
       }
     }
+  }
+
+  // Select option(s) on a <select> resolved by ref. Mirrors the locator
+  // resolver's selectOption: match each requested option by index/value/label,
+  // set selection (respecting `multiple`), and fire input/change.
+  function selectRefOptions(message) {
+    const { ref, entry } = lookupRefEntry(message);
+    const element = entry.element;
+    if (!element.tagName || element.tagName.toLowerCase() !== 'select') {
+      throw new Error('Accessibility ref is not a <select>');
+    }
+    const requested = Array.isArray(message.values) ? message.values : [];
+    if (requested.length === 0) throw new Error('no options requested');
+    const multiple = element.multiple === true;
+    const optionsToSelect = [];
+    for (const request of requested) {
+      const option = findRefOption(element, request);
+      if (!option) throw new Error(`Option not found: ${JSON.stringify(request)}`);
+      optionsToSelect.push(option);
+      if (!multiple) break;
+    }
+    for (const option of element.options) option.selected = false;
+    const selected = [];
+    for (const option of optionsToSelect) {
+      option.selected = true;
+      selected.push({ value: option.value, label: option.label || option.textContent || '', index: option.index });
+    }
+    if (typeof element.focus === 'function') {
+      try { element.focus({ preventScroll: true }); } catch { element.focus(); }
+    }
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    return { target: summarizeRefTarget(ref, entry), selected };
+  }
+
+  function findRefOption(select, request) {
+    const options = Array.from(select.options);
+    if (Number.isInteger(request.index)) return options[request.index] || null;
+    if (typeof request.value === 'string') return options.find(option => option.value === request.value) || null;
+    if (typeof request.label === 'string') {
+      const a11y = globalThis.__browserAgentBridgeDomA11y;
+      return options.find(option => a11y.matchesText(option.label || option.textContent || '', request.label, {
+        exact: request.exact === true,
+        caseSensitive: request.caseSensitive === true
+      })) || null;
+    }
+    return null;
   }
 
   function summarizeRefTarget(ref, entry) {
