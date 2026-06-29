@@ -287,6 +287,13 @@ The extension ID is stabilized via a hardcoded key in `manifest.json`. The stabl
   - Save only reusable operational knowledge: stable selectors, reliable wait conditions, iframe/shadow DOM notes, CSP-bypass needs, login walls, pop-up handling, pagination/list/detail patterns, extraction scripts, known failure modes, and preferred bridge methods.
   - Do not save private user data, page contents copied from a session, credentials, personal account details, or one-off observations that are unlikely to help future runs.
   - Use concise sections such as `Selectors`, `Wait Conditions`, `Extraction`, `Navigation`, `CSP`, and `Pitfalls`; include the date when behavior may be time-sensitive.
+  - **Record each flow separately**: when a site supports distinct flows or functions (e.g. login, search, checkout, export), give each one its own section. Do not blend steps from different flows into a single procedure.
+  - For each flow, record only the durable shape of the procedure — the ordered steps, and for each step:
+    - the content to obtain, or the interactive component to use;
+    - where that component sits on the page as a region/orientation, not pixel coordinates — e.g. "top-right of the header", "first row of the results list", "inside the cookie-consent dialog", "footer";
+    - what operation was performed on it (click / fill / select / press / hover);
+    - how to verify the step succeeded — an observable post-condition such as a URL change, an element/text that appears or disappears, or a `whatChanged` signal.
+  - Do not record volatile, run-specific values: exact coordinates, the specific text typed, query strings, ids/tokens, timestamps, or anything that changes between runs. Capture the stable selector / role / label that identifies the component and the *kind* of input it expects, not the input itself.
 - Do not execute high-risk actions such as purchases, sending messages, deleting data, changing account settings, or submitting sensitive forms unless the user explicitly asked for that exact action.
 - Prefer read-only methods first: `tabs.list`, `page.readText`, `page.accessibilityTree` (prefer `"format": "compact"` to get a token-efficient text snapshot with `f{frameId}:{ref}` tags), `page.screenshot`.
 - Prefer `session.start` for multi-step tasks that should stay isolated in a Chrome tab group. Use `session.createTab` for new tabs inside the session and `session.closeTab` to close one managed tab while keeping session metadata clean. `session.addTab` only accepts tabs that are already in an Agent-managed group.
